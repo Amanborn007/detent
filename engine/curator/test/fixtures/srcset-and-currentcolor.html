@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A remote srcset candidate and currentColor over a literal</title>
+<style>
+  @media (prefers-color-scheme: dark) { :root { --paper:#14181c; } }
+</style>
+</head>
+<body>
+<main>
+<h1>Two bypasses that both look local at a glance</h1>
+
+<p>The first candidate is local and the second is not, so a 2x screen fetches over the network:</p>
+<img srcset="local.png 1x, https://cdn.example.com/pic.png 2x" src="local.png" alt="pic">
+
+<p>currentColor is only as tokenised as the color it inherits:</p>
+<svg viewBox="0 0 200 60" role="img" aria-labelledby="cc-t cc-d" style="color:#ffffff">
+  <title id="cc-t">Painted through currentColor</title>
+  <desc id="cc-d">A path filled with currentColor over a hardcoded color declaration.</desc>
+  <path d="M10 10 H190 V50 H10 Z" fill="currentColor"/>
+</svg>
+</main>
+</body>
+</html>

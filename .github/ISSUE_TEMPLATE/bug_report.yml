@@ -1,0 +1,59 @@
+name: Bug report
+description: Something in detent does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste tokens, private ticket text or internal hostnames. For a security problem, use the private process in SECURITY.md instead of this form.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands or the skill you invoked, starting from a clean state if you can.
+      render: shell
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - engine or a stage
+        - curator
+        - sentinel or the autoscan hook
+        - owl
+        - a skill (name it below)
+        - another hook
+        - install or upgrade script
+        - docs
+        - eval harness
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Detent version or commit
+      description: The `version` in .claude-plugin/plugin.json, or the git commit of your clone.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Claude Code version, Node.js version, OS, and `gh --version`.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output or logs
+      description: The JSON line the engine printed, or the relevant lines from a hook log. Remove anything private.
+      render: shell

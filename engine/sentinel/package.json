@@ -1,0 +1,10 @@
+{
+  "name": "sentinel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Deterministic eyes for a PR bot-comment sentinel loop. Zero dependencies.",
+  "type": "module",
+  "bin": { "sentinel": "./sentinel.mjs" },
+  "engines": { "node": ">=18" },
+  "scripts": { "test": "node --test test/" }
+}

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Attributes and comments that only look like the real thing</title>
+<style>
+  :root { --paper:#faf8f5; --ink:#16273c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --paper:#14181c; --ink:#e8e6e2; }
+  }
+  body { background:var(--paper); color:var(--ink); }
+  /* Do not do this: background: url(https://cdn.example.com/x.png); */
+  /* Nor this: background-image: image-set("https://cdn.example.com/y.png" 2x); */
+</style>
+</head>
+<body>
+<main>
+<h1>None of this reaches the network or paints a badge</h1>
+
+<p>Custom attributes the browser never fetches, holding remote values:</p>
+<div data-src="https://cdn.example.com/a.png"
+     data-href="https://cdn.example.com/b.css"
+     data-poster="https://cdn.example.com/c.jpg"
+     data-class="ok">A record of what a config points at.</div>
+
+<p>The commented CSS rules above are not fetches either.</p>
+</main>
+</body>
+</html>

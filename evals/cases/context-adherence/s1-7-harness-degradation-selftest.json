@@ -1,0 +1,7 @@
+{
+  "id": "S1-7",
+  "suite": "context-adherence",
+  "check": "harness-degradation-selftest",
+  "description": "The eval harness grading itself: fixed degradation/edge-case truths about verdict.mjs's math (flip-override, band boundaries, null-score exclusion, added/removed case-ID exclusion, empty-selection, green-baseline counting) — any weakening of that math flips this case, DEGRADEing the harness on itself.",
+  "params": {}
+}

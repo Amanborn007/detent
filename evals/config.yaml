@@ -1,0 +1,70 @@
+# evals/config.yaml — committed harness config for `engine eval`.
+#
+# band: the variance epsilon (see engine/eval/verdict.mjs) — shields
+#   judge/noise only; a deterministic pass->fail flip DEGRADEs regardless.
+# k: default judge reruns per judge-backed case (median score, --k overrides).
+# judge_max_cases: cap on how many judge-tier cases a suite may add, so
+#   nobody wires up an expensive judge sweep without a conscious bump here.
+# suites: one entry per suite. `select` is the list of glob patterns (matched
+#   against `git diff --name-only` output) that pull this suite into
+#   `engine eval --changed`. `cases_dir` is where its case specs live.
+# gate: advisory|blocking mode + burn-in — see engine/eval/README.md's "Gate
+#   promotion & burn-in" section. Absent entirely => {mode: advisory,
+#   burn_in_prs: 0}. EVAL_BLOCKING=on|off (env) always overrides this.
+
+band: 0.05
+k: 1
+judge_max_cases: 5
+
+gate:
+  mode: blocking      # advisory | blocking (env EVAL_BLOCKING=on|off overrides)
+  burn_in_prs: 5      # green (NEUTRAL/UPGRADE) committed ledger entries vs the current baseline before blocking arms
+
+suites:
+  context-adherence:
+    select:
+      - "skills/**"
+      - "hooks/**"
+      - "engine/curator/**"
+      - "engine/cli/**"
+      - "engine/stages/**"
+      - "engine/eval/**"
+      - "engine/routing/**"
+      - "evals/**"
+    cases_dir: evals/cases/context-adherence
+  sentinel-golden:
+    select:
+      - "engine/sentinel/**"
+      - "config/sentinel/**"
+      - "hooks/sentinel-autoscan.sh"
+    cases_dir: evals/cases/sentinel-golden
+  clerk:
+    select:
+      - "skills/clerk/**"
+      - "evals/cases/clerk/**"
+      - "evals/calibration/clerk/**"
+    cases_dir: evals/cases/clerk
+  scout:
+    select:
+      - "skills/scout/**"
+      - "evals/cases/scout/**"
+      - "engine/scout/**"
+      - "evals/calibration/scout/**"
+    cases_dir: evals/cases/scout
+  referee:
+    select:
+      - "skills/referee/**"
+      - "skills/deslop/**"
+      - "evals/cases/referee/**"
+      - "evals/calibration/referee/**"
+    cases_dir: evals/cases/referee
+  scribe:
+    select:
+      - "skills/scribe/**"
+      - "evals/calibration/**"
+      - "evals/cases/scribe/**"
+    cases_dir: evals/cases/scribe
+  self-feedback:
+    select:
+      - "engine/self-feedback/**"
+    cases_dir: evals/cases/self-feedback

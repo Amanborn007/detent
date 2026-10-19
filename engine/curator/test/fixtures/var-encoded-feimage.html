@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A var that is not a token, an encoded url, and feImage</title>
+<style>
+  :root { --paper:#faf8f5; --ink:#16273c; --node-fill:#ffffff; }
+  @media (prefers-color-scheme: dark) {
+    /* --node-fill is NOT redefined here, so it holds one literal in both themes. */
+    :root:not([data-theme="light"]) { --paper:#14181c; --ink:#e8e6e2; }
+  }
+  body { background:var(--paper); color:var(--ink); }
+</style>
+</head>
+<body>
+<main>
+<h1>Three bypasses that all look compliant</h1>
+
+<p>The browser decodes character references before it fetches:</p>
+<img src="https&colon;//cdn.example.com/a.png" alt="a">
+
+<svg viewBox="0 0 200 60" role="img" aria-labelledby="vf-t vf-d">
+  <title id="vf-t">A var pointing at a fixed literal, and an external filter image</title>
+  <desc id="vf-d">One box painted through a custom property no dark-mode block redefines.</desc>
+  <filter id="ext">
+    <feImage href="https://cdn.example.com/texture.png"/>
+  </filter>
+  <rect x="10" y="10" width="180" height="40" rx="5" fill="var(--node-fill)"/>
+</svg>
+</main>
+</body>
+</html>

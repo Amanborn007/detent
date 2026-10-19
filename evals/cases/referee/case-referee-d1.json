@@ -1,0 +1,21 @@
+{
+  "id": "REFEREE-D1",
+  "suite": "referee",
+  "check": "doc-invariants",
+  "params": {
+    "file": "skills/referee/SKILL.md",
+    "must_match": [
+      "never without explicit approval",
+      "AUTHOR mode",
+      "REVIEWER mode",
+      "referee-done",
+      "capped at 1–3 lines",
+      "Hard cap",
+      "Banned in posted text",
+      "bullet lists"
+    ],
+    "must_not_match": [
+      "auto-approve"
+    ]
+  }
+}

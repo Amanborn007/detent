@@ -1,0 +1,14 @@
+{
+  "id": "SCOUT-D1",
+  "suite": "scout",
+  "check": "doc-invariants",
+  "params": {
+    "file": "skills/scout/SKILL.md",
+    "must_match": [
+      "attribution",
+      "blocked",
+      "cach",
+      "actively\\s+fetch"
+    ]
+  }
+}

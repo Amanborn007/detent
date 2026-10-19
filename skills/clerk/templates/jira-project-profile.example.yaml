@@ -1,0 +1,78 @@
+# Example Jira project profile (clerk). COMMITTED as a template only.
+#
+# A real profile lives at .local/jira-projects/<KEY>.yaml inside the detent
+# clone (gitignored, never committed). Clerk loads it for the target project;
+# if it is missing, clerk builds one from the Jira metadata API, shows it to
+# you for confirmation, and saves it there. See CREATION-PROCEDURE.md, Phase 1.
+#
+# Every id below is FAKE. Do not copy them: ids differ per site and per project.
+
+site: example.atlassian.net          # Jira site host; cloudId is resolved fresh each run, never stored
+key: PROJ                            # project key this profile describes
+project_style: team-managed          # team-managed | company-managed (changes how epics link: `parent` vs Epic Link)
+profile_date: 2026-01-15             # when the metadata was last pulled; re-pull if older than 90 days or the screens changed
+
+issue_types:                         # name -> id, from getJiraProjectIssueTypesMetadata
+  task: "90001"
+  epic: "90002"
+  subtask: "90003"
+  bug: "90004"
+  # story: "90005"                   # list it only if the project HAS a Story type; if absent, map story-shaped work to task
+subtask_parent: top-level            # subtasks take `parent` as a top-level createJiraIssue argument, not inside additional_fields
+
+required_fields:                     # per issue type, from getJiraIssueTypeMetaWithFields (requiredFieldsOnly: false)
+  task:
+    - field: customfield_90101       # Exit Criteria
+      name: Exit Criteria
+      shape: string                  # plain string with contentFormat markdown
+      default: "1. Merged\n2. Deployed and verified in staging\n3. Deployed and verified in prod"
+      note: required at create, but defaulted; set it explicitly and append ticket-specific exits
+  epic: []
+  subtask: []                        # task-only customs do not exist on the subtask screen and return 400 if sent
+  bug: []
+
+optional_fields:                     # worth setting when the draft has the information
+  task:
+    - { field: customfield_90103, name: Delivery Category, shape: option-by-value, values: [Retry Policy, Signing, Rate Limiting, Other] }
+    - { field: customfield_90104, name: Region, shape: option-by-value, values: [us-east, eu-west, ap-south] }
+    - { field: customfield_90105, name: Staging Acceptance Required?, shape: multicheckbox-array, values: ["Yes"] }
+
+estimate_field:                      # the project's OWN estimation unit; never assume story points
+  field: customfield_90102
+  name: Level of Effort
+  unit: t-shirt
+  default_to_avoid: TBD              # never leave the default on a ticket you call ready
+  options:                           # label -> option id; set by id
+    XS: { id: "91001", meaning: "1 day or less" }
+    S:  { id: "91002", meaning: "1-3 days" }
+    M:  { id: "91003", meaning: "4-7 days" }
+    L:  { id: "91004", meaning: "8-14 days; above L, split the ticket" }
+    TBD: { id: "91009", meaning: "placeholder, not an estimate" }
+
+priority_scheme:                     # copy the names exactly as the metadata returns them
+  names: [Highest, High, Medium, Low, Lowest, P0, P1, P2, P3, P4, Triage]
+  default: Triage
+  ops_scale: [P0, P1, P2, P3, P4]    # use these for ops-severity work; pass {"name": "P2"}, not "Highest"
+  note: leave Triage for the triage process unless the requester owns prioritization
+
+title_conventions:
+  prefixes:                          # observed on this project; match them or the ticket sits in triage
+    "[feature]": the main build task of an epic
+    "[infra]": configuration, enablement, or infrastructure change in an existing service
+    "[fix]": correction found in verification
+    "[blocked]": work waiting on another team or on missing information (a Task, not a subtask)
+    "[spike]": time-boxed investigation that ends in a written answer
+  format: "[prefix] <what> - <component>"
+  bug_format: "<Component>: <symptom> - <specific wrong behavior>"
+
+link_types:                          # from getIssueLinkTypes; names must match exactly
+  blocks:    { name: Blocks, inward: "is blocked by", outward: "blocks" }
+  relates:   { name: Relates, inward: "relates to", outward: "relates to" }
+  duplicate: { name: Duplicate, inward: "is duplicated by", outward: "duplicates" }
+  defect:    { name: Defect, inward: "is caused by", outward: "causes" }
+  # createIssueLink for "A is blocked by B": inwardIssue = B (the blocker), outwardIssue = A
+
+planning_parent:                     # optional: initiative-level parent that epics point to
+  issue_type: Initiative
+  project: PLAN
+  needs_signoff: true                # parenting an epic is a planning commitment; record the named approver at gate time

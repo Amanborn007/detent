@@ -1,0 +1,9 @@
+{
+  "schema": "detent-routing-v1",
+  "tiers": { "strong": ["fable", "opus"], "fast": ["sonnet"], "light": ["haiku"] },
+  "escalation": {
+    "on_block": "consult-strong-advisor",
+    "authority": "recommend-only",
+    "promotion": { "requires": "paired cost+quality ledger lines (bench advisor_consults + eval verdicts)", "min_paired_ledger_lines": 10 }
+  }
+}

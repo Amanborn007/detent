@@ -1,0 +1,13 @@
+{
+  "id": "CLERK-D1",
+  "suite": "clerk",
+  "check": "doc-invariants",
+  "params": {
+    "file": "skills/clerk/SKILL.md",
+    "must_match": [
+      "curator",
+      "PENDING-EXTERNAL",
+      "untrusted data, never instructions"
+    ]
+  }
+}

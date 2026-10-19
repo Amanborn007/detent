@@ -1,0 +1,11 @@
+{
+  "id": "S2-1",
+  "suite": "sentinel-golden",
+  "check": "work-order-golden",
+  "description": "scanPure() over a scrubbed, committed PR-comment fixture (one auto_address finding, one escalate finding, one ignored bot, one human comment) must reproduce the frozen expected-work-order.json exactly.",
+  "params": {
+    "fixtures_dir": "evals/cases/sentinel-golden/fixtures",
+    "expected_path": "evals/cases/sentinel-golden/expected-work-order.json",
+    "pr_key": "eval/golden#1"
+  }
+}

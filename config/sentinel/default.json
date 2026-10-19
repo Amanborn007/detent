@@ -1,0 +1,50 @@
+{
+  "//": "Default sentinel config for common public PR bots. Copy and adjust per org; keys starting with // are comments.",
+  "service_accounts": [],
+  "escalate_globs": ["auth/**", "deliveries/**", "migrations/**", "infra/**", "**/secrets/**"],
+  "// max_iterations": "Authoritative cap on fix-push-rescan rounds; on the cap the loop parks and escalates everything still open.",
+  "max_iterations": 10,
+  "blocking_severities": ["P0", "P1", "critical", "high", "medium-high", "blocker", "must_fix", "ERROR"],
+  "human_threads": { "enabled": true },
+  "bots": [
+    {
+      "name": "claude-review",
+      "match": { "logins": ["claude[bot]"] },
+      "policy": "auto_address",
+      "severity_patterns": ["Severity:\\s*([A-Za-z][A-Za-z-]*)"],
+      "clean_phrases": ["No issues found"],
+      "reply_channel": "@claude"
+    },
+    {
+      "name": "coderabbit",
+      "match": { "logins": ["coderabbitai[bot]"] },
+      "policy": "auto_address",
+      "severity_patterns": ["\\b(Critical|Major|Minor|Nitpick)\\b"],
+      "clean_phrases": ["No actionable comments"],
+      "reply_channel": "@coderabbitai"
+    },
+    {
+      "name": "semgrep",
+      "match": { "logins": ["semgrep-app[bot]", "semgrep[bot]"] },
+      "policy": "escalate",
+      "severity_patterns": ["Severity:\\s*([A-Za-z][A-Za-z-]*)", "\\b(ERROR|WARNING)\\b"],
+      "// blocking_severities": "semgrep grades ERROR/WARNING, not P-numbers; escalate policy means these only mark what a human sees first.",
+      "blocking_severities": ["ERROR", "critical", "high"]
+    },
+    {
+      "name": "codecov",
+      "match": { "logins": ["codecov[bot]", "codecov-commenter"] },
+      "policy": "ignore"
+    },
+    {
+      "name": "dependabot",
+      "match": { "logins": ["dependabot[bot]"] },
+      "policy": "ignore"
+    },
+    {
+      "name": "github-actions",
+      "match": { "logins": ["github-actions[bot]"] },
+      "policy": "ignore"
+    }
+  ]
+}

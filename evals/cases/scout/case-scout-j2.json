@@ -1,0 +1,7 @@
+{
+  "id": "SCOUT-J2",
+  "suite": "scout",
+  "grader": "judge",
+  "prompt_path": "evals/cases/scout/output-rubric.md",
+  "anchors": "scout"
+}

@@ -1,0 +1,20 @@
+[
+  {
+    "id": 2001,
+    "html_url": "https://github.com/acme/widget/pull/7#discussion_r2001",
+    "created_at": "2026-07-01T10:05:00Z",
+    "user": { "login": "lintbot[bot]", "type": "Bot" },
+    "path": "src/util/format.js",
+    "line": 12,
+    "body": "Severity: Medium\nPrefer `const` over `let` here; the binding is never reassigned."
+  },
+  {
+    "id": 2002,
+    "html_url": "https://github.com/acme/widget/pull/7#discussion_r2002",
+    "created_at": "2026-07-01T10:06:00Z",
+    "user": { "login": "seccomb[bot]", "type": "Bot" },
+    "path": "src/db/query.js",
+    "line": 88,
+    "body": "Severity: High\nPossible SQL injection: user input is concatenated into the query string."
+  }
+]

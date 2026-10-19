@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Everything the check used to report wrongly</title>
+<style>
+  :root { --paper:#faf8f5; --ink:#16273c; --rule:#e1ddd7; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --paper:#14181c; --ink:#e8e6e2; --rule:#2b3037; }
+  }
+  body { background:var(--paper); color:var(--ink); }
+</style>
+<link rel="canonical" href="https://example.atlassian.net/browse/PROJ-2565">
+</head>
+<body>
+<main>
+<h1>This file must exit 0, because every case below was once reported and was wrong</h1>
+
+<p>A class name that merely contains a badge word: a <span class="no-print">print hint</span>.</p>
+<p>One share quoted in a sentence is not a set of figures worth charting, so 74% stays prose.</p>
+
+<table>
+  <tr><th>Region</th><th class="col-no">3</th><th>Share</th></tr>
+  <tr><td>us-east</td><td class="col-no">1</td><td>61%</td></tr>
+  <tr><td>eu-west</td><td class="col-no">2</td><td>39%</td></tr>
+</table>
+
+<p>Two tables with real prose between them are not stacked tables. This paragraph is the prose,
+and it says something the reader needs rather than filling the gap.</p>
+
+<table>
+  <tr><th>Service</th><th>Owner</th></tr>
+  <tr><td>delivery-router</td><td>retries</td></tr>
+</table>
+
+<h2>Two approaches, one of which is an escape hatch</h2>
+<div data-plan-question="which-approach">
+  <div data-plan-option="No change to API; migrate storage">Keeps the contract, moves the store</div>
+  <div data-plan-option="Version the API">A new major, and every caller moves</div>
+  <div data-plan-option="Later">Park it</div>
+</div>
+<p>Two real options and one hatch, so no comparison quadrant is owed.</p>
+
+<h2>A decorative chevron is not a diagram</h2>
+<p>The mark below is decoration, so it neither counts as a drawing nor triggers a paint problem.</p>
+<svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+  <path d="M3 2 L9 6 L3 10" fill="none" stroke="var(--ink)" stroke-width="1.5"/>
+</svg>
+</main>
+</body>
+</html>

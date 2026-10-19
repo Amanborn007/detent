@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Percentages wrapped in markup are still figures</title>
+<style>
+  @media (prefers-color-scheme: dark) { :root { --paper:#14181c; } }
+</style>
+</head>
+<body>
+<main>
+<h1>Three shares in a table owe a chart even when each is bolded</h1>
+
+<h2>Region share</h2>
+<table>
+  <tr><th>Region</th><th>Share</th></tr>
+  <tr><td>us-east</td><td><strong>45%</strong></td></tr>
+  <tr><td>eu-west</td><td><strong>31%</strong></td></tr>
+  <tr><td>ap-south</td><td><em>24%</em></td></tr>
+</table>
+<p>No drawing here, so this section owes one.</p>
+</main>
+</body>
+</html>

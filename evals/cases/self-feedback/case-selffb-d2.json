@@ -1,0 +1,6 @@
+{
+  "id": "SELFFB-D2",
+  "suite": "self-feedback",
+  "check": "self-feedback-roundtrip",
+  "params": {}
+}

@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest a change or an addition.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: The behavior you want. If it touches a socket, say which one and what the request and response would look like.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Other ways to solve it
+      description: Anything you tried, including a provider command or a pack that would cover it without changing the engine.
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Where it belongs
+      options:
+        - engine (generic)
+        - a new or changed socket
+        - a skill
+        - a hook
+        - docs
+        - I am not sure
+    validations:
+      required: true

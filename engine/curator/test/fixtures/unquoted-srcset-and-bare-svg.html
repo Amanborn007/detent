@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>An unquoted srcset, and an SVG in no declared state</title>
+<style>
+  @media (prefers-color-scheme: dark) { :root { --paper:#14181c; } }
+</style>
+</head>
+<body>
+<main>
+<h1>Neither of these declares what it is</h1>
+
+<p>HTML allows a single unquoted candidate, and the browser fetches it:</p>
+<img srcset=https://cdn.example.com/x.png alt="x">
+
+<p>The SVG below carries neither a title nor role="img", and does not say it is decoration:</p>
+<svg viewBox="0 0 100 40">
+  <rect x="5" y="5" width="90" height="30" fill="var(--paper)" stroke="var(--ink)"/>
+</svg>
+</main>
+</body>
+</html>

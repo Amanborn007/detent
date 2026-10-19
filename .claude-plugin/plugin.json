@@ -1,0 +1,29 @@
+{
+  "name": "detent",
+  "version": "0.11.0",
+  "description": "Agent SDLC engine: curator plan review, referee PR self-review + sentinel bot-comment autoscan on every PR, knowledge aggregation, and owl unattended loops \u2014 loaded user-globally so every session in any repo gets them.",
+  "author": {
+    "name": "detent maintainers",
+    "url": "https://github.com/Amanborn007/detent"
+  },
+  "homepage": "https://github.com/Amanborn007/detent",
+  "repository": "https://github.com/Amanborn007/detent",
+  "license": "Apache-2.0",
+  "keywords": [
+    "sdlc",
+    "detent",
+    "curator",
+    "sentinel",
+    "engine",
+    "scout",
+    "courier",
+    "herald",
+    "owl",
+    "scribe",
+    "clerk",
+    "referee",
+    "jira",
+    "slack",
+    "knowledge"
+  ]
+}

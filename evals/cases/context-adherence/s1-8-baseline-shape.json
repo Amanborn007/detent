@@ -1,0 +1,11 @@
+{
+  "id": "S1-8",
+  "suite": "context-adherence",
+  "check": "json-shape",
+  "description": "evals/baseline.json parses as JSON, carries schema:\"detent-eval-baseline-v1\", and has a 'suites' key.",
+  "params": {
+    "file": "evals/baseline.json",
+    "schema": "detent-eval-baseline-v1",
+    "required_keys": ["suites"]
+  }
+}

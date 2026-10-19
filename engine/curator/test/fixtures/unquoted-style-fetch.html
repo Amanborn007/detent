@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>An unquoted style attribute that fetches</title>
+<style>
+  @media (prefers-color-scheme: dark) { :root { --paper:#14181c; } }
+</style>
+</head>
+<body>
+<main>
+<h1>HTML permits an unquoted attribute value, and the browser still fetches</h1>
+
+<div style=background:url(https://cdn.example.com/a.png)>The one real fetch on this page.</div>
+
+<p>And this is metadata the browser never applies, so it must stay unreported:</p>
+<div data-style="background:url(https://cdn.example.com/b.png)">A record of a template.</div>
+</main>
+</body>
+</html>

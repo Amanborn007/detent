@@ -1,0 +1,30 @@
+{
+  "schema": "detent-eval-anchors-v1",
+  "dimension": "referee",
+  "scenario": "Diff adds a catch-all `except Exception: pass` around a delivery-status webhook handler plus a rename sweep (35 files).",
+  "bands": {
+    "green": [0.75, 1],
+    "yellow": [0.4, 0.75],
+    "red": [0, 0.4]
+  },
+  "anchors": [
+    {
+      "label": "green",
+      "sample": "1. [CRITICAL] webhook_handler.py:42 — bare `except Exception: pass` around the delivery-status webhook handler silently swallows ALL failures (network errors, malformed payloads, downstream 500s) with zero logging — a subscriber's status update can be silently dropped and never retried. Evidence: diff line 42-44. Recommend catching a narrow exception set and logging or re-raising.\n2. [minor] rename sweep (35 files) is mechanical and consistent — no functional change detected; reported as ONE finding, not 35.\nSkipped: lens `cross-system` is OFF (network check failed this session) — disclosed here, not silently omitted.",
+      "expected_range": [0.8, 1.0],
+      "why": "leads with the planted critical, dedupes the mechanical rename into one finding instead of 35, cites evidence, and discloses the skipped lens honestly."
+    },
+    {
+      "label": "yellow",
+      "sample": "1. [nit] inconsistent quote style in renamed files.\n2. [nit] one renamed variable doesn't follow snake_case (reported once per affected file, twice).\n3. [nit] missing trailing newline in one file.\n4. [medium] the except Exception: pass block should probably log something.",
+      "expected_range": [0.45, 0.65],
+      "why": "the critical is present but buried under three cosmetic nits and undersold as 'medium', two findings are duplicated across files instead of deduped, and there's no disclosure of any skipped engine."
+    },
+    {
+      "label": "red",
+      "sample": "Five comments: inconsistent quotes; missing docstring on a renamed function; unused import; line too long; trailing whitespace. Cross-system lens: no findings.",
+      "expected_range": [0.0, 0.3],
+      "why": "the planted critical is missed entirely, every comment is cosmetic, and 'no findings' is reported for a lens that never actually ran — a fabricated clean bill, not a recorded skip."
+    }
+  ]
+}

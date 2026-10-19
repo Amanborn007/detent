@@ -1,0 +1,15 @@
+{
+  "id": "REFEREE-DESLOP-D2",
+  "suite": "referee",
+  "check": "doc-invariants",
+  "params": {
+    "file": "skills/deslop/SKILL.md",
+    "must_match": [
+      "four categories",
+      "AUTHOR mode only",
+      "propose",
+      "never auto-edits",
+      "exact hunk"
+    ]
+  }
+}

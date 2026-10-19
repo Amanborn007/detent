@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A remote base, and a diagram rule that never names svg</title>
+<base href="https://cdn.example.com/">
+<style>
+  :root { --paper:#faf8f5; --ink:#16273c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --paper:#14181c; --ink:#e8e6e2; }
+  }
+  body { background:var(--paper); color:var(--ink); }
+  .node { fill: #ffffff; }
+  .edge { stroke: #16273c; }
+  .prose-only { color: #333333; }
+</style>
+</head>
+<body>
+<main>
+<h1>Neither bypass names the thing it breaks</h1>
+
+<p>The base above makes this otherwise-relative image a network fetch:</p>
+<img src="pic.png" alt="pic">
+
+<p class="prose-only">This paragraph's rule is not a diagram rule, so it must not be reported.</p>
+
+<svg viewBox="0 0 200 60" role="img" aria-labelledby="bc-t bc-d">
+  <title id="bc-t">A node and an edge painted from class rules</title>
+  <desc id="bc-d">One box and one line whose paint comes from page-level class rules.</desc>
+  <rect class="node" x="10" y="10" width="120" height="40" rx="5"/>
+  <line class="edge" x1="130" y1="30" x2="190" y2="30"/>
+</svg>
+</main>
+</body>
+</html>

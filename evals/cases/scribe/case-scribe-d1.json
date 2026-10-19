@@ -1,0 +1,27 @@
+{
+  "id": "SCRIBE-D1",
+  "suite": "scribe",
+  "check": "doc-invariants",
+  "params": {
+    "file": "skills/scribe/SKILL.md",
+    "must_match": [
+      "never sends",
+      "NO AI slop",
+      "untrusted data",
+      "LENGTH CAP",
+      "1–3 lines"
+    ],
+    "files": [
+      {
+        "file": "skills/scribe/references/profiles.md",
+        "must_match": [
+          "1–3 lines, hard cap",
+          "NO bullet lists"
+        ],
+        "must_not_match": [
+          "a structured comment for a"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "id": "SELFFB-D1",
+  "suite": "self-feedback",
+  "check": "doc-invariants",
+  "params": {
+    "files": [
+      {
+        "file": "engine/self-feedback/CONTRACT.md",
+        "must_match": ["append-only", "recorded", "never blocks", "DETENT_SELF_FEEDBACK=off"]
+      },
+      {
+        "file": "engine/self-feedback/README.md",
+        "must_match": ["value", "herald", "coverage gap"]
+      }
+    ]
+  }
+}

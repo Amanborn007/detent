@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Quoting the bans without breaking them</title>
+<style>
+  :root { --paper:#faf8f5; --ink:#16273c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --paper:#14181c; --ink:#e8e6e2; }
+  }
+  body { background:var(--paper); color:var(--ink); }
+  /* No SVG on this page carries "unused-icon", so this rule paints nothing. */
+  .unused-icon { fill: #ffffff; }
+</style>
+</head>
+<body>
+<main>
+<h1>An artifact documenting the rules has to be able to quote them</h1>
+
+<p>Prose naming the banned classes: a span with class="ok" or class="badge" is a status pill, and
+a div with class="mermaid" is a Mermaid render. Neither of those phrases styles anything.</p>
+
+<pre><code>&lt;span class="ok"&gt;done&lt;/span&gt;
+&lt;div class="mermaid"&gt;graph TD; A--&gt;B;&lt;/div&gt;
+&lt;div id="mermaid-1"&gt;&lt;/div&gt;</code></pre>
+
+<svg viewBox="0 0 200 60" role="img" aria-labelledby="qe-t qe-d">
+  <title id="qe-t">A properly tokenised diagram</title>
+  <desc id="qe-d">One box painted from theme tokens only.</desc>
+  <rect x="10" y="10" width="180" height="40" rx="5" fill="var(--paper)" stroke="var(--ink)"/>
+</svg>
+</main>
+</body>
+</html>

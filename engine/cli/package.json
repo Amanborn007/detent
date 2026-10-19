@@ -1,0 +1,9 @@
+{
+  "name": "detent-engine-cli",
+  "version": "0.1.0",
+  "description": "detent engine runner + the detent umbrella CLI (routes to curator/sentinel/owl/engine)",
+  "bin": {
+    "detent": "./detent.mjs"
+  },
+  "private": true
+}

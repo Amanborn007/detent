@@ -1,0 +1,16 @@
+[
+  {
+    "id": 1101,
+    "html_url": "https://github.com/acme/widget/pull/7#issuecomment-1101",
+    "created_at": "2026-07-02T09:00:00Z",
+    "user": { "login": "github-actions[bot]", "type": "Bot" },
+    "body": "<!-- review-bot:sticky -->\n## Automated review\nNo issues found in this PR. Nice work.\n\n- [ ] Tick this box to mark a finding as a false positive."
+  },
+  {
+    "id": 1102,
+    "html_url": "https://github.com/acme/widget/pull/7#issuecomment-1102",
+    "created_at": "2026-07-02T09:01:00Z",
+    "user": { "login": "github-actions[bot]", "type": "Bot" },
+    "body": "<!-- bundlewatch:comment -->\nBundle size: 411 kB (-1.2 kB). Within budget."
+  }
+]

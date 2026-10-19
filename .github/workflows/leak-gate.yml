@@ -1,0 +1,41 @@
+name: leak-gate
+
+# No paths filter: a company term can land in any file, so every PR is scanned.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  company-strings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write denylist from secret
+        env:
+          LEAK_DENYLIST: ${{ secrets.LEAK_DENYLIST }}
+        run: |
+          if [ -z "$LEAK_DENYLIST" ]; then
+            echo "::error::LEAK_DENYLIST secret is empty or unavailable (fork PR?); refusing to pass an unchecked tree"
+            exit 2
+          fi
+          mkdir -p engine/.local
+          printf '%s\n' "$LEAK_DENYLIST" > engine/.local/denylist.txt
+
+      - name: Scan repo for denylisted strings (paths only)
+        run: bash engine/scripts/company-strings-check.sh --repo --paths-only
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

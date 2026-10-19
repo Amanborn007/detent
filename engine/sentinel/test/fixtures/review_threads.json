@@ -1,0 +1,74 @@
+[
+  {
+    "id": "THREAD_new",
+    "isResolved": false,
+    "isOutdated": false,
+    "path": "src/sender.ts",
+    "line": 95,
+    "truncated": false,
+    "comments": [
+      {
+        "id": 9001,
+        "html_url": "https://github.com/acme/widget/pull/7#discussion_r9001",
+        "body": "Why re-enqueue instead of the scheduler hook?",
+        "created_at": "2026-07-01T09:00:00Z",
+        "updated_at": "2026-07-01T09:00:00Z",
+        "user": { "login": "msmith", "type": "User" }
+      }
+    ]
+  },
+  {
+    "id": "THREAD_outdated_unresolved",
+    "isResolved": false,
+    "isOutdated": true,
+    "path": "src/util/format.js",
+    "line": 30,
+    "truncated": false,
+    "comments": [
+      {
+        "id": 9002,
+        "html_url": "https://github.com/acme/widget/pull/7#discussion_r9002",
+        "body": "This still needs an answer even though the diff moved on.",
+        "created_at": "2026-07-01T09:05:00Z",
+        "updated_at": "2026-07-01T09:05:00Z",
+        "user": { "login": "jdoe", "type": "User" }
+      }
+    ]
+  },
+  {
+    "id": "THREAD_resolved",
+    "isResolved": true,
+    "isOutdated": false,
+    "path": "src/api/handler.js",
+    "line": 5,
+    "truncated": false,
+    "comments": [
+      {
+        "id": 9003,
+        "html_url": "https://github.com/acme/widget/pull/7#discussion_r9003",
+        "body": "Looks fine now, resolving.",
+        "created_at": "2026-07-01T09:10:00Z",
+        "updated_at": "2026-07-01T09:10:00Z",
+        "user": { "login": "reviewer-a", "type": "User" }
+      }
+    ]
+  },
+  {
+    "id": "THREAD_bot_rooted",
+    "isResolved": false,
+    "isOutdated": false,
+    "path": "src/qux.js",
+    "line": 8,
+    "truncated": false,
+    "comments": [
+      {
+        "id": 9004,
+        "html_url": "https://github.com/acme/widget/pull/7#discussion_r9004",
+        "body": "<!-- review-bot:sticky -->\n[P2] nit here",
+        "created_at": "2026-07-01T09:15:00Z",
+        "updated_at": "2026-07-01T09:15:00Z",
+        "user": { "login": "github-actions[bot]", "type": "Bot" }
+      }
+    ]
+  }
+]

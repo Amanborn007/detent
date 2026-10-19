@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Selectors that only look like diagram hooks</title>
+<style>
+  :root { --paper:#faf8f5; --ink:#16273c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --paper:#14181c; --ink:#e8e6e2; }
+  }
+  body { background:var(--paper); color:var(--ink); }
+  /* The SVG below carries class="node". None of these three rules touches it. */
+  .node-description { color: #333333; }
+  .node-caption { border-color: #cccccc; }
+  .svg-preview { background: #eeeeee; }
+</style>
+</head>
+<body>
+<main>
+<h1>A hook has to match a whole CSS identifier</h1>
+
+<p class="node-description">Prose about the diagram, not the diagram.</p>
+
+<svg viewBox="0 0 200 60" role="img" aria-labelledby="hl-t hl-d">
+  <title id="hl-t">A properly tokenised node</title>
+  <desc id="hl-d">One box painted from theme tokens only.</desc>
+  <rect class="node" x="10" y="10" width="180" height="40" rx="5"
+        fill="var(--paper)" stroke="var(--ink)"/>
+</svg>
+</main>
+</body>
+</html>

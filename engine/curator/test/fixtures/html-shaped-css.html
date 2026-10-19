@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>HTML-shaped text inside CSS is not markup</title>
+<style>
+  :root { --paper:#faf8f5; --ink:#16273c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --paper:#14181c; --ink:#e8e6e2; }
+  }
+  body { background:var(--paper); color:var(--ink); }
+  /* An example in a CSS comment: <svg></svg> and <h1>a title</h1> */
+  .marker::before { content: 'class="ok"'; }
+  .other::after { content: "<svg></svg>"; }
+</style>
+</head>
+<body>
+<main>
+<h1>A CSS string is a string, not an element</h1>
+
+<p>The stylesheet above contains an SVG in a comment and a badge class in a string. The browser
+parses neither as markup, so neither is an inaccessible diagram nor a status pill.</p>
+</main>
+</body>
+</html>

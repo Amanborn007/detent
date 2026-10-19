@@ -1,0 +1,37 @@
+[
+  {
+    "id": 1001,
+    "html_url": "https://github.com/acme/widget/pull/7#issuecomment-1001",
+    "created_at": "2026-07-01T10:00:00Z",
+    "user": { "login": "github-actions[bot]", "type": "Bot" },
+    "body": "<!-- review-bot:sticky -->\n## Automated review\nFound 2 issues in this PR:\n\n[P1] Possible null dereference in `src/api/handler.js:42`\nThe response object may be null when the upstream times out.\n\n[P2] Hardcoded retry limit constant in [deliveries/retry.js#L10](https://github.com/acme/widget/blob/abc123/deliveries/retry.js#L10)\nRetry limits should come from configuration, not source.\n\n- [ ] Tick this box to mark a finding as a false positive."
+  },
+  {
+    "id": 1002,
+    "html_url": "https://github.com/acme/widget/pull/7#issuecomment-1002",
+    "created_at": "2026-07-01T10:01:00Z",
+    "user": { "login": "github-actions[bot]", "type": "Bot" },
+    "body": "<!-- bundlewatch:comment -->\nBundle size: 412 kB (+1.2 kB). Within budget."
+  },
+  {
+    "id": 1003,
+    "html_url": "https://github.com/acme/widget/pull/7#issuecomment-1003",
+    "created_at": "2026-07-01T10:02:00Z",
+    "user": { "login": "acme-coverage-bot", "type": "User" },
+    "body": "Coverage report: 84.2% (-0.1%). See the dashboard for details."
+  },
+  {
+    "id": 1004,
+    "html_url": "https://github.com/acme/widget/pull/7#issuecomment-1004",
+    "created_at": "2026-07-01T10:03:00Z",
+    "user": { "login": "somedev", "type": "User" },
+    "body": "LGTM after the retry fix."
+  },
+  {
+    "id": 1005,
+    "html_url": "https://github.com/acme/widget/pull/7#issuecomment-1005",
+    "created_at": "2026-07-01T10:04:00Z",
+    "user": { "login": "mysterybot[bot]", "type": "Bot" },
+    "body": "Automated notice: dependency drift detected."
+  }
+]

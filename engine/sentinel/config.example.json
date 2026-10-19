@@ -1,0 +1,65 @@
+{
+  "//": "sentinel config. All bot names below are FICTIONAL examples. Keys starting with // are comments and are ignored by the loader/validator.",
+  "// service_accounts": "Machine accounts whose user.type is 'User' (not 'Bot') but which should still be treated as bots. Detection via user.type == 'Bot' alone misses these.",
+  "service_accounts": ["acme-coverage-bot"],
+  "// escalate_globs": "Findings whose file path matches any of these globs are ALWAYS routed to the human, even when the bot's policy is auto_address. Use for safety-critical paths.",
+  "escalate_globs": ["deliveries/**", "auth/**"],
+  "// max_iterations": "THE authoritative cap on fix-push-rescan rounds. A round is any scan that produced news (fixable findings or escalations); no-news polling rounds are free. On the cap the loop parks and escalates everything still open, blocking findings first. Not to be confused with SENTINEL_AUTOSCAN_MAX_ROUNDS, which is how many times the hook polls for one commit's comments.",
+  "max_iterations": 10,
+  "// blocking_severities": "Severity tokens the loop may not converge past, matched case/separator-insensitively as whole tokens. Overridable per bot. A per-bot list REPLACES this one rather than adding to it. 'unknown' is rejected: it is sentinel's own unparsed-severity sentinel.",
+  "blocking_severities": ["P0", "P1", "critical", "high", "medium-high", "blocker", "must_fix", "ERROR"],
+  "// human_threads": "GraphQL reviewThreads classification of HUMAN review-thread conversations (REST alone cannot see thread resolution/outdated state). Human-rooted threads always escalate (never auto-answered) until resolved; outdated-but-unresolved still escalates, it is never dropped. Default ON; set enabled:false to fall back to bot-comments-only scanning (e.g. no GraphQL access).",
+  "human_threads": { "enabled": true },
+  "bots": [
+    {
+      "//": "A sticky-comment review bot. It posts under the SHARED github-actions[bot] login, so it must be disambiguated by a stable HTML-comment marker in the body.",
+      "name": "review-bot",
+      "match": {
+        "logins": ["github-actions[bot]"],
+        "markers": ["<!-- review-bot:sticky -->"]
+      },
+      "// policy": "auto_address: the agent fixes root causes and pushes; the push IS the reply. This bot re-reviews every push and never reads comment replies.",
+      "policy": "auto_address",
+      "// severity_patterns": "Regexes (first capture group = severity) tried in order against finding lines in the body.",
+      "severity_patterns": ["\\[(P\\d)\\]"],
+      "// clean_phrases": "If the bot's most recent comment contains any of these substrings, the bot is considered converged.",
+      "clean_phrases": ["No issues found"],
+      "// feedback_checkbox": "This bot exposes a checkbox on its sticky comment to flag inaccurate findings; the agent ticks it instead of replying.",
+      "feedback_checkbox": true,
+      "// drip_feed": "This bot reveals roughly one new finding per push. sentinel warns the agent to expect more findings after the next push.",
+      "drip_feed": true
+    },
+    {
+      "//": "An inline review-comment bot with its own dedicated login and a reply channel: it responds to @-mentions.",
+      "name": "lintbot",
+      "match": { "logins": ["lintbot[bot]"] },
+      "policy": "auto_address",
+      "severity_patterns": ["Severity:\\s*([A-Za-z][A-Za-z-]*)"],
+      "clean_phrases": ["0 problems"],
+      "// reply_channel": "Mention handle to use if the agent needs to talk back to this bot (e.g. to ask for a re-run or dispute a finding).",
+      "reply_channel": "@lintbot"
+    },
+    {
+      "//": "A coverage-report service account: user.type is 'User', listed in service_accounts above. Pure FYI, so policy ignore.",
+      "name": "coverage-svc",
+      "match": { "logins": ["acme-coverage-bot"] },
+      "policy": "ignore"
+    },
+    {
+      "//": "A bundle-size FYI bot sharing the github-actions[bot] login; disambiguated by its own marker; ignored.",
+      "name": "bundlewatch",
+      "match": {
+        "logins": ["github-actions[bot]"],
+        "markers": ["<!-- bundlewatch:comment -->"]
+      },
+      "policy": "ignore"
+    },
+    {
+      "//": "A security scanner. Its findings are never auto-addressed: policy escalate routes everything verbatim to the human.",
+      "name": "seccomb-scan",
+      "match": { "logins": ["seccomb[bot]"] },
+      "policy": "escalate",
+      "severity_patterns": ["Severity:\\s*([A-Za-z][A-Za-z-]*)"]
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>An artifact that writes about a fetch without making one</title>
+<style>
+  :root { --paper:#faf8f5; --ink:#16273c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --paper:#14181c; --ink:#e8e6e2; }
+  }
+  body { background:var(--paper); color:var(--ink); }
+</style>
+</head>
+<body>
+<main>
+<h1>A commented example is not a request the browser makes</h1>
+
+<!-- Never do this: <img src="https://cdn.example.com/pic.png" alt="pic"> -->
+<!-- Nor this: <link rel="stylesheet" href="https://cdn.example.com/a.css"> -->
+
+<p>The two lines above are HTML comments, and the block below is script text. The browser parses
+neither as markup, so neither reaches the network:</p>
+
+<script type="text/plain">
+  &lt;img src="https://cdn.example.com/other.png"&gt;
+  <img src="https://cdn.example.com/raw.png">
+</script>
+
+<p>An artifact documenting the rule has to be able to show what the rule forbids.</p>
+</main>
+</body>
+</html>

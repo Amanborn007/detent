@@ -1,0 +1,38 @@
+{
+  "issue": [
+    {
+      "id": 5001,
+      "html_url": "https://github.invalid/eval/golden/pull/1#issuecomment-5001",
+      "created_at": "2026-01-01T00:00:00Z",
+      "user": { "login": "eval-ci-bot[bot]", "type": "Bot" },
+      "body": "CI summary: build passed in 42s. Nothing actionable."
+    },
+    {
+      "id": 5002,
+      "html_url": "https://github.invalid/eval/golden/pull/1#issuecomment-5002",
+      "created_at": "2026-01-01T00:05:00Z",
+      "user": { "login": "eval-human", "type": "User" },
+      "body": "Looks fine to me overall, left one nit inline."
+    }
+  ],
+  "review": [
+    {
+      "id": 6001,
+      "html_url": "https://github.invalid/eval/golden/pull/1#discussion_r6001",
+      "created_at": "2026-01-01T00:10:00Z",
+      "user": { "login": "eval-lint-bot[bot]", "type": "Bot" },
+      "path": "src/eval/util.js",
+      "line": 12,
+      "body": "Severity: Medium\nAvoid using == for null checks in src/eval/util.js:12; use === instead."
+    },
+    {
+      "id": 6002,
+      "html_url": "https://github.invalid/eval/golden/pull/1#discussion_r6002",
+      "created_at": "2026-01-01T00:15:00Z",
+      "user": { "login": "eval-sec-bot[bot]", "type": "Bot" },
+      "path": "src/eval/secrets.js",
+      "line": 5,
+      "body": "Severity: High\nHardcoded API key literal detected in src/eval/secrets.js:5."
+    }
+  ]
+}

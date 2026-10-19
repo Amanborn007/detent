@@ -1,0 +1,101 @@
+#!/usr/bin/env node
+/**
+ * repo-docs-knowledge — reference adapter for the `knowledge` socket
+ * (see engine/sockets/knowledge.md). One of possibly MANY knowledge providers;
+ * the engine aggregates results across providers by (source, confidence).
+ *
+ * Greps a repo's README* and docs/ tree for a query. Pure node, zero deps,
+ * no network.
+ *
+ * stdin:  {"query":"...", "repo_path":"/abs/path", "max_results":20}
+ * stdout: {"provider":"repo-docs","query","results":[{source,excerpt,confidence}],"next_step"}
+ * exit:   0 ok (empty results is still ok) | 1 provider failure | 2 contract violation
+ */
+"use strict";
+const fs = require("node:fs");
+const path = require("node:path");
+
+function emit(obj, code) {
+  process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
+  process.exit(code);
+}
+
+function readStdin() {
+  const chunks = [];
+  const buf = Buffer.alloc(65536);
+  while (true) {
+    let n;
+    try { n = fs.readSync(0, buf, 0, buf.length); } catch (e) {
+      if (e.code === "EAGAIN") continue;
+      throw e;
+    }
+    if (n === 0) break;
+    chunks.push(Buffer.from(buf.slice(0, n)));
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+let req;
+try { req = JSON.parse(readStdin()); } catch (e) {
+  emit({ error: "stdin is not valid JSON: " + e.message,
+         next_step: 'send {"query":"...","repo_path":"/abs/path"} on stdin' }, 2);
+}
+if (!req.query || typeof req.query !== "string" || !req.repo_path) {
+  emit({ error: "need string query and repo_path",
+         next_step: 'send {"query":"...","repo_path":"/abs/path"} on stdin' }, 2);
+}
+if (!fs.existsSync(req.repo_path) || !fs.statSync(req.repo_path).isDirectory()) {
+  emit({ error: "repo_path is not a directory: " + req.repo_path,
+         next_step: "pass the absolute path of a checked-out repo" }, 1);
+}
+const maxResults = Number.isInteger(req.max_results) ? req.max_results : 20;
+
+const TEXT_EXT = new Set([".md", ".mdx", ".txt", ".rst", ".adoc"]);
+const files = [];
+for (const entry of fs.readdirSync(req.repo_path)) {
+  if (/^readme/i.test(entry) && fs.statSync(path.join(req.repo_path, entry)).isFile()) {
+    files.push(path.join(req.repo_path, entry));
+  }
+}
+const docsDir = path.join(req.repo_path, "docs");
+if (fs.existsSync(docsDir)) {
+  const stack = [docsDir];
+  while (stack.length) {
+    const dir = stack.pop();
+    for (const entry of fs.readdirSync(dir)) {
+      const p = path.join(dir, entry);
+      const st = fs.statSync(p);
+      if (st.isDirectory()) { if (entry !== ".git") stack.push(p); }
+      else if (TEXT_EXT.has(path.extname(entry).toLowerCase())) files.push(p);
+    }
+  }
+}
+
+const q = req.query.toLowerCase();
+const wordRe = new RegExp("\\b" + q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i");
+const results = [];
+outer:
+for (const file of files) {
+  let text;
+  try { text = fs.readFileSync(file, "utf8"); } catch { continue; }
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].toLowerCase().includes(q)) continue;
+    results.push({
+      source: path.relative(req.repo_path, file) + ":" + (i + 1),
+      excerpt: lines[i].trim().slice(0, 240),
+      confidence: wordRe.test(lines[i]) ? 0.9 : 0.6
+    });
+    if (results.length >= maxResults) break outer;
+  }
+}
+results.sort((a, b) => b.confidence - a.confidence);
+
+emit({
+  provider: "repo-docs",
+  query: req.query,
+  results,
+  next_step: results.length
+    ? "read the highest-confidence sources in full before relying on excerpts"
+    : "no hits in README/docs; try a broader query or another knowledge provider"
+}, 0);

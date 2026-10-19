@@ -1,0 +1,22 @@
+{
+  "//": "Scrubbed sentinel config for the sentinel-golden eval case. All logins/URLs are fictional (eval/golden namespace) — do NOT point these at real repos. Exercises the three policies.",
+  "bots": [
+    {
+      "name": "eval-lint-bot",
+      "match": { "logins": ["eval-lint-bot[bot]"] },
+      "policy": "auto_address",
+      "severity_patterns": ["Severity:\\s*([A-Za-z][A-Za-z-]*)"]
+    },
+    {
+      "name": "eval-ci-bot",
+      "match": { "logins": ["eval-ci-bot[bot]"] },
+      "policy": "ignore"
+    },
+    {
+      "name": "eval-sec-bot",
+      "match": { "logins": ["eval-sec-bot[bot]"] },
+      "policy": "escalate",
+      "severity_patterns": ["Severity:\\s*([A-Za-z][A-Za-z-]*)"]
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "id": "S1-2",
+  "suite": "context-adherence",
+  "check": "hooks-kill-switch",
+  "description": "Every script referenced in hooks/hooks.json exists under hooks/ and is executable; every PostToolUse+matcher:Bash script carries a kill-switch guard reachable within its first 400 lines (KILL_SWITCH_WINDOW).",
+  "params": {}
+}

@@ -1,0 +1,47 @@
+# packs/example/stack.yaml — example pack for the fictional AcmeCo
+# webhook-delivery service.
+#
+# A pack tells the skills which knowledge providers, review lenses and
+# network check this deployment has. Select it with `pack.path` in
+# detent.user.yaml; the default is this file. Relative paths resolve from
+# the detent root.
+#
+# A null or missing provider, lens skill or command turns that feature OFF.
+# The skill that needs it says so in one line and does not pretend it ran.
+# An unreadable or invalid pack file is an error, never a fallback to defaults.
+# Provider shapes follow engine/sockets/knowledge.md; the engine-side wiring
+# lives in engine/stack.example.yaml.
+
+pack: {name: example, version: "1"}
+
+knowledge:
+  providers:
+    # kind mcp: queried through an MCP server's tool. requires_network `private`
+    # means network.check_cmd must pass first. required_corpus names a corpus
+    # the server must expose, or null when any content will do.
+    - {id: org-kb, kind: mcp, server: knowledge, tool: search_docs, requires_network: private, required_corpus: null}
+    # kind local: files read from the target repo checkout; no network.
+    - {id: repo-docs, kind: local, paths: [README.md, docs/, CLAUDE.md]}
+  # Off by default. When enabled, scout reads the service name from
+  # service_manifest at the repo root and asks neighbor_source (a provider id
+  # above) for its callers and callees.
+  blast_radius: {enabled: false, service_manifest: service.yaml, neighbor_source: org-kb}
+
+review:
+  lenses:
+    # skill: null means no cross-system skill is configured, so the lens is OFF.
+    # probe names the provider (and corpus) that must be reachable for it to run.
+    - {id: cross-system, kind: skill, skill: null, probe: {provider: org-kb, required_corpus: services}}
+    # Any PR-review skill can be named here; null leaves this lens OFF.
+    - {id: principal, kind: skill, skill: null}
+    - {id: deslop, kind: builtin}
+
+incident:  {kind: skill, skill: null}
+analytics: {kind: mcp, server: null}
+
+# Shell command that exits 0 when the private network is reachable. null skips
+# the check; a non-zero exit marks every requires_network: private provider
+# as unreachable.
+network:   {check_cmd: null}
+
+sentinel:  {config: config/sentinel/default.json}

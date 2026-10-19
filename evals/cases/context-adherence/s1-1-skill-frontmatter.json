@@ -1,0 +1,7 @@
+{
+  "id": "S1-1",
+  "suite": "context-adherence",
+  "check": "skill-frontmatter",
+  "description": "Every skills/*/SKILL.md starts with --- frontmatter carrying a non-empty name: equal to its directory name, and a non-empty description:.",
+  "params": {}
+}

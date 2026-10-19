@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inert SVG metadata, and a quoted local paint server</title>
+<style>
+  :root { --paper:#faf8f5; --ink:#16273c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --paper:#14181c; --ink:#e8e6e2; }
+  }
+  body { background:var(--paper); color:var(--ink); }
+  /* Unrelated to the diagram: its only "node" is a data-class, which styles nothing. */
+  .node { fill: #ffffff; }
+</style>
+</head>
+<body>
+<main>
+<h1>Metadata is not paint, and a quoted fragment is still local</h1>
+
+<div data-class="mermaid" data-id="mermaid-example">A record of what a template used.</div>
+
+<svg viewBox="0 0 200 60" role="img" aria-labelledby="ia-t ia-d" data-class="node">
+  <title id="ia-t">A quoted local paint server</title>
+  <desc id="ia-d">One box filled from a gradient defined in this document.</desc>
+  <defs>
+    <linearGradient id="grad">
+      <stop offset="0" stop-color="var(--paper)"/>
+      <stop offset="1" stop-color="var(--ink)"/>
+    </linearGradient>
+  </defs>
+  <rect data-fill="#ffffff" x="10" y="10" width="180" height="40" rx="5" fill="url('#grad')"/>
+</svg>
+</main>
+</body>
+</html>

@@ -1,0 +1,80 @@
+#!/usr/bin/env node
+/**
+ * gh-ticket — reference adapter for the `ticket` socket (see engine/sockets/ticket.md).
+ *
+ * Fetches a GitHub issue via the `gh` CLI and emits engine ticket JSON.
+ * Zero dependencies beyond node and an authenticated `gh`.
+ *
+ * stdin:  {"repo":"owner/name","number":123}  or  {"ticket_ref":"owner/name#123"}
+ * stdout: {"id","title","status","labels","url","body_excerpt","next_step"}
+ * exit:   0 ok | 1 provider failure (gh error, not found) | 2 contract violation (bad input)
+ */
+"use strict";
+const { execFileSync } = require("node:child_process");
+
+function emit(obj, code) {
+  process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
+  process.exit(code);
+}
+
+function readStdin() {
+  const chunks = [];
+  const fd = 0;
+  const buf = Buffer.alloc(65536);
+  const fs = require("node:fs");
+  while (true) {
+    let n;
+    try { n = fs.readSync(fd, buf, 0, buf.length); } catch (e) {
+      if (e.code === "EAGAIN") continue;
+      throw e;
+    }
+    if (n === 0) break;
+    chunks.push(Buffer.from(buf.slice(0, n)));
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+let req;
+try {
+  req = JSON.parse(readStdin());
+} catch (e) {
+  emit({ error: "stdin is not valid JSON: " + e.message,
+         next_step: 'send {"repo":"owner/name","number":123} on stdin' }, 2);
+}
+
+let repo = req.repo, number = req.number;
+if (req.ticket_ref) {
+  const m = /^([^#\s]+\/[^#\s]+)#(\d+)$/.exec(req.ticket_ref);
+  if (!m) emit({ error: "ticket_ref must look like owner/name#123, got: " + req.ticket_ref,
+                 next_step: "fix ticket_ref and re-invoke" }, 2);
+  repo = m[1]; number = Number(m[2]);
+}
+if (!repo || !Number.isInteger(number)) {
+  emit({ error: "need repo (owner/name) and integer number, or ticket_ref",
+         next_step: 'send {"repo":"owner/name","number":123} on stdin' }, 2);
+}
+
+let raw;
+try {
+  raw = execFileSync("gh",
+    ["issue", "view", String(number), "-R", repo,
+     "--json", "number,title,body,state,labels,url"],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+} catch (e) {
+  const detail = (e.stderr || e.message || "").toString().trim();
+  emit({ error: "gh issue view failed: " + detail,
+         next_step: "check `gh auth status` and that " + repo + "#" + number + " exists, then re-invoke" }, 1);
+}
+
+const issue = JSON.parse(raw);
+const body = (issue.body || "").replace(/\s+/g, " ").trim();
+emit({
+  id: repo + "#" + issue.number,
+  title: issue.title,
+  status: (issue.state || "").toLowerCase(),
+  labels: (issue.labels || []).map(l => l.name),
+  url: issue.url,
+  body_excerpt: body.slice(0, 400),
+  next_step: "feed this ticket JSON to the research stage; fetch full body with `gh issue view " +
+             issue.number + " -R " + repo + "` if the excerpt is truncated"
+}, 0);

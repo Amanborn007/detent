@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Two diagrams, only one of them reading currentColor</title>
+<style>
+  :root { --paper:#faf8f5; --ink:#16273c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --paper:#14181c; --ink:#e8e6e2; }
+  }
+  body { background:var(--paper); color:var(--ink); }
+  /* The second diagram never reads currentColor, so this color is a label colour and not paint. */
+  .plain { color: #333333; }
+  /* The first one does, and it paints from a token, so nothing here fails. */
+  .tinted { color: var(--ink); }
+</style>
+</head>
+<body>
+<main>
+<h1>A color rule is paint only for a diagram that reads currentColor</h1>
+
+<svg class="tinted" viewBox="0 0 200 60" role="img" aria-labelledby="t1-t t1-d">
+  <title id="t1-t">Reads currentColor</title>
+  <desc id="t1-d">One box filled through currentColor over a tokenised color.</desc>
+  <rect x="10" y="10" width="180" height="40" rx="5" fill="currentColor"/>
+</svg>
+
+<svg class="plain" viewBox="0 0 200 60" role="img" aria-labelledby="t2-t t2-d">
+  <title id="t2-t">Does not read currentColor</title>
+  <desc id="t2-d">One box painted from tokens, with a text colour that is not diagram paint.</desc>
+  <rect x="10" y="10" width="180" height="40" rx="5" fill="var(--paper)" stroke="var(--ink)"/>
+</svg>
+</main>
+</body>
+</html>

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Paint that ignores the dark switch</title>
+<style>
+  @media (prefers-color-scheme: dark) { :root { --paper:#14181c; } }
+</style>
+</head>
+<body>
+<main>
+<h1>A hex literal inside a drawing leaves a light slab on a dark page</h1>
+
+<h2>Mechanism — the read path</h2>
+<p>The drawing below is in the right place and painted the wrong way.</p>
+<svg viewBox="0 0 400 100" role="img" aria-labelledby="paint-t paint-d">
+  <title id="paint-t">The read path</title>
+  <desc id="paint-d">Two boxes painted with literals rather than tokens.</desc>
+  <rect width="400" height="100" fill="#faf8f5"/>
+  <rect x="20" y="30" width="140" height="40" rx="5" fill="rgba(22,39,60,0.08)" stroke="#16273c"/>
+  <text x="90" y="55" fill="#16273c" font-size="11" text-anchor="middle">reader</text>
+  <line x1="160" y1="50" x2="230" y2="50" stroke="oklch(0.7 0.1 200)"/>
+  <rect x="230" y="30" width="140" height="40" rx="5" fill="rebeccapurple"/>
+</svg>
+</main>
+</body>
+</html>

@@ -1,0 +1,29 @@
+# Per-user personal config — copy detent.user.example.yaml and fill in. Never committed.
+detent.user.yaml
+
+# Per-user local state (inbox, team-profiles) — lives INSIDE the clone so the
+# whole detent footprint is one directory, but is never committed.
+# Migrate legacy ~/.detent state with scripts/migrate-local-state.sh.
+/.local/
+
+node_modules/
+.DS_Store
+
+# Runtime output of the engine loop in THIS repo's root (the committed example
+# run lives under examples/ and is not affected by these root-anchored rules).
+/.sdlc/
+/.plans/
+
+# Worktrees the engine and Claude Code create inside the clone, plus IDE state.
+# Untracked entries here are why detent-upgrade.sh's `status --porcelain` guard
+# used to abort every run on a working install.
+/.claude/
+/.idea/
+
+# Per-project brand-token state written by the diagram-design skill.
+/.diagram-design
+
+# Work-repo lexicons copied into the clone are local working copies; the map
+# that indexes them (engine/lexicon/PROTOCOL.md) is committed.
+/lexicon/*
+!/lexicon/LEXICON-MAP.md

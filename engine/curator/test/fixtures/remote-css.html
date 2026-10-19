@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fetches from CSS</title>
+<style>
+  @media (prefers-color-scheme: dark) { :root { --paper:#14181c; } }
+  @import "https://cdn.example.com/base.css";
+  .hero { background: url(//cdn.example.com/hero.png); }
+</style>
+</head>
+<body>
+<main>
+<h1>CSS reaches the network too</h1>
+<p>An absolute @import and a protocol-relative url(), which browsers both fetch.</p>
+</main>
+</body>
+</html>

@@ -1,0 +1,26 @@
+{
+  "schema": "detent-eval-anchors-v1",
+  "dimension": "output-slop",
+  "bands": {
+    "green": [0.75, 1],
+    "yellow": [0.4, 0.75],
+    "red": [0, 0.4]
+  },
+  "anchors": [
+    {
+      "label": "green",
+      "sample": "Fix is merged (PR #123). Could you re-run the job when you get a sec? Ping me if it still repros.",
+      "expected_range": [0.85, 1.0]
+    },
+    {
+      "label": "yellow",
+      "sample": "Great question! Just wanted to circle back — the fix has been merged in PR #123, so feel free to re-run the job whenever works for you. Let me know if you hit any issues!",
+      "expected_range": [0.45, 0.65]
+    },
+    {
+      "label": "red",
+      "sample": "Hi there! I hope this message finds you well. I wanted to reach out regarding your question above. I'd be happy to help clarify — as per the fix, I think maybe we could possibly consider re-running the job at some point. Please don't hesitate to reach out if you need anything else. Thanks so much and have a great day!",
+      "expected_range": [0.05, 0.2]
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "id": "CLERK-J2",
+  "suite": "clerk",
+  "grader": "judge",
+  "prompt_path": "evals/cases/clerk/output-rubric.md",
+  "anchors": "clerk"
+}

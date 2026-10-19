@@ -1,0 +1,9 @@
+{
+  "id": "CLERK-J1",
+  "suite": "clerk",
+  "grader": "judge",
+  "prompt_path": "evals/cases/clerk/rubric.md",
+  "include": [
+    "skills/clerk/SKILL.md"
+  ]
+}

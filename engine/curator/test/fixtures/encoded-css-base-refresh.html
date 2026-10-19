@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Encoded URLs in CSS, base and meta refresh</title>
+<base href="https&colon;//cdn.example.com/">
+<meta http-equiv="refresh" content="0; url=https&colon;//example.com/elsewhere">
+<style>
+  @media (prefers-color-scheme: dark) { :root { --paper:#14181c; } }
+</style>
+</head>
+<body>
+<main>
+<h1>The browser decodes before it fetches</h1>
+
+<div style="background:url(https&colon;//cdn.example.com/x.png)">One encoded fetch in CSS.</div>
+</main>
+</body>
+</html>

@@ -1,0 +1,4 @@
+{"phase":"research","model":"opus","input":10000,"output":2000}
+{"phase":"plan","model":"opus","input":5000,"output":3000}
+{"phase":"implement","model":"sonnet","input":20000,"output":8000}
+{"phase":"implement","model":"mystery-model","input":1000,"output":500}

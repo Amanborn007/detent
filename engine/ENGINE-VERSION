@@ -1,0 +1,3 @@
+This repository is the engine source; engine/ is edited in place.
+Release identity is the git commit of this repo. There is no separate
+vendored snapshot to sync.

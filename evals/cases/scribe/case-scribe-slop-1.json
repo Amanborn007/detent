@@ -1,0 +1,7 @@
+{
+  "id": "SCRIBE-SLOP-1",
+  "suite": "scribe",
+  "grader": "judge",
+  "prompt_path": "evals/cases/scribe/slop-rubric.md",
+  "anchors": "output-slop"
+}

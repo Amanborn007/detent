@@ -1,0 +1,7 @@
+{
+  "id": "S1-12",
+  "suite": "context-adherence",
+  "check": "curator-example-ids-unique",
+  "description": "Every data-plan-question id in a committed artifact under engine/curator/examples/ is unique within its own file, so a poll answer is never ambiguous about which question it belongs to.",
+  "params": {}
+}

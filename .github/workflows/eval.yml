@@ -1,0 +1,132 @@
+name: eval
+
+# `engine eval` deterministic-tier CI gate (STAGE D). Fork-safe: read-only
+# GITHUB_TOKEN only, no secrets, zero network calls from the harness itself
+# (--no-judge forces the deterministic tier; judge would need a `claude`
+# binary + credentials this job intentionally never has). This is true of
+# the `eval` job below ONLY — the separate `judge` job (advisory, never the
+# merge gate) DOES use a `claude` binary + an `ANTHROPIC_API_KEY` repo secret,
+# gated to same-repo PRs only. See that job's own comment.
+on:
+  pull_request:
+    # docs/** is here because docs/evidence-and-voice.md is an authoritative input the skills read,
+    # so a docs-only change can alter the shared writing rules and must still run the checks.
+    paths: ["engine/**", "skills/**", "hooks/**", "evals/**", "benchmarks/**", "docs/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # engine/eval/select.mjs needs the merge-base with origin/main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: unit tests (engine/eval)
+        run: node --test engine/eval/test/
+
+      - name: unit tests (engine/self-feedback)
+        run: node --test engine/self-feedback/test/
+
+      # Just these files, not the whole directory: engine/curator/test/ also holds server tests that
+      # bind a port and spawn a process, and they are not part of this gate.
+      - name: unit tests (curator artifact gate)
+        run: |
+          node --test engine/curator/test/artifact-check.test.mjs \
+                      engine/curator/test/cli-gate.test.mjs
+
+      - name: engine eval --changed (deterministic tier)
+        # Fail the check on a CONFIRMED DEGRADE (deterministic flip or a
+        # suite delta beyond the band vs the committed baseline) — not on
+        # NEUTRAL/UPGRADE — once the gate is ARMED. Mode + burn-in are now
+        # config-driven (evals/config.yaml's `gate:` block), not a hardcoded
+        # env var here: `gate.mode: blocking` plus `gate.burn_in_prs` green
+        # (NEUTRAL/UPGRADE) COMMITTED ledger entries vs the current baseline
+        # arms blocking for judge-driven DEGRADEs; a deterministic flip or
+        # missing baseline case blocks immediately under a blocking config,
+        # no burn-in required (see
+        # engine/eval/README.md's "Gate promotion & burn-in" section for the
+        # counting rule and the promotion runbook). No env var here means
+        # "defer to the committed config" — set EVAL_BLOCKING=on|off on this
+        # step to force blocking/advisory regardless of config, same
+        # precedence eval.mjs's resolveGateMode uses everywhere else.
+        run: |
+          set -o pipefail
+          set +e
+          node engine/cli/engine.mjs eval --changed --no-judge | tee eval.json
+          code=$?
+          # Fail SOFT here: eval.json not existing/parsing is itself the
+          # interesting failure to surface (e.g. the eval command crashed
+          # before printing anything) — never let `node -e` throwing under
+          # `set -e` mask that with an opaque non-zero exit from this step.
+          verdict="$(node -e "console.log(JSON.parse(require('fs').readFileSync('eval.json','utf8')).verdict || 'UNKNOWN')" 2>/dev/null || echo UNKNOWN)"
+          gate_line="$(node -e "const r=JSON.parse(require('fs').readFileSync('eval.json','utf8')); const g=r.gate; console.log(g ? \`gate: \${g.mode}, burn-in \${g.green_baselines}/\${g.burn_in_prs}, armed: \${g.armed}\` : 'gate: unknown')" 2>/dev/null || echo "gate: unknown")"
+          # A refusal (ok:false, exit 2) has no verdict, so the summary would
+          # otherwise read "UNKNOWN / gate: unknown" — indistinguishable from a
+          # blocking DEGRADE, with the actual reason never printed anywhere a
+          # reviewer looks. stdout is the only channel CI renders; stderr is
+          # not. So surface reason + next_step explicitly.
+          refusal="$(node -e "const r=JSON.parse(require('fs').readFileSync('eval.json','utf8')); if(r.ok===false){const kind=process.argv[1]==='2'?'REFUSED':'FAILED';console.log(kind+': '+(r.reason||'(no reason)')+'\n\nnext step: '+(r.next_step||'(none)'))}" "$code" 2>/dev/null || true)"
+          {
+            echo "## engine eval: $verdict"
+            echo
+            if [ -n "$refusal" ]; then
+              echo "$refusal"
+              echo
+            fi
+            echo "$gate_line"
+            echo
+            echo '```json'
+            node -e "const r=JSON.parse(require('fs').readFileSync('eval.json','utf8')); console.log(JSON.stringify(r.suites || {}, null, 2))" 2>/dev/null || echo "(eval.json missing or unparsable — see the raw command output above)"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          exit "$code"
+
+  judge:
+    # Advisory quality grading. Same-repo PRs only: fork PRs never receive
+    # secrets on pull_request anyway, and this guard makes it explicit and
+    # skips (not fails) the job. NEVER the merge gate.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - name: judge tier (advisory — never gates merge)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -o pipefail
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "## engine eval judge tier: skipped (no ANTHROPIC_API_KEY repo secret) — deterministic tier only" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          npm install -g @anthropic-ai/claude-code@2.1.209
+          set +e
+          node engine/cli/engine.mjs eval --changed --k 3 | tee judge.json
+          set -e
+          node -e '
+            const r = JSON.parse(require("fs").readFileSync("judge.json","utf8"));
+            const lines = ["## engine eval judge tier (advisory)", ""];
+            if (!r.judge || !r.judge.recorded) {
+              lines.push(`judge tier: skipped (deterministic only)${r.judge && r.judge.note ? " — " + r.judge.note : ""}`);
+            } else {
+              for (const [s, d] of Object.entries(r.suites || {}))
+                for (const [id, c] of Object.entries(d.cases || {}))
+                  if (c.recorded && typeof c.spread === "number")
+                    lines.push(`- ${s}/${id}: score ${c.score}${c.band ? ` — ${c.band.toUpperCase()}` : ""} (k=${c.k}, spread ${c.spread})`);
+              if (r.judge_flaky && r.judge_flaky.length) lines.push("", `judge-uncertain (spread > 2×band): ${r.judge_flaky.join(", ")}`);
+            }
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
+          '
+          exit 0   # advisory: this job NEVER fails CI on a judge verdict

@@ -1,0 +1,34 @@
+# detent.user.example.yaml — the single place for inherently-personal values.
+#
+# Copy to detent.user.yaml (gitignored) and fill in YOUR values:
+#   cp detent.user.example.yaml detent.user.yaml   # then edit
+#
+# Anything in this repo that needs a person-specific value (owner email, GitHub
+# login, Jira account) reads it from detent.user.yaml rather than hardcoding it.
+# Paths never belong here — scripts resolve paths via $HOME or DETENT_* env vars.
+
+user:
+  # Display name and work email. Skills that act as you (herald) stop if these are empty.
+  name: ""
+  email: you@example.com
+  # GitHub login (used by PR tooling to tell "my PR" from "someone else's").
+  # Empty: resolved at run time from `gh api user --jq .login`.
+  github_login: ""
+  # Your own team handles, e.g. ["your-org/your-team"].
+  teams: []
+  # Jira account (usually same as email).
+  jira_account: you@example.com
+
+voice:
+  # Path to a file holding your writing-voice rules; null means none.
+  # When set, voice-discipline.sh names it in its reminder.
+  file: null
+
+org:
+  # GitHub org that clerk searches for precedent (`gh search --owner`).
+  github_owner: your-org
+
+pack:
+  # Pack file the skills read for knowledge providers, review lenses and the
+  # network check. null means packs/example/stack.yaml.
+  path: null

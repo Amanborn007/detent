@@ -1,0 +1,62 @@
+{
+  "id": "S1-9",
+  "suite": "context-adherence",
+  "check": "doc-invariants",
+  "description": "The code-comment standard is stated everywhere it must be and stays stated: canonically in deslop's slop category 1, restated by referee's lens and the implement stage, injected at authoring time by hooks/comment-discipline.sh, and wired into hooks.json. Each surface must carry the why-only rule, the bounded ticket-key escape hatch, and the doc-comment carve-out — a rewrite that silently drops one fails loudly, naming the file and the phrase.",
+  "params": {
+    "files": [
+      {
+        "file": "skills/deslop/SKILL.md",
+        "must_match": [
+          "canonical\\s+statement",
+          "never\\s+restate\\s+what\\s+the\\s+code",
+          "never\\s+narrate\\s+the\\s+change",
+          "point\\s+at\\s+the\\s+ticket\\s+key",
+          "per-hunk\\s+change\\s+marker",
+          "not\\s+slop"
+        ]
+      },
+      {
+        "file": "skills/referee/SKILL.md",
+        "must_match": [
+          "never\\s+narrate\\s+the\\s+change",
+          "ticket\\s+key",
+          "not\\s+slop"
+        ]
+      },
+      {
+        "file": "engine/stages/implement/SKILL.md",
+        "must_match": [
+          "comment\\s+discipline",
+          "non-obvious",
+          "never\\s+restating\\s+what\\s+the\\s+code",
+          "never\\s+narrating\\s+the\\s+change",
+          "ticket\\s+key",
+          "per-hunk\\s+marker",
+          "language\\s+or\\s+repo\\s+convention\\s+requires",
+          "narrating\\s+comments"
+        ]
+      },
+      {
+        "file": "hooks/comment-discipline.sh",
+        "must_match": [
+          "never\\s+restate\\s+what\\s+the\\s+code",
+          "never\\s+narrate\\s+the\\s+change",
+          "ticket\\s+key",
+          "once\\s+per\\s+construct",
+          "per-hunk\\s+change\\s+marker",
+          "required\\s+by\\s+the\\s+language\\s+or\\s+repo\\s+convention",
+          "not\\s+slop",
+          "COMMENT_DISCIPLINE"
+        ]
+      },
+      {
+        "file": "hooks/hooks.json",
+        "must_match": [
+          "SessionStart[\\s\\S]*comment-discipline\\.sh",
+          "comment-discipline\\.sh[\\s\\S]*Write[\\s\\S]*comment-discipline\\.sh"
+        ]
+      }
+    ]
+  }
+}

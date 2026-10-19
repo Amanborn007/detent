@@ -1,0 +1,30 @@
+{
+  "schema": "detent-eval-anchors-v1",
+  "dimension": "scout",
+  "scenario": "Query: how does webhook-dispatcher's signing-key rotation work before changing keys.yaml? Pack: providers org-kb (mcp, requires_network private) and repo-docs (local); blast radius enabled.",
+  "bands": {
+    "green": [0.75, 1],
+    "yellow": [0.4, 0.75],
+    "red": [0, 0.4]
+  },
+  "anchors": [
+    {
+      "label": "green",
+      "sample": "Ranked brief (partial — 1 provider blocked):\n1. [direct hit] A rotated signing key stays valid for a 24-hour overlap window and is not revoked automatically — source: repo-docs docs/signing.md, read directly.\n2. [direct hit] keys.yaml's retire_after field is enforced by KeyRetireJob, which pages the on-call engineer if a subscriber still verifies with the old key — source: repo path webhook-dispatcher/keys.yaml, reviewed directly.\n3. [blast-radius, reconstructed from repo docs] PROJ-103 moved key-rotation ownership from the platform team to the delivery team — source: repo-docs docs/signing.md, labeled reconstructed because org-kb is blocked.\n4. [blocked] org-kb knowledge search — requires_network private; network.check_cmd exited 1 (\"VPN_DOWN\"); excluded, not silently retried.\nBrief marked PARTIAL due to the blocked org-kb provider above.",
+      "expected_range": [0.8, 1.0],
+      "why": "every line is attributed, the blocked provider is named with its probe output rather than silently dropped, and the brief is honestly marked partial."
+    },
+    {
+      "label": "yellow",
+      "sample": "Findings: rotated keys stay valid for 24 hours. keys.yaml's retire job pages the on-call engineer. PROJ-103 moved key-rotation ownership to the delivery team.",
+      "expected_range": [0.45, 0.65],
+      "why": "the facts are right but two of the three lines carry no source attribution, and the org-kb provider was configured but its blocked status is never surfaced — it's just quietly absent rather than named as blocked."
+    },
+    {
+      "label": "red",
+      "sample": "webhook-dispatcher revokes the old signing key the moment a new one is issued, no overlap window exists, nothing pages anyone, and there's no PROJ-103 ownership change involved.",
+      "expected_range": [0.0, 0.3],
+      "why": "a confident, complete-looking brief with zero source attribution and no acknowledgment that any configured provider was even attempted — the 'all providers down, brief anyway' failure mode."
+    }
+  ]
+}

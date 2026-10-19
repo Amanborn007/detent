@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan: search service migration</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --ink: #1b1e23; --paper: #fbfbfa; --muted: #5b6470; --line: #d9dde3;
+    --accent: #2563c9; --good: #1d7a3d; --warn: #9a6200; --bad: #b3362b;
+    --chip: #eef1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink: #e8eaed; --paper: #191b1f; --muted: #9aa3ae; --line: #33383f; --chip: #23262b; }
+  }
+  * { box-sizing: border-box; min-width: 0; }
+  body {
+    margin: 0; padding: 32px 20px 80px; background: var(--paper); color: var(--ink);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+  h1 { font-size: 26px; margin: 0; letter-spacing: -.01em; }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 0 0 10px; }
+  p { margin: 0 0 10px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  section { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+  .phases { display: flex; flex-direction: column; gap: 10px; }
+  .phase { display: flex; gap: 12px; align-items: baseline; }
+  .phase b { flex: none; width: 72px; font-variant-numeric: tabular-nums; }
+  .risk { border-left: 4px solid var(--bad); background: var(--chip); border-radius: 6px; padding: 10px 12px; margin: 8px 0; }
+  .risk.medium { border-left-color: var(--warn); }
+  .risk .sev { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--bad); }
+  .risk.medium .sev { color: var(--warn); }
+  .options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 620px) { .options { grid-template-columns: 1fr; } }
+  .option { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .option h3 { margin: 0 0 6px; font-size: 15px; }
+  .option ul { margin: 6px 0 0; padding-left: 18px; }
+  .option li { margin: 3px 0; }
+  .pro { color: var(--good); } .con { color: var(--bad); }
+  .q-label { font-weight: 600; margin-bottom: 10px; }
+  .hint { font-size: 12.5px; color: var(--muted); font-style: italic; }
+  button.custom {
+    border: 1px solid var(--accent); color: var(--accent); background: none;
+    border-radius: 8px; padding: 8px 14px; font: 600 13px inherit; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Migrating product search to the new index</h1>
+    <p class="meta">Draft plan for review · alt-click anything to annotate · select text to comment · click an option card to decide</p>
+  </header>
+
+  <section id="summary">
+    <h2>Summary</h2>
+    <p>Move product search off the legacy inverted index onto the new vector-hybrid index.
+       The legacy cluster is EOL in Q4; query latency at p99 has degraded 30% year over year.
+       Scope: query path, indexing pipeline, and relevance tests. Out of scope: autocomplete.</p>
+  </section>
+
+  <section id="phases">
+    <h2>Phases</h2>
+    <div class="phases">
+      <div class="phase"><b>Week 1–2</b><span>Dual-write to both indexes; backfill historical documents.</span></div>
+      <div class="phase"><b>Week 3</b><span>Shadow-read: mirror 100% of queries to the new index, compare results offline.</span></div>
+      <div class="phase"><b>Week 4–5</b><span>Serve real traffic from the new index behind a percentage ramp.</span></div>
+      <div class="phase"><b>Week 6</b><span>Decommission legacy cluster; remove dual-write.</span></div>
+    </div>
+  </section>
+
+  <section id="risks">
+    <h2>Risks</h2>
+    <div class="risk">
+      <span class="sev">High</span>
+      <p>Relevance regressions are invisible to health checks — a bad ranking ships silently.
+         Mitigation: offline diff of top-10 results on the 500 highest-volume queries before every ramp step.</p>
+    </div>
+    <div class="risk medium">
+      <span class="sev">Medium</span>
+      <p>Dual-write doubles indexing cost for ~5 weeks. Acceptable, but the backfill must be
+         throttled so it never starves live indexing.</p>
+    </div>
+  </section>
+
+  <section id="decision-rollout">
+    <h2>Decision needed: rollout strategy</h2>
+    <div data-plan-question="rollout-strategy">
+      <p class="q-label">How should real traffic move to the new index?</p>
+      <div class="options">
+        <div class="option" data-plan-option="Percentage ramp">
+          <h3>Percentage ramp</h3>
+          <ul>
+            <li class="pro">Blast radius capped at each step (1 → 5 → 25 → 100)</li>
+            <li class="pro">Relevance diffs checked between steps</li>
+            <li class="con">Two code paths live for ~2 weeks</li>
+          </ul>
+        </div>
+        <div class="option" data-plan-option="Cutover with instant rollback">
+          <h3>Cutover with instant rollback</h3>
+          <ul>
+            <li class="pro">One switch, one code path, done in a day</li>
+            <li class="con">Full traffic exposed to any unnoticed regression</li>
+            <li class="con">Rollback restores latency, not user trust</li>
+          </ul>
+        </div>
+      </div>
+      <p class="hint">Click a card to choose — your answer is queued for the agent (re-clicking replaces it).</p>
+    </div>
+  </section>
+
+  <section id="decision-legacy">
+    <h2>Decision needed: legacy cluster</h2>
+    <div data-plan-question="legacy-cluster">
+      <p class="q-label">After cutover, what happens to the legacy cluster?</p>
+      <div class="options">
+        <div class="option" data-plan-option="Keep 2 weeks warm">
+          <h3>Keep warm 2 weeks</h3>
+          <ul>
+            <li class="pro">Instant rollback target if relevance issues surface late</li>
+            <li class="con">Two more weeks of double infra cost</li>
+          </ul>
+        </div>
+        <div class="option" data-plan-option="Decommission immediately">
+          <h3>Decommission immediately</h3>
+          <ul>
+            <li class="pro">Cost savings land in week 6</li>
+            <li class="con">Rollback becomes a multi-day re-provision</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="extras">
+    <h2>Anything else?</h2>
+    <p>If the whole approach is wrong, say so:</p>
+    <button class="custom" onclick="window.curator.queuePrompt('Rethink the approach: dual-write + shadow-read is too heavy. Propose a simpler migration.')">
+      Ask for a simpler plan
+    </button>
+  </section>
+</main>
+</body>
+</html>

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A remote paint url, and element rules with no class</title>
+<style>
+  :root { --paper:#faf8f5; --ink:#16273c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --paper:#14181c; --ink:#e8e6e2; }
+  }
+  body { background:var(--paper); color:var(--ink); }
+  /* Neither the word svg nor a class, and it paints every rect in the page's diagrams. */
+  rect { fill: #ffffff; }
+  /* A class for prose that merely starts with an element name must stay unreported. */
+  .text-muted { color: #333333; }
+</style>
+</head>
+<body>
+<main>
+<h1>Paint can reach the network too</h1>
+
+<p class="text-muted">Prose, not a diagram.</p>
+
+<svg viewBox="0 0 200 60" role="img" aria-labelledby="pu-t pu-d">
+  <title id="pu-t">A stroke pointing at a remote gradient</title>
+  <desc id="pu-d">One box whose stroke is fetched from a CDN.</desc>
+  <rect x="10" y="10" width="180" height="40" rx="5"
+        stroke="url(https://cdn.example.com/x.svg#gradient)"/>
+</svg>
+</main>
+</body>
+</html>

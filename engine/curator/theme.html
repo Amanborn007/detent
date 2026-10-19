@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curator theme — copy this skeleton</title>
+<style>
+  /* ── The standard curator skin. Copy this whole <style> block verbatim. ──
+     Warm paper, navy ink, one teal accent. Self-contained: system
+     fonts only, so an artifact still renders offline and on a locked-down
+     machine. Editorial contrast comes from the serif heading stack, not from
+     a downloaded face. */
+  :root {
+    --paper:#faf8f5;        /* page background */
+    --paper-2:#efece7;      /* code, table zebra, quiet panels */
+    --ink:#16273c;          /* primary text */
+    --muted:#7e7c76;        /* labels, captions, de-emphasis */
+    --soft:#2c415a;         /* secondary prose */
+    --rule:#e1ddd7;         /* hairlines */
+    --accent:#397882;       /* ONE accent. 1-2 uses per screen. */
+    --accent-tint:#bfe6ec;  /* accent fill */
+    --serif:ui-serif,Georgia,'Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:#14181c; --paper-2:#1b2026; --ink:#e8e6e2; --muted:#98a2af;
+      --soft:#b8c2cf; --rule:#2b3037; --accent:#7fc3cd; --accent-tint:#1d3a40;
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:48px 24px 120px; background:var(--paper); color:var(--ink);
+         font-family:var(--sans); font-size:17px; line-height:1.72; }
+  main { max-width:52rem; margin:0 auto; }
+
+  /* Header: mono eyebrow, serif title. The eyebrow carries the identifier. */
+  .eyebrow { font-family:var(--mono); font-size:9px; letter-spacing:.16em;
+             text-transform:uppercase; color:var(--muted); margin:0 0 10px; }
+  h1 { font-family:var(--serif); font-weight:400; font-size:34px; line-height:1.2; margin:0 0 12px; }
+  .lede { color:var(--soft); margin:0 0 8px; }
+
+  /* Sections: serif, hairline under. Generous space above — the gap is what
+     makes a long artifact skimmable. */
+  h2 { font-family:var(--serif); font-weight:400; font-size:24px; margin:64px 0 6px;
+       padding-bottom:8px; border-bottom:1px solid var(--rule); }
+  h3 { font-size:17px; font-weight:600; margin:36px 0 4px; }
+  h4 { font-size:15px; font-weight:600; margin:24px 0 2px; color:var(--soft); }
+
+  p { margin:.8rem 0; }
+  ul,ol { margin:.8rem 0; padding-left:1.35rem; }
+  li { margin:.45rem 0; }
+  code { background:var(--paper-2); padding:.08rem .32rem; border-radius:4px;
+         font-size:.84em; font-family:var(--mono); }
+  pre { background:var(--paper-2); padding:1rem 1.1rem; border-radius:6px;
+        overflow-x:auto; font:.79rem/1.5 var(--mono); margin:1rem 0; }
+
+  /* A quote is for someone else's words. Accent rule earns its keep here. */
+  blockquote { margin:1rem 0; padding:.3rem 0 .3rem 1.1rem;
+               border-left:3px solid var(--accent); color:var(--soft); font-style:italic; }
+  /* An aside is your own parenthetical. Neutral rule, so it does not compete. */
+  .box { margin:1.4rem 0; padding:.3rem 0 .3rem 1.1rem; border-left:3px solid var(--rule); }
+  /* One-line conclusion after a block of reasoning. */
+  .verdict { background:var(--paper-2); border-radius:6px; padding:.7rem 1rem;
+             margin:.8rem 0; font-size:15px; }
+
+  table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:15px;
+          display:block; overflow-x:auto; }
+  th,td { text-align:left; padding:.5rem .7rem; border-bottom:1px solid var(--rule);
+          vertical-align:top; }
+  th { font-family:var(--mono); font-size:9px; letter-spacing:.08em;
+       text-transform:uppercase; color:var(--muted); }
+
+  /* Diagrams: reference the tokens inside the SVG — fill="var(--paper)",
+     var(--ink), var(--accent) — never a hex literal. A hardcoded background
+     ignores the dark-mode switch above and leaves a light slab on a dark page. */
+  svg { display:block; width:100%; height:auto; margin:12px 0 4px; }
+  .caption { font-family:var(--mono); font-size:10px; color:var(--muted);
+             letter-spacing:.04em; margin:0 0 8px; }
+
+  footer { margin-top:72px; padding-top:16px; border-top:1px solid var(--rule);
+           font-family:var(--mono); font-size:9px; letter-spacing:.1em; color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+
+<p class="eyebrow">TICKET OR TOPIC · THE ONE-LINE IDENTIFIER</p>
+<h1>A title that states the finding, not the subject</h1>
+<p class="lede">One or two sentences a reader can stop at and still be right.</p>
+
+<h2>1 · The short version</h2>
+<p><strong>Bolded takeaway first.</strong> Then the reasoning, in whole short
+sentences. Lead with the answer, never the status.</p>
+
+<h2>2 · Evidence</h2>
+<p>Put the finding in the sentence and the anchor at the end of it, like this:
+the pill comes from one field only, <code>mapper.go:890</code>. Never a column
+of bare file anchors carrying the meaning.</p>
+
+<blockquote>Someone else's words go here, attributed. — Name, where, when</blockquote>
+
+<div class="box">
+<p>Your own aside — a caveat, a nuance, something the reader should carry but
+which is not the main line.</p>
+</div>
+
+<h2>3 · Options</h2>
+<p>A table only where the shape carries the meaning. Comparing options across
+the same few dimensions is exactly that shape.</p>
+
+<table>
+  <tr><th>Option</th><th>Cost</th><th>Precedent</th><th>Where it lands</th></tr>
+  <tr><td>Do the obvious thing</td><td>Low</td><td>Strong — three services do it this way</td>
+      <td>What I would pick</td></tr>
+  <tr><td>Do the clever thing</td><td>High</td><td>None found</td>
+      <td>Matches the mock and rots in a month</td></tr>
+</table>
+
+<p class="verdict"><strong>Recommendation, in one line,</strong> with the reason
+in the same breath if it changes what the reader does.</p>
+
+<h2>4 · A diagram</h2>
+<p>Every fill and stroke reads a token, so the diagram follows the page into
+dark mode. Copy this shape; do not paste hex literals into an SVG.</p>
+
+<!-- data-placeholder keeps this example from counting as a drawing you made. Delete the attribute
+     when you replace it with a real diagram, or the check will still say the section owes one. -->
+<svg viewBox="0 0 480 120" role="img" aria-labelledby="theme-ex-title theme-ex-desc"
+     data-placeholder="true">
+  <title id="theme-ex-title">Token-referencing diagram example</title>
+  <desc id="theme-ex-desc">Two boxes joined by an arrow, drawn entirely with theme tokens so the
+  diagram follows the page into dark mode.</desc>
+  <defs>
+    <marker id="theme-ex-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="var(--muted)"/>
+    </marker>
+  </defs>
+  <rect width="100%" height="100%" fill="var(--paper)"/>
+  <line x1="196" y1="60" x2="236" y2="60" stroke="var(--muted)" stroke-width="1"
+        marker-end="url(#theme-ex-arrow)"/>
+  <rect x="40" y="32" width="156" height="56" rx="6" fill="var(--paper)" stroke="var(--ink)"/>
+  <text x="118" y="65" fill="var(--ink)" font-size="12" font-weight="600"
+        font-family="-apple-system, system-ui, sans-serif" text-anchor="middle">the ordinary node</text>
+  <rect x="236" y="32" width="156" height="56" rx="6" fill="var(--accent-tint)" stroke="var(--accent)"/>
+  <text x="314" y="65" fill="var(--ink)" font-size="12" font-weight="600"
+        font-family="-apple-system, system-ui, sans-serif" text-anchor="middle">the focal one</text>
+</svg>
+<p class="caption">FIG 1 · CAPTION IN MONO, STATING WHAT THE READER SHOULD TAKE</p>
+
+<h2>5 · The decision</h2>
+<p>Every decision you need is an explicit block. One block per decision.</p>
+
+<div data-plan-question="which-option">
+  <div data-plan-option="Obvious">Obvious — cheap, precedented, 80% of the win</div>
+  <div data-plan-option="Clever">Clever — full win, no precedent, slower review</div>
+</div>
+
+<footer>PROJECT · SOURCE OF ANY TOKENS · DATE</footer>
+
+</main>
+</body>
+</html>

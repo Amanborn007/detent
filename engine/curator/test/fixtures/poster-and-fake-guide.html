@@ -1,0 +1,20 @@
+<!-- artifact-check: guide -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A video poster, and the guide marker pasted into a file that is not the guide</title>
+</head>
+<body>
+<main>
+<h1>The marker is document content, so it cannot be the whole exemption</h1>
+
+<p>The poster image is fetched while the video renders:</p>
+<video poster="https://cdn.example.com/frame.jpg" controls></video>
+
+<p>Status classes below must still be reported, because this file is not
+<code>detent-guide-v&lt;N&gt;.html</code> and only that file may claim the exemption:</p>
+<p><span class="ok">done</span> <span class="no">blocked</span></p>
+</main>
+</body>
+</html>

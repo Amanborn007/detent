@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Paint from the page stylesheet, and a url written about rather than used</title>
+<style>
+  :root { --paper:#faf8f5; --ink:#16273c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --paper:#14181c; --ink:#e8e6e2; }
+  }
+  body { background:var(--paper); color:var(--ink); }
+  /* Never inside the <svg>, and it paints the diagram all the same. */
+  svg .node { fill: #ffffff; stroke: #16273c; }
+</style>
+</head>
+<body>
+<main>
+<h1>A rule in the page stylesheet paints the diagram too</h1>
+
+<p>This artifact writes <em>about</em> a stylesheet without loading one. None of the following is
+a fetch, because none of it is in a style block or a style attribute:</p>
+<pre><code>background: url(https://cdn.example.com/hero.png);
+@import "https://cdn.example.com/base.css";</code></pre>
+<p>Prose can name <code>url(https://example.com/x.png)</code> the same way.</p>
+
+<svg viewBox="0 0 200 60" role="img" aria-labelledby="css-t css-d">
+  <title id="css-t">A node painted from the stylesheet</title>
+  <desc id="css-d">One box whose paint comes from a page-level rule.</desc>
+  <rect class="node" x="10" y="10" width="180" height="40" rx="5"/>
+</svg>
+</main>
+</body>
+</html>

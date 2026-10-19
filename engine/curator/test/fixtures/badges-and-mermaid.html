@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Status pills and an embedded Mermaid render</title>
+<style>
+  @media (prefers-color-scheme: dark) { :root { --paper:#14181c; } }
+</style>
+</head>
+<body>
+<main>
+<h1>A coloured word in a state column is a badge under another name</h1>
+
+<p>Status classes: <span class="ok">done</span> and <span class="no">blocked</span>
+and <span class="pill">queued</span>.</p>
+
+<p>These are not badges and must not be reported: a <span class="no-print">print hint</span>
+and a <td class="col-no">3</td> numbering column.</p>
+
+<h2>Mechanism — the flow</h2>
+<div class="mermaid">graph TD; A-->B;</div>
+</main>
+</body>
+</html>

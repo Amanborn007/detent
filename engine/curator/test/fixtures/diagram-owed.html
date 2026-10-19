@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A section that owes a drawing and does not have one</title>
+<style>
+  @media (prefers-color-scheme: dark) { :root { --paper:#14181c; } }
+</style>
+</head>
+<body>
+<main>
+<h1>A drawing elsewhere on the page does not discharge this section's obligation</h1>
+
+<h2>Mechanism — the write path</h2>
+<p>Described in prose only. The only SVG on the page is the skeleton's example, carrying
+data-placeholder, so it must not count as a drawing this artifact made.</p>
+<svg viewBox="0 0 400 100" role="img" aria-labelledby="ph-t ph-d" data-placeholder="true">
+  <title id="ph-t">Example</title>
+  <desc id="ph-d">Copied from the skeleton and never replaced.</desc>
+  <rect width="400" height="100" fill="var(--paper)"/>
+</svg>
+
+<h2>Architecture — the read path</h2>
+<p>A second flow heading, also with no drawing of its own, so two obligations go unmet.</p>
+</main>
+</body>
+</html>

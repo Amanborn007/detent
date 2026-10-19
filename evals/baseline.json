@@ -1,0 +1,271 @@
+{
+  "schema": "detent-eval-baseline-v1",
+  "generated_at": "2026-08-11T09:58:18.000Z",
+  "git_sha": "638536d",
+  "suites": {
+    "context-adherence": {
+      "score": 1,
+      "cases": {
+        "S1-1": {
+          "score": 1,
+          "pass": true,
+          "checks": [
+            {
+              "name": "skill-frontmatter",
+              "ok": true,
+              "detail": "9 skill(s) verified: clerk, courier, curator, deslop, herald, owl, referee, scout, scribe"
+            }
+          ]
+        },
+        "S1-2": {
+          "score": 1,
+          "pass": true,
+          "checks": [
+            {
+              "name": "hooks-kill-switch",
+              "ok": true,
+              "detail": "11 hook script(s) verified (3 kill-switch-checked)"
+            }
+          ]
+        },
+        "S1-3": {
+          "score": 1,
+          "pass": true,
+          "checks": [
+            {
+              "name": "curator-self-containment",
+              "ok": true,
+              "detail": "generated .plans/engine-dashboard.html — all self-containment invariants held"
+            }
+          ]
+        },
+        "S1-4": {
+          "score": 1,
+          "pass": true,
+          "checks": [
+            {
+              "name": "contract-stage-parity",
+              "ok": true,
+              "detail": "7 stage(s) verified: intake, research, plan, implement, recheck, ship, respond"
+            }
+          ]
+        },
+        "S1-5": {
+          "score": 1,
+          "pass": true,
+          "checks": [
+            {
+              "name": "ledger-parseable",
+              "ok": true,
+              "detail": "2 ledger line(s) parsed and shape-checked"
+            }
+          ]
+        },
+        "S1-6": {
+          "score": 1,
+          "pass": true,
+          "checks": [
+            {
+              "name": "calibration-anchors-valid",
+              "ok": true,
+              "detail": "4 calibration dimension(s) verified: clerk, output-slop, referee, scout"
+            }
+          ]
+        },
+        "S1-7": {
+          "score": 1,
+          "pass": true,
+          "checks": [
+            {
+              "name": "harness-degradation-selftest",
+              "ok": true,
+              "detail": "11 degradation/edge-case self-assertion(s) held: deterministic-flip-forces-degrade-despite-zero-delta: ok; missing-baseline-case-forces-degrade: ok; delta-exactly-neg-band-is-not-degrade: ok; delta-just-past-neg-band-is-degrade: ok; delta-exactly-pos-band-is-not-upgrade: ok; delta-just-past-pos-band-is-upgrade: ok; null-score-suite-never-manufactures-a-verdict: ok; added-removed-case-ids-excluded-from-the-delta-intersection: ok; empty-selection-is-neutral-no-suites-selected: ok; aggregate-suite-drops-non-numeric-entries-never-scores-zero: ok; count-green-baselines-excludes-hollow-and-null-sha-lines: ok"
+            }
+          ]
+        },
+        "S1-8": {
+          "score": 1,
+          "pass": true,
+          "checks": [
+            {
+              "name": "json-shape",
+              "ok": true,
+              "detail": "evals/baseline.json: valid JSON, shape matched"
+            }
+          ]
+        },
+        "S1-9": {
+          "score": 1,
+          "pass": true,
+          "checks": [
+            {
+              "name": "doc-invariants",
+              "ok": true,
+              "detail": "skills/deslop/SKILL.md: all invariant phrase(s) matched; skills/referee/SKILL.md: all invariant phrase(s) matched; engine/stages/implement/SKILL.md: all invariant phrase(s) matched; hooks/comment-discipline.sh: all invariant phrase(s) matched; hooks/hooks.json: all invariant phrase(s) matched"
+            }
+          ]
+        }
+      }
+    },
+    "sentinel-golden": {
+      "score": 1,
+      "cases": {
+        "S2-1": {
+          "score": 1,
+          "pass": true,
+          "checks": [
+            {
+              "name": "work-order-golden",
+              "ok": true,
+              "detail": "scanPure(eval/golden#1) matches expected-work-order.json exactly"
+            }
+          ]
+        }
+      }
+    },
+    "clerk": {
+      "score": 1,
+      "cases": {
+        "CLERK-D1": {
+          "score": 1,
+          "pass": true,
+          "checks": [
+            {
+              "name": "doc-invariants",
+              "ok": true,
+              "detail": "skills/clerk/SKILL.md: all invariant phrase(s) matched"
+            }
+          ]
+        },
+        "CLERK-J1": {
+          "score": null,
+          "pass": null,
+          "recorded": false,
+          "note": "--no-judge set (case CLERK-J1)"
+        },
+        "CLERK-J2": {
+          "score": null,
+          "pass": null,
+          "recorded": false,
+          "note": "--no-judge set (case CLERK-J2)"
+        }
+      }
+    },
+    "scout": {
+      "score": 1,
+      "cases": {
+        "SCOUT-D1": {
+          "score": 1,
+          "pass": true,
+          "checks": [
+            {
+              "name": "doc-invariants",
+              "ok": true,
+              "detail": "skills/scout/SKILL.md: all invariant phrase(s) matched"
+            }
+          ]
+        },
+        "SCOUT-J1": {
+          "score": null,
+          "pass": null,
+          "recorded": false,
+          "note": "--no-judge set (case SCOUT-J1)"
+        },
+        "SCOUT-J2": {
+          "score": null,
+          "pass": null,
+          "recorded": false,
+          "note": "--no-judge set (case SCOUT-J2)"
+        }
+      }
+    },
+    "referee": {
+      "score": 1,
+      "cases": {
+        "REFEREE-DESLOP-D2": {
+          "score": 1,
+          "pass": true,
+          "checks": [
+            {
+              "name": "doc-invariants",
+              "ok": true,
+              "detail": "skills/deslop/SKILL.md: all invariant phrase(s) matched"
+            }
+          ]
+        },
+        "REFEREE-D1": {
+          "score": 1,
+          "pass": true,
+          "checks": [
+            {
+              "name": "doc-invariants",
+              "ok": true,
+              "detail": "skills/referee/SKILL.md: all invariant phrase(s) matched"
+            }
+          ]
+        },
+        "REFEREE-J1": {
+          "score": null,
+          "pass": null,
+          "recorded": false,
+          "note": "--no-judge set (case REFEREE-J1)"
+        },
+        "REFEREE-J2": {
+          "score": null,
+          "pass": null,
+          "recorded": false,
+          "note": "--no-judge set (case REFEREE-J2)"
+        }
+      }
+    },
+    "scribe": {
+      "score": 1,
+      "cases": {
+        "SCRIBE-D1": {
+          "score": 1,
+          "pass": true,
+          "checks": [
+            {
+              "name": "doc-invariants",
+              "ok": true,
+              "detail": "skills/scribe/SKILL.md: all invariant phrase(s) matched; skills/scribe/references/profiles.md: all invariant phrase(s) matched"
+            }
+          ]
+        },
+        "SCRIBE-SLOP-1": {
+          "score": null,
+          "pass": null,
+          "recorded": false,
+          "note": "--no-judge set (case SCRIBE-SLOP-1)"
+        }
+      }
+    },
+    "self-feedback": {
+      "score": 1,
+      "cases": {
+        "SELFFB-D1": {
+          "score": 1,
+          "pass": true,
+          "checks": [
+            {
+              "name": "doc-invariants",
+              "ok": true,
+              "detail": "engine/self-feedback/CONTRACT.md: all invariant phrase(s) matched; engine/self-feedback/README.md: all invariant phrase(s) matched"
+            }
+          ]
+        },
+        "SELFFB-D2": {
+          "score": 1,
+          "pass": true,
+          "checks": [
+            {
+              "name": "self-feedback-roundtrip",
+              "ok": true,
+              "detail": "self-feedback add/list round-trip verified in a scratch DETENT_ROOT; kill switch honored, journal untouched"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

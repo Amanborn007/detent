@@ -1,0 +1,7 @@
+{
+  "id": "S1-5",
+  "suite": "context-adherence",
+  "check": "ledger-parseable",
+  "description": "Every non-blank line of benchmarks/ledger.jsonl parses as JSON and carries either schema:\"detent-eval-v1\" or a bench-line key (wall_clock_ms). An empty file passes.",
+  "params": {}
+}

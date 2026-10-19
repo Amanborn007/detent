@@ -1,0 +1,7 @@
+{
+  "id": "REFEREE-J2",
+  "suite": "referee",
+  "grader": "judge",
+  "prompt_path": "evals/cases/referee/output-rubric.md",
+  "anchors": "referee"
+}

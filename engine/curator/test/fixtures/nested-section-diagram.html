@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A drawing under a subsection still belongs to its parent section</title>
+<style>
+  :root { --paper:#faf8f5; --ink:#16273c; --muted:#7e7c76; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --paper:#14181c; --ink:#e8e6e2; --muted:#98a2af; }
+  }
+  body { background:var(--paper); color:var(--ink); }
+</style>
+</head>
+<body>
+<main>
+<h1>An h2 obligation is satisfied by a drawing beneath its own h3</h1>
+
+<h2>Mechanism — the write path</h2>
+<p>The obligation sits on this h2, and the drawing that meets it sits under the h3 below, which is
+inside this section rather than after it.</p>
+
+<h3>Where the row is written</h3>
+<svg viewBox="0 0 400 100" role="img" aria-labelledby="nest-t nest-d">
+  <title id="nest-t">The write path</title>
+  <desc id="nest-d">A handler feeding a ledger write, drawn with theme tokens.</desc>
+  <rect width="400" height="100" fill="var(--paper)"/>
+  <rect x="20" y="30" width="140" height="40" rx="5" fill="var(--paper)" stroke="var(--ink)"/>
+  <text x="90" y="55" fill="var(--ink)" font-size="11" text-anchor="middle">handler</text>
+  <line x1="160" y1="50" x2="230" y2="50" stroke="var(--muted)" stroke-width="1"/>
+  <rect x="230" y="30" width="140" height="40" rx="5" fill="var(--paper)" stroke="var(--ink)"/>
+  <text x="300" y="55" fill="var(--ink)" font-size="11" text-anchor="middle">ledger write</text>
+</svg>
+<p class="caption">FIG 1 · THE ROW IS WRITTEN BEFORE THE KEY IS SET</p>
+
+<h2>What I would refuse</h2>
+<p>Retrying inside the handler, because it moves the duplicate window rather than closing it.</p>
+</main>
+</body>
+</html>

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>image-set fetches, and a stylesheet color feeds currentColor</title>
+<style>
+  :root { --paper:#faf8f5; --ink:#16273c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --paper:#14181c; --ink:#e8e6e2; }
+  }
+  body { background:var(--paper); color:var(--ink); }
+  /* A bare quoted URL, no url() anywhere. */
+  .hero { background-image: image-set("https://cdn.example.com/a.png" 1x); }
+  /* fill is allow-listed as currentColor; the literal it inherits is the real paint. */
+  svg { color: #ffffff; }
+</style>
+</head>
+<body>
+<main>
+<h1>Two ways to paint and fetch without writing either out</h1>
+
+<svg viewBox="0 0 200 60" role="img" aria-labelledby="is-t is-d">
+  <title id="is-t">Painted through an inherited color</title>
+  <desc id="is-d">One box filled with currentColor.</desc>
+  <rect x="10" y="10" width="180" height="40" rx="5" fill="currentColor"/>
+</svg>
+</main>
+</body>
+</html>

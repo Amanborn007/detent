@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>An unquoted class, and a var falling back to a literal</title>
+<style>
+  :root { --paper:#faf8f5; --ink:#16273c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --paper:#14181c; --ink:#e8e6e2; }
+  }
+  body { background:var(--paper); color:var(--ink); }
+  /* Every candidate local, so this is not a fetch even though the page has encoded characters. */
+  .hero { background-image: image-set("a.png" 1x, "b.png" 2x); }
+</style>
+</head>
+<body>
+<main>
+<h1>HTML permits an unquoted class, and it renders the same &amp; styles the same</h1>
+
+<p><span class=ok>done</span> <span class=pill>queued</span></p>
+
+<svg viewBox="0 0 200 60" role="img" aria-labelledby="uc-t uc-d">
+  <title id="uc-t">A var whose property is undeclared</title>
+  <desc id="uc-d">One box painted by the fallback literal, because the property does not exist.</desc>
+  <rect x="10" y="10" width="180" height="40" rx="5" fill="var(--missing, #ffffff)"/>
+</svg>
+</main>
+</body>
+</html>

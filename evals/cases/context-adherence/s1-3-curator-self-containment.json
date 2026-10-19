@@ -1,0 +1,7 @@
+{
+  "id": "S1-3",
+  "suite": "context-adherence",
+  "check": "curator-self-containment",
+  "description": "engine dashboard, run offline against a scratch DETENT_ROOT, emits a self-contained HTML artifact: color-scheme support, no external network references, a system font stack, and a charset meta.",
+  "params": {}
+}

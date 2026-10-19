@@ -1,0 +1,7 @@
+{
+  "id": "S1-10",
+  "suite": "context-adherence",
+  "check": "invocation-desc-length",
+  "description": "Every skills/*/SKILL.md carrying disable-model-invocation: true has a description under 200 characters (user-invoked only, costs nothing per turn). Passes vacuously when no skill currently sets the flag.",
+  "params": {}
+}

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Three more ways to reach the network</title>
+<meta http-equiv="refresh" content="0; url=https://example.com/elsewhere">
+<style>
+  @media (prefers-color-scheme: dark) { :root { --paper:#14181c; } }
+  /* The remote candidate is second, and a 2x display fetches it. */
+  .hero { background-image: image-set("local.png" 1x, "https://cdn.example.com/x.png" 2x); }
+  /* Every candidate local, so this one must stay unreported. */
+  .fine { background-image: image-set("a.png" 1x, "b.png" 2x); }
+</style>
+</head>
+<body>
+<main>
+<h1>rel does not inert anything except a link</h1>
+
+<p>The browser fetches this image; rel is decoration on an img:</p>
+<img rel="canonical" src="https://cdn.example.com/x.png" alt="x">
+
+<p>And a link that really is canonical still fetches nothing:</p>
+<link rel="canonical" href="https://example.atlassian.net/browse/PROJ-2565">
+</main>
+</body>
+</html>

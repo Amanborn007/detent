@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Showing the Mermaid ban without breaking it</title>
+<style>
+  :root { --paper:#faf8f5; --ink:#16273c; --paper-2:#efece7; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --paper:#14181c; --ink:#e8e6e2; --paper-2:#1b2026; }
+  }
+  body { background:var(--paper); color:var(--ink); }
+  pre { background:var(--paper-2); }
+</style>
+</head>
+<body>
+<main>
+<h1>A fence inside a code block renders nothing</h1>
+
+<p>An artifact documenting the rule has to be able to show what the rule forbids:</p>
+
+<pre><code>```mermaid
+graph TD; A--&gt;B;
+```</code></pre>
+
+<p>Nothing above activates Mermaid, so this artifact is compliant.</p>
+</main>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "id": "REFEREE-J1",
+  "suite": "referee",
+  "grader": "judge",
+  "prompt_path": "evals/cases/referee/rubric.md",
+  "include": [
+    "skills/referee/SKILL.md",
+    "skills/deslop/SKILL.md"
+  ]
+}

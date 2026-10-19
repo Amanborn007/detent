@@ -1,0 +1,109 @@
+# stack.example.yaml — example company wiring for the SDLC engine.
+#
+# Copy to stack.yaml and replace the fictional AcmeCo commands with your own.
+# Every socket is a command: JSON request on stdin, JSON response on stdout,
+# exit 0 = success, 1 = provider failure (retried once, then surfaced),
+# 2 = contract violation (pipeline halts and asks the user).
+#
+# Version pinning: every provider carries an explicit `version`. The engine
+# calls `<command> --socket-version` at assembly time and refuses to run if it
+# does not match — no floating "latest" providers. Adapters shipped in this
+# repo are pinned as "builtin".
+
+engine_version: "1"          # contract major version this file targets
+
+sockets:
+
+  # ---- intake ---------------------------------------------------------------
+  # Fetches the work item. See sockets/ticket.md.
+  ticket:
+    command: "acme-ticket-bridge"      # AcmeCo's tracker exporter
+    args: ["--format", "engine-v1"]
+    version: "3.2.0"
+    timeout: "30s"
+
+  # ---- research -------------------------------------------------------------
+  # MULTI-PROVIDER: the engine queries every provider listed here and merges
+  # results (dedupe by source, rank by confidence). One provider failing is a
+  # warning; all failing aborts research. See sockets/knowledge.md.
+  knowledge:
+    providers:
+      - name: "runbooks"                       # ops runbooks search
+        command: "acme-runbook-search"
+        version: "1.4.2"
+      - name: "adr-index"                      # architecture decision records
+        command: "acme-adr-query"
+        version: "0.9.1"
+      - name: "repo-docs"                      # generic adapter from this repo
+        command: "engine/adapters/repo-docs-knowledge"
+        version: "builtin"
+    merge:
+      max_results: 25        # cap after cross-provider merge
+      min_confidence: 0.3    # drop noise below this before merging
+
+  # ---- plan -----------------------------------------------------------------
+  # Returns applicable skills/plays for the task. See sockets/skill-discovery.md.
+  skill-discovery:
+    command: "acme-skills"
+    args: ["discover"]
+    version: "2.1.0"
+    timeout: "20s"
+
+  # ---- review ---------------------------------------------------------------
+  # Company-specific findings; each carries action (no-op | auto-fix | ask-user)
+  # and risk_level. See sockets/reviewer.md.
+  reviewer:
+    command: "acme-review-bot"
+    args: ["--mode", "engine"]
+    version: "5.0.3"
+    timeout: "10m"
+
+  # ---- PR verification ------------------------------------------------------
+  # Runs tests AND captures end-to-end evidence artifacts. A pass without
+  # evidence is treated as provider misbehavior. See sockets/verifier.md.
+  verifier:
+    command: "acme-verify"
+    args: ["--evidence-dir", ".verify"]
+    version: "1.7.0"
+    timeout: "30m"
+
+  # ---- standing PR loop ------------------------------------------------------
+  # Polled until the PR merges. See sockets/bot-comments.md.
+  bot-comments:
+    command: "engine/adapters/gh-bot-comments"   # generic adapter works as-is on GitHub
+    version: "builtin"
+    poll_interval: "5m"      # engine-side polling cadence
+    timeout: "60s"
+
+  # ---- pipeline extension ----------------------------------------------------
+  # Domain-team packs; each contributes stages at declared insertion points.
+  # See sockets/skills-pack.md.
+  skills-pack:
+    packs:
+      - name: "deliveries-pack"
+        manifest: "acme-deliveries-pack"     # command answering the manifest contract
+        version: "2.0.0"
+      - name: "mobile-pack"
+        manifest: "acme-mobile-pack"
+        version: "1.3.5"
+
+  # ---- post-merge ------------------------------------------------------------
+  # Read-only investigation hook; never mutates the environment.
+  # See sockets/incident.md.
+  incident:
+    command: "acme-incident-probe"
+    version: "4.1.0"
+    timeout: "15m"
+
+  # ---- explicit-only deploy harness ------------------------------------------
+  # SEPARATE from verifier. Deploys to a real environment and tests there.
+  # Runs ONLY on explicit human request, or (if the gate below is enabled)
+  # when a PR is approved-and-ready-to-merge. NEVER automatically per change —
+  # the engine rejects a stack.yaml that wires it into regular stages.
+  # See sockets/deploy-harness.md.
+  deploy-harness:
+    command: "acme-deploy-and-test"
+    version: "0.8.2"
+    timeout: "90m"
+    gate_on_ready_to_merge: true   # false = human request is the only trigger
+    environments: ["staging"]      # environments the harness may target

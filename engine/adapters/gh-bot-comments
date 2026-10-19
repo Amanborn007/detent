@@ -1,0 +1,122 @@
+#!/usr/bin/env node
+/**
+ * gh-bot-comments — reference adapter for the `bot-comments` socket
+ * (see engine/sockets/bot-comments.md).
+ *
+ * Lists a PR's issue comments + review comments via `gh api`, tags each author
+ * as bot/human (GitHub user type "Bot" or login ending in "[bot]"), and applies
+ * a simple, documented actionable/informational heuristic. The heuristic is a
+ * starting point — companies replace this adapter to plug in their own
+ * classifier.
+ *
+ * stdin:  {"repo":"owner/name","number":123}  or  {"pr":"owner/name#123"}
+ * stdout: {"pr","comments":[{id,author,author_type,classification,excerpt,url}],"counts","next_step"}
+ * exit:   0 ok | 1 provider failure | 2 contract violation
+ */
+"use strict";
+const { execFileSync } = require("node:child_process");
+const fs = require("node:fs");
+
+function emit(obj, code) {
+  process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
+  process.exit(code);
+}
+
+function readStdin() {
+  const chunks = [];
+  const buf = Buffer.alloc(65536);
+  while (true) {
+    let n;
+    try { n = fs.readSync(0, buf, 0, buf.length); } catch (e) {
+      if (e.code === "EAGAIN") continue;
+      throw e;
+    }
+    if (n === 0) break;
+    chunks.push(Buffer.from(buf.slice(0, n)));
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+let req;
+try { req = JSON.parse(readStdin()); } catch (e) {
+  emit({ error: "stdin is not valid JSON: " + e.message,
+         next_step: 'send {"repo":"owner/name","number":123} on stdin' }, 2);
+}
+let repo = req.repo, number = req.number;
+if (req.pr) {
+  const m = /^([^#\s]+\/[^#\s]+)#(\d+)$/.exec(req.pr);
+  if (!m) emit({ error: "pr must look like owner/name#123, got: " + req.pr,
+                 next_step: "fix pr and re-invoke" }, 2);
+  repo = m[1]; number = Number(m[2]);
+}
+if (!repo || !Number.isInteger(number)) {
+  emit({ error: "need repo (owner/name) and integer number, or pr",
+         next_step: 'send {"repo":"owner/name","number":123} on stdin' }, 2);
+}
+
+function ghJson(endpoint) {
+  // Explicit page loop (rather than `gh api --paginate`, whose concatenated
+  // arrays are awkward to re-join safely without a streaming parser).
+  const all = [];
+  for (let page = 1; page <= 20; page++) {
+    const raw = execFileSync("gh", ["api", `${endpoint}?per_page=100&page=${page}`],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 32 * 1024 * 1024 });
+    const batch = JSON.parse(raw);
+    all.push(...batch);
+    if (batch.length < 100) break;
+  }
+  return all;
+}
+
+const ACTIONABLE_RE = new RegExp(
+  ["\\bplease\\b", "\\bmust\\b", "\\bshould\\b", "\\bneeds? to\\b", "\\bfix\\b",
+   "\\bchange\\b", "\\bupdate\\b", "\\bremove\\b", "\\brename\\b", "\\bblocking\\b",
+   "\\brequest(ed)? changes\\b", "```suggestion", "\\?"].join("|"), "i");
+
+function classify(body) {
+  return ACTIONABLE_RE.test(body || "") ? "actionable" : "informational";
+}
+function authorType(user) {
+  if (!user) return "bot"; // deleted/ghost authors are treated as non-human
+  return (user.type === "Bot" || /\[bot\]$/.test(user.login)) ? "bot" : "human";
+}
+
+let issueComments, reviewComments;
+try {
+  issueComments = ghJson(`repos/${repo}/issues/${number}/comments`);
+  reviewComments = ghJson(`repos/${repo}/pulls/${number}/comments`);
+} catch (e) {
+  const detail = (e.stderr || e.message || "").toString().trim().slice(0, 300);
+  emit({ error: "gh api failed: " + detail,
+         next_step: "check `gh auth status` and that " + repo + "#" + number + " is a PR, then re-invoke" }, 1);
+}
+
+const comments = [];
+for (const [kind, list] of [["issue_comment", issueComments], ["review_comment", reviewComments]]) {
+  for (const c of list) {
+    comments.push({
+      id: kind + ":" + c.id,
+      author: c.user ? c.user.login : "(deleted)",
+      author_type: authorType(c.user),
+      classification: classify(c.body),
+      excerpt: (c.body || "").replace(/\s+/g, " ").trim().slice(0, 200),
+      url: c.html_url
+    });
+  }
+}
+const counts = {
+  bot: comments.filter(c => c.author_type === "bot").length,
+  human: comments.filter(c => c.author_type === "human").length,
+  actionable: comments.filter(c => c.classification === "actionable").length,
+  informational: comments.filter(c => c.classification === "informational").length
+};
+
+const actionable = counts.actionable;
+emit({
+  pr: repo + "#" + number,
+  comments,
+  counts,
+  next_step: actionable
+    ? "triage the " + actionable + " actionable comment(s): decide reply / code change / escalate-to-human for each"
+    : "no actionable comments; re-poll on the configured interval until the PR merges"
+}, 0);

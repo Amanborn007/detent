@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A CSS escape and an entity-encoded class</title>
+<style>
+  @media (prefers-color-scheme: dark) { :root { --paper:#14181c; } }
+  /* No literal "://" appears here until the CSS escape is resolved. */
+  .hero { background: url(https\3a //cdn.example.com/x.png); }
+</style>
+</head>
+<body>
+<main>
+<h1>The browser resolves both layers before it fetches or styles</h1>
+
+<p>This reaches the browser as class "ok":</p>
+<p><span class="&#111;k">done</span></p>
+
+<p>And this as class "mermaid":</p>
+<div class="&#109;ermaid">graph TD; A--&gt;B;</div>
+</main>
+</body>
+</html>

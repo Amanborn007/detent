@@ -1,0 +1,12 @@
+{"ts":"2026-07-05T10:00:00Z","event":"run_created","run_id":"2026-07-05-demo","ticket_ref":"octo/repo#1"}
+{"ts":"2026-07-05T10:00:00Z","event":"stage_begin","stage":"intake"}
+{"ts":"2026-07-05T10:01:00Z","event":"stage_end","stage":"intake"}
+{"ts":"2026-07-05T10:01:00Z","event":"stage_begin","stage":"research"}
+{"ts":"2026-07-05T10:04:00Z","event":"stage_end","stage":"research"}
+{"ts":"2026-07-05T10:04:00Z","event":"stage_begin","stage":"plan"}
+{"ts":"2026-07-05T10:05:00Z","event":"gate_raised","stage":"plan","gate":"intent","decision_id":"D-001"}
+{"ts":"2026-07-05T10:05:00Z","event":"gate_opened","gate":"intent","decision_id":"D-001"}
+{"ts":"2026-07-05T10:15:00Z","event":"gate_answered","gate":"intent","decision_id":"D-001","answer":"approve","answered_at":"2026-07-05T10:15:00Z"}
+{"ts":"2026-07-05T10:16:00Z","event":"external_request","id":"ci-1","kind":"ci"}
+{"ts":"2026-07-05T10:21:00Z","event":"external_response","id":"ci-1","kind":"ci"}
+{"ts":"2026-07-05T10:22:00Z","event":"stage_end","stage":"plan"}

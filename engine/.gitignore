@@ -1,0 +1,5 @@
+# Per-company local config. The denylist for company-strings-check.sh lives
+# here and is itself company-identifying — never commit it.
+.local/
+# scratch files used by guard tests
+scratch-*.txt

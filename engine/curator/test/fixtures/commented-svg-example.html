@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A commented SVG is an example, not a drawing</title>
+<style>
+  :root { --paper:#faf8f5; --ink:#16273c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --paper:#14181c; --ink:#e8e6e2; }
+  }
+  body { background:var(--paper); color:var(--ink); }
+</style>
+</head>
+<body>
+<main>
+<h1>An SVG inside a comment neither fails the page nor discharges an obligation</h1>
+
+<h2>Mechanism — the write path</h2>
+<p>The only SVG in this section is commented out, so this section still owes a drawing. If a
+commented SVG counted, an artifact could satisfy the rule by writing about a diagram.</p>
+
+<!--
+<svg viewBox="0 0 400 100" role="img">
+  <rect width="400" height="100" fill="#faf8f5"/>
+  <text class="ok" x="10" y="20">a hardcoded literal and a badge class, both inside a comment</text>
+</svg>
+-->
+</main>
+</body>
+</html>

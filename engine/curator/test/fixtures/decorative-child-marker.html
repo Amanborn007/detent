@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A decorative child must not exempt the whole drawing</title>
+<style>
+  :root { --paper:#faf8f5; --ink:#16273c; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --paper:#14181c; --ink:#e8e6e2; }
+  }
+  body { background:var(--paper); color:var(--ink); }
+</style>
+</head>
+<body>
+<main>
+<h1>The markers describe the drawing, so they only count on its root</h1>
+
+<h2>Mechanism — the write path</h2>
+<p>The SVG below has a decorative child and a placeholder child. Neither makes the drawing itself
+decoration, and the drawing is missing both a title and role, so the section is still owed one and
+the SVG is still in no declared state.</p>
+<svg viewBox="0 0 200 60">
+  <rect aria-hidden="true" x="0" y="0" width="200" height="60" fill="var(--paper)"/>
+  <line data-placeholder="true" x1="10" y1="30" x2="190" y2="30" stroke="var(--ink)"/>
+</svg>
+</main>
+</body>
+</html>

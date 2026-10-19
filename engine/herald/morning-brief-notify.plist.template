@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Morning-brief NOTIFICATION LaunchAgent (macOS) — nudge only.
+
+  IMPORTANT (honest constraint): this agent does NOT assemble the brief. It
+  cannot: the full brief needs interactive-only connectors (Jira/Gmail/Slack)
+  and a browser, neither reachable from a headless launchd context. All it does
+  is post a desktop notification each morning telling you to open a session and
+  run the brief there. The real work happens interactively via `detent brief` /
+  the herald skill (and the SessionStart hook offers it on your first
+  session of the day).
+
+  Placeholders are filled by install-notify.sh:
+    __LABEL__   launchd label (e.g. com.detent.herald.notify)
+    __HOUR__    hour of day (0-23)
+    __MINUTE__  minute (0-59)
+    __MESSAGE__ the notification body text
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>__LABEL__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/osascript</string>
+    <string>-e</string>
+    <string>display notification "__MESSAGE__" with title "Morning brief" sound name "Glass"</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>__HOUR__</integer>
+    <key>Minute</key>
+    <integer>__MINUTE__</integer>
+  </dict>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+</dict>
+</plist>

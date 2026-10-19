@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# fake-claude — test stub standing in for the real `claude` binary.
+#
+# Honors the owl.sh contract:
+#   - reads the iteration prompt from stdin (and discards it),
+#   - ignores all CLI flags,
+#   - prints a single CLI-style JSON envelope on stdout:
+#       {"type":"result","result":"<inner JSON string>","session_id":...,"total_cost_usd":...}
+#     where the inner JSON is the owl iteration contract:
+#       {success, summary, key_changes, key_learnings, should_fully_stop}
+#
+# Behaviour is scripted per-invocation via $FAKE_CLAUDE_DIR/plan.txt:
+# line N = directive for invocation N. Directives:
+#   edit-success   append to work.txt in cwd, report success:true
+#   edit-fail      append to work.txt in cwd, report success:false
+#   noop-success   change nothing, report success:true   (no-op halt-rule test)
+#   fail           change nothing, report success:false
+#   stop           append to work.txt, success:true + should_fully_stop:true
+#   garbage        emit a result that violates the JSON contract
+#   sleep-N        sleep N seconds, then behave like edit-success
+#   decide         like edit-success, plus one provisional_decisions entry
+#                  (never-halt decision-journal test)
+#   decide-fail    change work.txt, report success:false plus one
+#                  provisional_decisions entry (rolled-back decision test)
+# Missing/blank line -> treated as "fail".
+# Invocation counter persists in $FAKE_CLAUDE_DIR/iter.count.
+set -u -o pipefail
+
+: "${FAKE_CLAUDE_DIR:?fake-claude: FAKE_CLAUDE_DIR must be set}"
+
+# Consume (and ignore) the prompt on stdin, like `claude -p` would.
+cat > /dev/null
+
+count_file="$FAKE_CLAUDE_DIR/iter.count"
+n=0
+[[ -f "$count_file" ]] && n="$(cat "$count_file")"
+n=$((n + 1))
+printf '%s' "$n" > "$count_file"
+
+# Record this invocation's argv, one element per line (argv-safe: no eval,
+# no shell-string joining — newlines handle spaces) so tests can assert the
+# resolved settings path actually reached the claude invocation.
+printf '%s\n' "$@" > "$FAKE_CLAUDE_DIR/argv-$n.txt"
+
+directive="$(sed -n "${n}p" "$FAKE_CLAUDE_DIR/plan.txt" 2>/dev/null || true)"
+[[ -z "$directive" ]] && directive="fail"
+
+emit() { # $1=success(bool) $2=summary $3=should_fully_stop(bool) [$4=provisional_decisions(json array)]
+  local inner decisions
+  decisions="${4:-[]}"
+  inner="$(jq -cn \
+    --argjson success "$1" \
+    --arg summary "$2" \
+    --argjson stop "$3" \
+    --argjson decisions "$decisions" \
+    --arg n "$n" \
+    '{success: $success,
+      summary: $summary,
+      key_changes: [("change-" + $n + ": touched work.txt")],
+      key_learnings: [("learning-" + $n + ": remember this for next iteration")],
+      provisional_decisions: $decisions,
+      should_fully_stop: $stop}')"
+  jq -cn --arg result "$inner" \
+    '{type: "result", subtype: "success", is_error: false,
+      result: $result, session_id: "fake-session", total_cost_usd: 0.01}'
+}
+
+fake_decision() { # one deterministic provisional decision for iteration $n
+  jq -cn --arg n "$n" \
+    '[{decision_needed: ("cache format for iteration " + $n),
+       options_considered: ["json file", "sqlite database"],
+       provisional_choice: "store the cache as a json file",
+       rationale: "no new dependency and trivially inspectable",
+       reversibility: "easy"}]'
+}
+
+case "$directive" in
+  edit-success)
+    printf 'iteration %s\n' "$n" >> work.txt
+    emit true "fake unit $n" false
+    ;;
+  edit-fail)
+    printf 'junk %s\n' "$n" >> work.txt
+    emit false "failed unit $n (left junk behind)" false
+    ;;
+  noop-success)
+    emit true "claimed success without changing anything ($n)" false
+    ;;
+  fail)
+    emit false "failed unit $n" false
+    ;;
+  stop)
+    printf 'final %s\n' "$n" >> work.txt
+    emit true "objective complete (agent claim)" true
+    ;;
+  garbage)
+    jq -cn '{type: "result", subtype: "success", is_error: false,
+             result: "I did some things but forgot the output contract entirely.",
+             session_id: "fake-session", total_cost_usd: 0.01}'
+    ;;
+  sleep-*)
+    sleep "${directive#sleep-}"
+    printf 'slow %s\n' "$n" >> work.txt
+    emit true "slow unit $n" false
+    ;;
+  decide)
+    printf 'decided %s\n' "$n" >> work.txt
+    emit true "fake unit $n (with decision)" false "$(fake_decision)"
+    ;;
+  decide-fail)
+    printf 'junk %s\n' "$n" >> work.txt
+    emit false "failed unit $n (with decision)" false "$(fake_decision)"
+    ;;
+  *)
+    printf 'fake-claude: unknown directive %q on line %s of plan.txt\n' "$directive" "$n" >&2
+    exit 1
+    ;;
+esac

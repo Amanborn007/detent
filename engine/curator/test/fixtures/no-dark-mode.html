@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Compliant except for the dark-mode block</title>
+<style>
+  :root { --paper:#faf8f5; --ink:#16273c; }
+  body { background:var(--paper); color:var(--ink); }
+</style>
+</head>
+<body>
+<main>
+<h1>A missing dark-mode block is a warning and does not gate</h1>
+<p>Nothing else on this page fails, so the check passes and still says the page will not follow a
+dark theme.</p>
+</main>
+</body>
+</html>
