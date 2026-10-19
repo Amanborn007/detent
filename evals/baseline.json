@@ -1,10 +1,10 @@
 {
   "schema": "detent-eval-baseline-v1",
-  "generated_at": "2026-08-11T09:58:18.000Z",
-  "git_sha": "638536d",
+  "generated_at": "2026-10-19T12:21:16.285Z",
+  "git_sha": "7a10349",
   "suites": {
     "context-adherence": {
-      "score": 1,
+      "score": 0.9167,
       "cases": {
         "S1-1": {
           "score": 1,
@@ -13,7 +13,40 @@
             {
               "name": "skill-frontmatter",
               "ok": true,
-              "detail": "9 skill(s) verified: clerk, courier, curator, deslop, herald, owl, referee, scout, scribe"
+              "detail": "10 skill(s) verified: clerk, courier, curator, deslop, examiner, herald, owl, referee, scout, scribe"
+            }
+          ]
+        },
+        "S1-10": {
+          "score": 1,
+          "pass": true,
+          "checks": [
+            {
+              "name": "invocation-desc-length",
+              "ok": true,
+              "detail": "4 skill(s) with disable-model-invocation:true verified under 200 chars"
+            }
+          ]
+        },
+        "S1-11": {
+          "score": 0,
+          "pass": false,
+          "checks": [
+            {
+              "name": "hooks-wiring-parity",
+              "ok": false,
+              "detail": "hooks/cold-resume-warn.mjs: has a shebang (directly-executable hook script) but is not wired anywhere in hooks.json; hooks/session-cost-statusline.mjs: has a shebang (directly-executable hook script) but is not wired anywhere in hooks.json"
+            }
+          ]
+        },
+        "S1-12": {
+          "score": 1,
+          "pass": true,
+          "checks": [
+            {
+              "name": "curator-example-ids-unique",
+              "ok": true,
+              "detail": "1 example artifact(s) checked, 2 data-plan-question id(s) verified unique per file"
             }
           ]
         },
@@ -24,7 +57,7 @@
             {
               "name": "hooks-kill-switch",
               "ok": true,
-              "detail": "11 hook script(s) verified (3 kill-switch-checked)"
+              "detail": "13 hook script(s) verified (3 kill-switch-checked)"
             }
           ]
         },
@@ -57,7 +90,7 @@
             {
               "name": "ledger-parseable",
               "ok": true,
-              "detail": "2 ledger line(s) parsed and shape-checked"
+              "detail": "benchmarks/ledger.jsonl is empty — trivially valid"
             }
           ]
         },
