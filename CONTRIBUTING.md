@@ -16,12 +16,12 @@ scripts/detent-install.sh
 Run these from the repo root. All of them should pass before you push.
 
 ```sh
-node --test engine/*/test
+node --test engine/*/test engine/cli/tests
 bash engine/owl/test/run-tests.sh
-for f in hooks/tests/*.sh scripts/tests/*.sh engine/scripts/tests/*.sh; do bash "$f" || echo "FAILED: $f"; done
+for f in hooks/tests/*.sh scripts/tests/*.sh engine/scripts/tests/*.sh engine/adapters/tests/*.sh; do bash "$f" || echo "FAILED: $f"; done
 ```
 
-Some curator tests start a local server, so they need permission to bind a port on `127.0.0.1`.
+Some curator tests start a local server, so they need permission to bind a port on `127.0.0.1`. The `gh-ticket` and `gh-bot-comments` adapter smoke tests call the live GitHub API, so they need a signed-in `gh` and network access.
 
 ## Check the eval suites
 

@@ -5,10 +5,9 @@
 # exit 0 = success, 1 = provider failure (retried once, then surfaced),
 # 2 = contract violation (pipeline halts and asks the user).
 #
-# Version pinning: every provider carries an explicit `version`. The engine
-# calls `<command> --socket-version` at assembly time and refuses to run if it
-# does not match — no floating "latest" providers. Adapters shipped in this
-# repo are pinned as "builtin".
+# Every provider carries an explicit `version` (the adapters in this repo use
+# "builtin"). The CLI does not check it against `--socket-version` yet; see
+# "Not in v0" in engine/cli/README.md.
 
 engine_version: "1"          # contract major version this file targets
 

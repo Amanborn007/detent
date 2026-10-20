@@ -66,7 +66,7 @@ stop, call this instead, and extend this file if something is missing.
 ### 0. Load the pack, then check the cache
 
 **Pack.** Read `pack.path` from `detent.user.yaml`; if unset, use
-`packs/example/stack.yaml`. Run `engine pack validate` first and stop on a
+`packs/example/stack.yaml`. Run `detent pack validate` first and stop on a
 non-zero exit, reporting its `errors`. Take `knowledge` and `network` from it. A pack file
 that is missing, unparseable, or lacks a `knowledge.providers` list is an
 error: stop and report the path and what is wrong. Never fall back to default
