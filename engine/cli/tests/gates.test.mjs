@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, writeFileSync, chmodSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { tmpdir, } from "node:os";
+import { fileURLToPath } from "node:url";
 import { engine, mkRun, writeArtifact, readJson, writeJson, throughResearch, eventsOf } from "./helpers.mjs";
 
 function toPlanEnd(ctx) {
@@ -81,7 +82,39 @@ test("gate open dispatches to curator when it is on PATH (by contract, never ven
   assert.equal(r.code, 0, r.stdout);
   assert.equal(r.json.mode, "curator");
   assert.match(r.json.next_step, /curator open/);
-  assert.match(r.json.next_step, /curator await/);
+});
+
+test("gate open next_step uses only subcommands and flags the real curator CLI accepts", () => {
+  const cliSrc = readFileSync(
+    join(fileURLToPath(import.meta.url), "..", "..", "..", "curator", "cli.mjs"), "utf8");
+  const real = new Set(
+    cliSrc.match(/const commands = \{([^}]*)\}/)[1].split(",").map((e) => e.split(":")[0].trim()));
+  const flags = new Set([...cliSrc.matchAll(/'(--[a-z-]+)':/g)].map((m) => m[1]));
+  assert.ok(real.has("open") && real.has("poll") && !real.has("await"), [...real].join());
+
+  const ctx = mkRun();
+  toPlanEnd(ctx);
+  const binDir = join(tmpdir(), "engine-test-bin-real-" + process.pid);
+  mkdirSync(binDir, { recursive: true });
+  const stub = join(binDir, "curator");
+  writeFileSync(stub, "#!/bin/sh\necho stub-curator\n");
+  chmodSync(stub, 0o755);
+  const r = engine(["gate", "open", "intent", "--repo", ctx.repo, "--run", ctx.runId],
+    { env: { PATH: binDir + ":/usr/bin:/bin" } });
+  assert.equal(r.json.mode, "curator");
+
+  const calls = [...r.json.next_step.matchAll(/\bcurator ([a-z-]+)((?: [^\s&;]+)*)/g)];
+  assert.ok(calls.length >= 2, r.json.next_step);
+  for (const [, sub, rest] of calls) {
+    assert.ok(real.has(sub), `curator ${sub} is not a real curator command`);
+    for (const tok of rest.split(" ").filter((t) => t.startsWith("-"))) {
+      assert.ok(flags.has(tok), `curator ${sub} ${tok}: flag is not accepted by curator`);
+    }
+  }
+  assert.doesNotMatch(r.json.next_step, /--playbook|curator await/);
+  // curator open takes a self-contained .html artifact, never the gate-request .json
+  const opened = r.json.next_step.match(/curator open (\S+)/)[1];
+  assert.match(opened, /\.html$/);
 });
 
 test("gate open on an unknown gate id exits 2", () => {

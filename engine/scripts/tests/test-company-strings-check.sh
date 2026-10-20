@@ -52,6 +52,16 @@ for d in .git .local node_modules/pkg; do printf '%s\n' "$P1" >"$REPO/$d/f.txt";
 run "$CHECK" --repo; [ "$RC" -eq 0 ] || fail "excluded dirs were scanned (rc=$RC): $OUT"
 echo "PASS"
 
+echo "--- --repo scope skips a worktree's .git pointer file ---"
+WT="$TMP/worktree"
+mkdir -p "$WT/engine/scripts" "$WT/engine/.local"
+cp "$REAL_CHECK" "$WT/engine/scripts/company-strings-check.sh"
+cp "$DENYLIST" "$WT/engine/.local/denylist.txt"
+printf 'gitdir: /home/%s/repo/.git/worktrees/x\n' "$P1" >"$WT/.git"
+run "$WT/engine/scripts/company-strings-check.sh" --repo
+[ "$RC" -eq 0 ] || fail "worktree .git pointer file was scanned (rc=$RC): $OUT"
+echo "PASS"
+
 echo "--- --paths-only prints file:line and never the matched content ---"
 printf 'line one\nsecret is %s here\n' "$P1" >"$REPO/docs/leak.md"
 run "$CHECK" --repo --paths-only; [ "$RC" -eq 1 ] || fail "--paths-only expected exit 1, got $RC: $OUT"
