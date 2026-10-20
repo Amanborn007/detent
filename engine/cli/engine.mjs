@@ -18,7 +18,7 @@
 
 import {
   readFileSync, writeFileSync, appendFileSync, renameSync, existsSync,
-  mkdirSync, readdirSync, statSync, accessSync, constants, rmSync,
+  mkdirSync, readdirSync, statSync, accessSync, constants, rmSync, writeSync,
 } from "node:fs";
 import { join, resolve, dirname, delimiter, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,7 +74,11 @@ const STAGE_END_GATES = {
 // ---------------------------------------------------------------------------
 
 function out(obj, code = 0) {
-  process.stdout.write(JSON.stringify(obj) + "\n");
+  // Sync write: process.exit() right after an async pipe write truncates output past ~8 KB (`help`).
+  const buf = Buffer.from(JSON.stringify(obj) + "\n");
+  for (let off = 0; off < buf.length;) {
+    try { off += writeSync(1, buf, off); } catch (e) { if (e.code !== "EAGAIN") throw e; }
+  }
   process.exit(code);
 }
 
@@ -1906,7 +1910,7 @@ function cmdAdvisorConsult(flags) {
 // Dispatch.
 // ---------------------------------------------------------------------------
 
-const USAGE = "engine <run new|stage begin|stage end|gate open|socket call|next|dashboard|live|bench|eval|pack validate|respond|step|advisor consult|handoff|attempt|env|decide-why|spend|help> — see engine/cli/README.md";
+const USAGE = "engine <setup|run new|stage begin|stage end|gate open|socket call|next|dashboard|live|bench|eval|pack validate|respond|step|advisor consult|handoff|attempt|env|decide-why|spend|help> — see engine/cli/README.md";
 
 /**
  * cmdEval — wraps engine/eval/eval.mjs's runEval() for `engine eval`. An
@@ -2371,10 +2375,120 @@ function cmdPackValidate(flags) {
   out({ ok: true, ...summary, next_step: "pack is valid — proceed" });
 }
 
+// ---------------------------------------------------------------------------
+// engine setup — first-run config. Fills empty detent.user.yaml fields from
+// git/gh and writes a starter stack.yaml wired to the built-in adapters.
+// ---------------------------------------------------------------------------
+
+const PLACEHOLDER_EMAIL = "you@example.com";
+
+function probeValue(cmd, args, cwd) {
+  const r = spawnSync(cmd, args, { encoding: "utf8", cwd, timeout: 15000 });
+  if (r.error || r.status !== 0) return null;
+  return r.stdout.trim() || null;
+}
+
+function starterStack(clone) {
+  const adapter = (n) => JSON.stringify(join(clone, "engine", "adapters", n));
+  return [
+    "# Starter stack.yaml written by `detent setup`. Add other sockets from",
+    "# engine/stack.example.yaml in the detent clone as you wire more tools.",
+    'engine_version: "1"',
+    "",
+    "sockets:",
+    "  ticket:",
+    `    command: ${adapter("gh-ticket")}`,
+    '    version: "builtin"',
+    "",
+    "  knowledge:",
+    "    providers:",
+    '      - name: "repo-docs"',
+    `        command: ${adapter("repo-docs-knowledge")}`,
+    '        version: "builtin"',
+    "",
+    "  bot-comments:",
+    `    command: ${adapter("gh-bot-comments")}`,
+    '    version: "builtin"',
+    "",
+  ].join("\n");
+}
+
+function cmdSetup(flags) {
+  if (!flags.repo || flags.repo === true) {
+    return refuse("setup needs the work repo", "detent setup --repo <path-to-work-repo>");
+  }
+  const repo = resolve(flags.repo);
+  if (!existsSync(repo) || !statSync(repo).isDirectory()) {
+    return refuse(`--repo is not a directory: ${repo}`, "pass the path of the repo you will work in");
+  }
+  const g = spawnSync("git", ["-C", repo, "rev-parse", "--git-dir"], { encoding: "utf8" });
+  if (g.error || g.status !== 0) {
+    return refuse(`${repo} is not a git repo`, "run `git init` there, or pass the path of your work repo");
+  }
+  const stackPath = join(repo, "stack.yaml");
+  if (existsSync(stackPath) && flags.force !== true) {
+    return refuse(`${stackPath} already exists`, "keep it, or re-run with --force to overwrite it");
+  }
+
+  const clone = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const userPath = join(detentRoot(), "detent.user.yaml");
+  const wrote = [];
+  const leftAlone = [];
+  const unresolved = [];
+
+  let text;
+  if (existsSync(userPath)) {
+    text = readFileSync(userPath, "utf8");
+  } else {
+    const example = join(clone, "detent.user.example.yaml");
+    if (!existsSync(example)) {
+      return fail(`template missing: ${example}`, "restore detent.user.example.yaml in the detent clone");
+    }
+    text = readFileSync(example, "utf8");
+    wrote.push(userPath);
+  }
+  const user = (parseYamlSubset(text, userPath).user) || {};
+  const isEmpty = (v) => v === undefined || v === null || v === "" || v === "''" || v === PLACEHOLDER_EMAIL;
+  const gitCmd = process.env.DETENT_GIT_CMD || "git";
+  const ghCmd = process.env.DETENT_GH_CMD || "gh";
+  const probes = [
+    ["name", () => probeValue(gitCmd, ["config", "user.name"], repo)],
+    ["email", () => probeValue(gitCmd, ["config", "user.email"], repo)],
+    ["github_login", () => probeValue(ghCmd, ["api", "user", "--jq", ".login"], repo)],
+  ];
+  let changed = false;
+  for (const [key, probe] of probes) {
+    const dotted = `user.${key}`;
+    if (!isEmpty(user[key])) { leftAlone.push(dotted); continue; }
+    const value = probe();
+    const line = new RegExp(`^(  ${key}:)[ \\t]*(?:""|''|${PLACEHOLDER_EMAIL.replace(".", "\\.")})?[ \\t]*$`, "m");
+    if (value === null || !line.test(text)) { unresolved.push(dotted); continue; }
+    text = text.replace(line, `$1 ${JSON.stringify(value)}`);
+    changed = true;
+  }
+  if (!Array.isArray(user.teams) || user.teams.length === 0) unresolved.push("user.teams");
+  if (isEmpty(user.jira_account)) unresolved.push("user.jira_account");
+  if (changed || wrote.includes(userPath)) writeFileSync(userPath, text);
+  if (!wrote.includes(userPath) && changed) wrote.push(userPath);
+
+  writeFileSync(stackPath, starterStack(clone));
+  wrote.push(stackPath);
+
+  out({
+    ok: true,
+    wrote,
+    left_alone: leftAlone,
+    unresolved,
+    next_step: `detent run new --ticket <owner/repo#N> --repo ${repo}` +
+      (unresolved.length ? `; fill ${unresolved.join(", ")} in ${userPath} (run \`gh auth login\` first for user.github_login)` : ""),
+  });
+}
+
 function cmdHelp() {
   out({
     ok: true,
     usage: {
+      "setup": "engine setup --repo <path> [--force] — first run: create <DETENT_ROOT>/detent.user.yaml and fill empty user.name/email/github_login from git and gh (never overwrites a set value), and write a starter stack.yaml in the work repo wired to the built-in adapters by absolute path. Refuses (exit 2) if --repo is missing or not a git repo, or if stack.yaml exists without --force. Values it cannot detect are listed in `unresolved`",
       "run new": "engine run new --ticket <ref> [--repo <path>] [--slug <slug>] [--no-worktree] — create a run under the centralized <DETENT_ROOT>/.sdlc/ with a dedicated git worktree (the default flow)",
       "stage begin": "engine stage begin <stage> [--run <id>] [--repo <path>] — enter a stage (refuses illegal transitions)",
       "stage end": "engine stage end <stage> [--run <id>] [--repo <path>] — finish a stage (checks artifact + gates). implement: [--tdd-test <name> --tdd-red <sha> --tdd-green <sha> | --tdd-exempt <reason>] records the tdd block (implement records, never judges). recheck: asserts red_sha is an ancestor of green_sha via git cat-file/merge-base, proving ORDER only, never that the test was observed failing.",
@@ -2412,6 +2526,7 @@ function main() {
   }
   const [a, b, c] = positional;
   if (a === "help" || flags.help === true) return cmdHelp();
+  if (a === "setup") return cmdSetup(flags);
   if (a === "run" && b === "new") return cmdRunNew(flags);
   if (a === "stage" && b === "begin") return cmdStageBegin(c, flags);
   if (a === "stage" && b === "end") return cmdStageEnd(c, flags);

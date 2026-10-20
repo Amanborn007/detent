@@ -40,7 +40,9 @@ Install the plugin and run the shell script as described in the README. Then:
 cp detent.user.example.yaml detent.user.yaml   # skip if the install script already made it
 ```
 
-Open `detent.user.yaml` and fill in your name, email, GitHub login, teams and tracker account. Leave the GitHub login empty if you want detent to read it from `gh api user`.
+To do the next two steps in one command, run `detent setup --repo ~/code/your-repo`. It creates `detent.user.yaml` from the example if it is missing and fills `user.name` and `user.email` from `git config` and `user.github_login` from `gh api user`, only where they are empty. It also writes a starter `stack.yaml` in your work repo with the three built-in adapters below, as absolute paths. It refuses if `stack.yaml` already exists (add `--force` to overwrite) or if the path is not a git repo. It prints one JSON line that lists what it wrote, what it left alone, and an `unresolved` list of values it could not detect, such as `user.teams`; fill those in by hand. If `gh` is not logged in, `user.github_login` is listed as unresolved and the rest still runs.
+
+Otherwise, open `detent.user.yaml` and fill in your name, email, GitHub login, teams and tracker account. Leave the GitHub login empty if you want detent to read it from `gh api user`.
 
 Two more files wire detent up. They are separate, and `detent.user.yaml` points at only one of them.
 
