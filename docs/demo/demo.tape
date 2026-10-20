@@ -18,25 +18,25 @@ Show
 
 Type "# detent walks a ticket through gated stages. The engine is the state machine." Enter
 Sleep 2s
-Type "engine run new --ticket DEMO-42 --slug banner --no-worktree | pj" Enter
+Type "detent run new --ticket DEMO-42 --slug banner --no-worktree | pj" Enter
 Sleep 4s
 
-Type "engine next | pj" Enter
+Type "detent next | pj" Enter
 Sleep 4s
 
 Type "# try to skip ahead to plan" Enter
-Type "engine stage begin plan | pj" Enter
+Type "detent stage begin plan | pj" Enter
 Sleep 5s
 
 Type "# do intake properly. Ending it without brief.md is refused too" Enter
-Type "engine stage begin intake | pj >/dev/null; engine stage end intake | pj" Enter
+Type "detent stage begin intake | pj >/dev/null; detent stage end intake | pj" Enter
 Sleep 5s
 
-Type "brief DEMO-42; engine stage end intake | pj" Enter
+Type "brief DEMO-42; detent stage end intake | pj" Enter
 Sleep 5s
 
 Type "# sockets: your tracker, knowledge and reviewers plug in via YAML. ON/OFF is explicit" Enter
-Type "engine pack validate --pack packs/example/stack.yaml | packs" Enter
+Type "detent pack validate --pack packs/example/stack.yaml | packs" Enter
 Sleep 6s
 
 Type "# every stage ends at a gate you answer in curator. Detent never merges." Enter

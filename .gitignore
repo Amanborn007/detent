@@ -9,8 +9,7 @@ detent.user.yaml
 node_modules/
 .DS_Store
 
-# Runtime output of the engine loop in THIS repo's root (the committed example
-# run lives under examples/ and is not affected by these root-anchored rules).
+# Runtime output of the engine loop in THIS repo's root.
 /.sdlc/
 /.plans/
 

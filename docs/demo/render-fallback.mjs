@@ -28,7 +28,7 @@ for (const line of tape) {
 // 2. Run them for real, one bash session, output split by markers.
 const work = mkdtempSync(join(tmpdir(), "detent-demo-"));
 const MARK = "@@STEP@@";
-const script = [`export DEMO_TMP=${work}/state`, `source ${join(here, "demo-env.sh")} >/dev/null 2>&1`]
+const script = [`export DEMO_TMP=${JSON.stringify(work + "/state")}`, `source ${JSON.stringify(join(here, "demo-env.sh"))} >/dev/null 2>&1`]
   .concat(steps.map((s) => `echo ${MARK}; ${s.cmd}`)).join("\n");
 const run = spawnSync("bash", ["-c", script], { encoding: "utf8" });
 const outs = run.stdout.split(MARK + "\n").slice(1).map((o) => o.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\n$/, ""));
@@ -51,7 +51,7 @@ body{margin:0;background:#1e1e2e;color:#cdd6f4;font:20px/1.45 Menlo,Monaco,monos
 .c{color:#6c7086}.g{color:#a6e3a1}.r{color:#f38ba8}.y{color:#f9e2af}.p{color:#89b4fa}
 .cur{background:#cdd6f4;color:#1e1e2e}</style><div class=t>${(lines.length ? lines : [""]).map((l, i, a) => `<div>${l || " "}${cursor && i === a.length - 1 ? '<span class=cur> </span>' : ""}</div>`).join("")}</div>`;
 
-const frames = []; // {file, dur}
+const frames = [];
 const frameDir = join(work, "frames"); mkdirSync(frameDir);
 let history = [];
 const emit = (lines, cursor, dur) => {

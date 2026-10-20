@@ -15,4 +15,4 @@ Without vhs, this replays the same `Type` lines from `demo.tape` using headless 
 node docs/demo/render-fallback.mjs
 ```
 
-To check the commands without rendering: `bash docs/demo/smoke.sh`.
+To print the demo output without rendering: `bash docs/demo/smoke.sh`. It does not assert anything; read the output.

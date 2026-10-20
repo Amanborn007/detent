@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Sourced by demo.tape. Builds a throwaway work repo and detent home, then defines `engine`.
+# Sourced by demo.tape. Builds a throwaway work repo and detent home, then defines `detent`.
 DEMO_SRC="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
 DEMO_TMP="${DEMO_TMP:-$(mktemp -d)}"
+[ -n "$DEMO_TMP" ] || return 1
 export DEMO_TMP
 mkdir -p "$DEMO_TMP"
 git init -q "$DEMO_TMP/repo"
 git -C "$DEMO_TMP/repo" -c user.email=demo@example.com -c user.name=demo commit -q --allow-empty -m init
 export DETENT_ROOT="$DEMO_TMP/home"
 mkdir -p "$DETENT_ROOT"
-engine() { node "$DEMO_SRC/engine/cli/engine.mjs" --repo "$DEMO_TMP/repo" "$@"; }
+detent() { node "$DEMO_SRC/engine/cli/engine.mjs" --repo "$DEMO_TMP/repo" "$@"; }
 # Engine prints one JSON line; show the three fields a human needs, with the temp path shortened.
 pj() {
   node -e '
@@ -23,7 +24,7 @@ pj() {
       console.log(JSON.stringify(o, null, 1));
     });'
 }
-# Provider/lens ON-OFF table from `engine pack validate`.
+# Provider/lens ON-OFF table from `detent pack validate`.
 packs() {
   node -e '
     let s = ""; process.stdin.on("data", d => s += d).on("end", () => {

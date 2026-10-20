@@ -58,7 +58,7 @@ loudly rather than pretending it ran.
 
 Resolve the pack once, before Phase 0: `pack.path` in `detent.user.yaml`,
 else `packs/example/stack.yaml` (relative paths resolve from the detent
-root). Run `engine pack validate` first and stop on a non-zero exit, reporting
+root). Run `detent pack validate` first and stop on a non-zero exit, reporting
 its `errors`. Read `review.lenses`, `knowledge.providers`, and `network` from
 it. If the file is missing, unparseable, or has no `review.lenses` list, stop and
 report the path and what is wrong. Never fall back to a built-in lens list. A

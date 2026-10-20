@@ -20,7 +20,7 @@ The hooks:
 | `deslop-check.sh` | PostToolUse, matcher `Bash` | After a `git push` with a code-ish diff vs main, nudge the agent to run referee's deslop lens (`/deslop`) to strip AI slop. |
 | `eval-gate.sh` | PostToolUse, matcher `Bash` | After a `git push`/`gh pr create` touching engine-eval-relevant paths, nudge the agent to run `engine eval --changed` and report the verdict on the PR. |
 | `comment-discipline.sh` | SessionStart **and** PostToolUse, matcher `Write\|Edit` | Inject the code-comment standard (minimal, why-only, ticket key instead of prose) once per agent — subagents get their own — so comments start short rather than getting stripped at review. |
-| `voice-discipline.sh` | SessionStart **and** PostToolUse, matcher `Write\|Edit` | Complement of the above, gated on prose files instead of code: re-inject the user's authored-prose voice (`.local/voice.md`) once per agent, so documents, runbooks and artifacts are written in their voice the first time rather than corrected turn by turn. |
+| `voice-discipline.sh` | SessionStart **and** PostToolUse, matcher `Write\|Edit` | Complement of the above, gated on prose files instead of code: re-inject the user's authored-prose voice once per agent, naming the file set by `voice.file` in `detent.user.yaml`, so documents, runbooks and artifacts are written in their voice the first time rather than corrected turn by turn. |
 
 ### settings.json snippet (ready to paste)
 

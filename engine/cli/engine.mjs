@@ -892,7 +892,7 @@ function cmdStep(label, flags) {
 // engine gate open <gate-id>
 // Renders a pending gate. Curator is integrated BY CONTRACT (blueprint D7):
 // if a `curator` executable is on PATH we write/refresh the gate artifact and
-// print the curator open+await commands; otherwise we print a terminal
+// print the curator open+poll commands; otherwise we print a terminal
 // fallback. This CLI never answers a decision — only a human does.
 // ---------------------------------------------------------------------------
 
@@ -1001,6 +1001,8 @@ function cmdGateOpen(gateId, flags) {
 
   const curator = curatorOnPath();
   if (curator) {
+    // curator open takes only a self-contained .html; the gate-request .json is not openable.
+    const html = join(detentRoot(), ".plans", `${runId}-${stage || "gate"}.html`);
     out({
       ok: true,
       run_id: runId,
@@ -1009,8 +1011,10 @@ function cmdGateOpen(gateId, flags) {
       gate_artifact: gateArtifact,
       ...(parkHandoff || {}),
       next_step:
-        `curator open ${gateArtifact} --playbook ${playbook} && curator await ${decision.id} --run-dir ${runDir}` +
-        ` — curator writes the human's answer into decisions.json; then re-run the refused engine command`,
+        `author ${html} with a data-plan-question="${decision.id}" block (stage SKILL), then ` +
+        `curator open ${html} && curator poll ${html}` +
+        ` — poll does not touch decisions.json: transcribe each {type:"decision", question:"${decision.id}", answer}` +
+        ` it returns into ${join(runDir, "decisions.json")} verbatim with answered_by:"human"; then re-run the refused engine command`,
     });
   }
   out({

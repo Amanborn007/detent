@@ -78,6 +78,7 @@ set +e
 RAW="$(printf '%s\n' "$PATTERNS" | grep -rinIF \
   --exclude-dir='.local' \
   --exclude-dir='.git' \
+  --exclude='.git' \
   --exclude-dir='node_modules' \
   -f /dev/stdin "$SCAN_DIR")"
 RC=$?
