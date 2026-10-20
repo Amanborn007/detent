@@ -42,7 +42,7 @@
 #   Window transitions:
 #   - New head SHA detected at a round check -> the window RESTARTS for the new
 #     commit (new_commit inbox line; fresh delay + round budget), up to
-#     $SENTINEL_AUTOSCAN_MAX_WINDOWS windows (default 10).
+#     $SENTINEL_AUTOSCAN_MAX_WINDOWS windows (default 12).
 #   - sentinel reports converged -> trusted ONLY if a WATCHED review bot
 #     (auto_address/escalate, not a human or coverage/CI bot) has commented at
 #     or after the window start (bots have actually reviewed THIS commit).

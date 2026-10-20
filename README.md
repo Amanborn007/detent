@@ -1,176 +1,322 @@
-# detent
+# Detent
 
-Detent is a Claude Code plugin that walks a ticket to a merged pull request in gated stages, and stops for a human at every decision.
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-c8501a.svg)](https://code.claude.com/docs/en/plugins)
+[![Version](https://img.shields.io/badge/version-0.11.0-informational.svg)](.claude-plugin/plugin.json)
 
-You give it a requirement or a ticket key. It researches, plans, implements, rechecks, ships a draft PR and handles the bot comments that arrive afterwards. Each stage ends at a gate. A gate is a decision you answer in a local browser page called curator, not in a wall of terminal text. Detent never merges. Creating tickets, the first push and the draft PR each wait for your approval.
+A Claude Code plugin that walks a ticket to a draft PR in stages and stops for you at the plan and ship gates. It never merges.
 
-Detent is two kinds of parts:
+Status: early, v0.11.0. Apache-2.0. See [Status](#status) for what is tested and what is not.
 
-- **Skills** are prompts that Claude loads when your intent matches, or when you type a slash command. They do the judgment work: research, drafting, summarizing.
-- **Tools** are small Node and shell programs (`engine`, `curator`, `sentinel`, `owl`, `detent`). They hold the state machine, the gates and the scans, so those run the same way every time.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/detent-architecture-dark.png">
+    <img alt="Detent architecture: you work in a Claude Code session whose skills and hooks drive the Detent engine; the engine keeps run state in plain files, renders gates to a local curator page for your approval, and reaches GitHub and your tracker through configured providers, while sentinel watches PR bot comments." src="docs/assets/detent-architecture.png" width="880">
+  </picture>
+</p>
 
-Your tracker, knowledge sources, reviewer and verifier are not built in. They plug in through **sockets**, which are command-line contracts you declare in a YAML file. The engine itself names no company and no vendor.
+Read the diagram from left to right. You work in a Claude Code session. Its skills and hooks call the engine, which keeps run state in plain files and reaches GitHub and your tracker through the providers you configure. Curator is the local page where you approve gates, and sentinel is the watcher that reads bot comments on your PR.
 
 ## What it does
 
-The engine runs seven stages. They group into four phases, and each phase ends at a gate you answer.
+You give detent a ticket or a requirement. It researches the change, writes a plan, and waits for you to approve the plan. Then it implements the plan in a git worktree, checks the diff against the plan, and stops again before it pushes. After you approve, it pushes a branch and opens a draft PR. Once you mark the PR ready, it triages the comments that review bots leave and fixes the ones your policy says to fix.
 
-| Phase | Stages | What happens |
-|---|---|---|
-| Explore | intake, research | Fetch the ticket, write a brief, search your knowledge sources and the repo, write `research.md` with a map of what the change could break. |
-| Plan | plan | Write the plan, check it against the brief in a fresh context, and render it in curator. You approve it before any code is written. |
-| Code | implement, recheck | Commit on a ticket-named branch in a disposable git worktree, using test-first steps. Then diff the result against the approved plan and file any drift as a decision. |
-| Commit | ship, respond | Run review and verification through your sockets, stop at a ship gate, push, and open a draft PR. The respond loop starts only after you mark the PR ready. It then triages bot comments on every push. |
+Detent is two kinds of parts:
 
-Run state lives in plain files under `.sdlc/<run-id>/`. You can read every one of them.
+- **Skills** are prompts that Claude loads when your intent matches or when you type a slash command.
+- **Tools** are small Node and shell programs: `detent`, `curator`, `sentinel`, `owl`. They hold the state machine, the gates and the PR scans, so those run the same way every time.
 
-### Skills
+Your tracker, knowledge sources, reviewer and verifier are not built in. You declare them as commands in a YAML file, and the engine calls them with JSON on stdin and reads JSON from stdout.
 
-| Skill | Trigger | What it does |
-|---|---|---|
-| clerk | `/clerk <requirement or ticket key>` | Turns a requirement in any shape into researched tickets. It lists the approaches with precedent, asks you to pick one, drafts the tickets, and creates them only after you approve. Given an existing ticket key, it compares what is built with what remains and creates only the missing delta. |
-| referee | automatic on push, or `/referee` | Reviews a PR diff. On your own PR it proposes fixes behind an approval gate. On someone else's PR it only drafts comments. Nothing is posted without your approval. |
-| scout | automatic in the research stage | Sends one question to every knowledge provider you have wired in, plus the repo's own docs, and returns one ranked brief with the source of each claim. |
-| scribe | `/scribe` | Reads a thread (Slack, email, Jira, GitHub, Confluence) and recent history on that channel, then drafts a reply in the format that surface needs. It never sends. |
-| herald | `/herald` or `detent herald` | Builds the morning brief: owl results, open PRs that need action, active engine runs, and tracker, mail and chat items if those connectors are available. It is rendered as a curator page. |
-| owl | `/owl <objective>` | Starts an unattended loop in a separate shell process. It confirms the caps with you first, then commits one small verified step per iteration and stops at a hard limit. |
-| curator | automatic for long output | Renders a plan, comparison or report as a self-contained HTML page and reads your annotations and decisions back as JSON. |
-| sentinel | automatic after a push | Reads every bot comment on a PR and sorts each one into auto-address, ignore or escalate, according to a JSON policy file. It only reads. It never posts or replies. |
-| courier | automatic, or `detent courier` | Lets a headless step ask for data that only an interactive session can reach (for example a chat or drive connector). Your interactive session reads it and hands it back. Detent stores no credentials for this. |
-| deslop | `/deslop [PR]` | Reviews your own diff for AI-written slop: restating comments, defensive try/catch on trusted paths, casts to `any`, and style drift. It proposes removals and never edits on its own. |
-| examiner | `/examiner <subject>` | Asks you every open question about a plan in one curator round. Each question carries a recommended answer and what breaks if it is wrong. Only you can invoke it. |
+## What runs without asking you
 
-Sentinel is implemented as a tool and a hook, not a skill. It is listed here because it sits in the same loop.
+Most of detent waits for you. These parts do not:
+
+- **Hooks run on their own.** After `git push`, `gh pr create` or `gh pr ready` on a branch with an open PR, `sentinel-autoscan.sh` asks the session to run a referee review and, for a non-draft PR, starts a detached read-only scanner. Other hooks add reminders to the model's context or keep a turn open. See [Hooks](#hooks).
+- **After a PR is ready, fixes need no per-item approval.** The respond stage, and the `sentinel-inbox-check` Stop hook that keeps its loop running, push fixes and reply to and resolve bot threads. They stop at the round cap in the sentinel config, 10 by default. This works even when no engine run exists.
+- **Curator is a local web server.** It binds `127.0.0.1` on a random port and stops after 60 minutes idle.
+
+Detent has no telemetry. It never merges: nothing in the repo calls `gh pr merge`. Set the kill switches under [Hooks](#hooks) to turn the automatic parts off.
+
+## Requirements
+
+- Claude Code with plugin support. No minimum version is pinned.
+- Node.js 20, `git`, `bash`, `jq`, `python3` and `npm`.
+- The GitHub CLI `gh`, signed in with `gh auth login`.
+- Optional MCP connectors in your Claude Code session: Atlassian for clerk, Slack, Gmail and Jira for herald and scribe.
+
+`python3` is needed because `curator open` runs a page check with it. `npm` is needed once, for the install script.
 
 ## Install
 
-Detent installs from its own plugin marketplace. Inside Claude Code:
+Install the plugin from inside Claude Code, then restart it:
 
 ```
 /plugin marketplace add Amanborn007/detent
 /plugin install detent@detent
 ```
 
-The marketplace name and the plugin name are both `detent`, from `.claude-plugin/marketplace.json` and `.claude-plugin/plugin.json`. Restart Claude Code after installing.
-
-The plugin gives you the skills and the hooks. It cannot put programs on your `PATH` or export an environment variable. For that, clone the repo and run the shell script once:
+The plugin gives you the skills and the hooks. It cannot put programs on your `PATH` or set an environment variable, so clone the repo and run the install script once:
 
 ```sh
 git clone https://github.com/Amanborn007/detent && cd detent
 scripts/detent-install.sh
 ```
 
-The script links `curator`, `engine` and `detent` onto your `PATH`, adds `DETENT_ROOT` to your shell profile, and copies `detent.user.example.yaml` to `detent.user.yaml`. It does not edit `~/.claude/settings.json`. It is safe to run again.
+The script links `curator` and `detent` onto your `PATH`, adds `DETENT_ROOT` and a `detent-upgrade` alias to your shell profile, and copies `detent.user.example.yaml` to `detent.user.yaml`. It does not edit `~/.claude/settings.json`, and it is safe to run again. There is no `engine` command on your `PATH`. Use `detent <command>`, or `node engine/cli/engine.mjs <command>` from the clone.
 
-To check the result:
+Open a new shell, then check the result:
 
 ```sh
-node engine/cli/engine.mjs help     # prints a usage line as JSON, exits 0
-curator status                      # an empty list is correct on a fresh install
+detent help
+curator status
+detent sentinel config-check --config config/sentinel/default.json
 ```
 
-To update, run `detent-upgrade`. It fast-forwards the clone, re-links the programs and updates the plugin. The plugin cache and the clone are separate copies, so both have to move to the same commit.
+Run `detent-upgrade` to update. It fast-forwards the clone and updates the plugin. Add `--reinstall` to reinstall the plugin. Without `DETENT_ROOT`, hook state lands in the plugin cache, so run the install script before you rely on the hooks.
 
-## Requirements
+## Quickstart
 
-- Claude Code with plugin marketplace and hook support. No minimum version is pinned yet.
-- Node.js 20.
-- `git` and `bash`.
-- The GitHub CLI (`gh`), signed in with `gh auth login`. Sentinel, referee, herald and the PR-aware hooks use it.
-- Optional: connectors for your tracker, mail and chat. Clerk, scribe and herald use whichever ones your Claude Code session already has.
+Skills are namespaced by the plugin, so you type them as `/detent:<skill>`. Fill in `detent.user.yaml` first: at least `user.name` and `user.email`, because herald stops without them.
+
+**Review a PR.** This needs a review skill named in the pack, see [Configuration](#configuration).
+
+```
+/detent:referee https://github.com/your-org/your-repo/pull/123
+```
+
+On your own PR, referee shows its findings and a fix plan, and changes nothing until you approve. On someone else's PR it drafts inline comments and posts them only after you approve the plan. Add `--describe` to get the review as a curator page. `/detent:deslop` runs without a pack entry.
+
+**Look at a plan.** Ask Claude to render any plan, comparison or report in curator, or open a page yourself:
+
+```sh
+detent curator open "$DETENT_ROOT/.plans/my-plan.html"
+detent curator poll "$DETENT_ROOT/.plans/my-plan.html"
+```
+
+`open` checks the page with `engine/curator/scripts/artifact-check.py` and refuses a page that fails. `poll` waits and prints your clicks and annotations as JSON.
+
+**Drive a run.** Copy `engine/stack.example.yaml` to `stack.yaml` in your work repo and wire at least the `ticket` socket, then:
+
+```sh
+detent run new --ticket owner/repo#12 --repo ~/code/your-repo
+detent next --repo ~/code/your-repo
+```
+
+`run new` creates the run directory and a worktree on branch `sdlc/<run-id>`. `next` prints the command to run next. Then ask Claude to follow `engine/stages/<stage>/SKILL.md` for that run id, and run `detent next` again after each stage. `detent dashboard` lists every run. `owner/repo#12` assumes the built-in `gh-ticket` adapter. These commands need a real install and a real ticket, so they are not run in this repo's CI.
+
+## How a run works
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/detent-pipeline-dark.png">
+    <img alt="Detent stage pipeline: intake, research, plan, implement, recheck, ship and respond, with your approval required at the plan gate and the ship gate, and the respond loop driven by sentinel scans." src="docs/assets/detent-pipeline.png" width="880">
+  </picture>
+</p>
+
+A run has seven stages: intake, research, plan, implement, recheck, ship and respond. `detent stage begin` refuses to start a stage while an earlier one is not done or skipped, or while a pending decision blocks it. `detent stage end` refuses to finish a stage whose required artifact is missing.
+
+| Stage | Required artifact | What happens |
+|---|---|---|
+| intake | `brief.md` | Fetch the ticket through the `ticket` socket and write the brief. Each open question becomes a pending decision. |
+| research | `research.md`, `access-report.json` | Ask the knowledge providers and the repo, and name any source that could not be reached. |
+| plan | `plan/plan.md` | Write the plan and render it in curator for your approval. |
+| implement | none | Commit test-first steps on `sdlc/<run-id>` in a worktree. Does not push. |
+| recheck | `recheck.md` | Compare the diff with the approved plan. Drift becomes a decision. |
+| ship | none | Run review and verification through your sockets, then ask before the first push and the draft PR. |
+| respond | none | After you mark the PR ready, run sentinel scans and handle bot comments. |
+
+**Which gates the engine enforces.** The CLI enforces one gate itself: the plan `intent` gate, with the answers `approve` or `revise`. The drift gate (accept, back to plan, back to implement) and the ship gate are rules in the stage prompts. The agent records them as pending decisions in `decisions.json`, and a pending decision blocks the stages it names. A prompt can be followed badly, so read each gate before you answer it. Recheck also checks that the recorded red commit is an ancestor of the green commit. That proves the order of the commits, not that the test was seen to fail.
+
+**How you answer a gate.** The plan stage renders `.plans/<run-id>-plan.html`. `curator open` shows it, `curator poll` collects your clicks, and the answer is copied into `decisions.json` word for word. Without curator you can edit `decisions.json` by hand.
+
+**Run state.** Each run lives in `${DETENT_ROOT}/.sdlc/<date>-<ticket>[-slug]/` with `run.json`, `stage-status.json`, `decisions.json`, `events.jsonl`, `gates/`, `handoff/` and `worktree/`. Run ids never change, so a re-run is a new run. Every command prints one JSON line with a `next_step`. Exit 0 is ok, 1 is a provider or environment failure, and 2 is a refusal with a `reason`.
+
+[GUIDE.md](GUIDE.md) has the stage details. `engine/stages/WALKTHROUGH.md` traces a fictional ticket through all seven.
 
 ## Configuration
 
-There are two files.
+Three files wire detent up. They are separate files, and mixing them up is the most common setup error.
 
-**`detent.user.yaml`** holds values that belong to you: name, email, GitHub login, your teams, your tracker account, a path to a file of writing-voice rules, and the GitHub org that clerk searches for precedent. Copy it from `detent.user.example.yaml`. It is gitignored. If you leave the GitHub login empty, detent reads it from `gh api user`.
+| File | Lives in | Read by | Holds |
+|---|---|---|---|
+| `detent.user.yaml` | the clone, gitignored | skills and hooks | You: name, email, GitHub login, teams, voice file, org, pack path. |
+| Provider pack | `packs/example/stack.yaml`, or the file named by `pack.path` | referee, scout and other skills | Knowledge providers, review lenses, incident and analytics hooks, network check. |
+| Engine `stack.yaml` | your work repo, or `--stack <path>` | the engine CLI | A top-level `sockets:` map of commands. Start from `engine/stack.example.yaml`. |
 
-**A provider pack** tells the engine which programs fill each socket. The example is `packs/example/stack.yaml`. Copy it to `stack.yaml` in your work repo (or pass `--stack <path>`) and replace the commands with your own. The sockets are:
+**`detent.user.yaml`** comes from `detent.user.example.yaml`. The install script creates it. An empty `github_login` is read from `gh api user`.
 
-| Socket | Used by | What the provider does |
-|---|---|---|
-| `ticket` | intake | Fetch a work item and return normalized JSON. |
-| `knowledge` | research | Search one source. You can list several. The engine merges the results. |
-| `skill-discovery` | plan | Find skills or playbooks that apply to the task. |
-| `reviewer` | ship | Return extra findings, each with an action and a risk level. |
-| `verifier` | ship | Run tests and capture end-to-end evidence. A pass with no evidence is rejected. |
-| `bot-comments` | respond | List PR comments and tag bot or human. |
-| `skills-pack` | assembly | Add stages from a team-owned pack. |
-| `incident` | after merge | Read-only investigation hook. |
-| `deploy-harness` | on request only | Deploy to a real environment and test there. Never automatic. |
+```yaml
+user:
+  name: ""
+  email: you@example.com
+  github_login: ""
+voice:
+  file: null
+org:
+  github_owner: your-org
+pack:
+  path: null
+```
 
-A socket you leave out is off. The engine refuses a command that needs it and names the socket. A skill that depends on one says which provider is missing and what it skipped. It does not guess.
+**The provider pack** turns features on or off. A null field turns that feature off, and the skill that needs it says so in one line. Check the pack with `detent pack validate`, which lists what is on and off. It exits 2 and lists `errors[]` when the pack is invalid.
 
-Every provider is a command that reads one JSON request on stdin and writes one JSON response on stdout. Exit 0 is success, 1 is a provider failure (retried once, then shown to you), 2 is a contract violation (the stage stops and asks you). Contracts are in `engine/sockets/`. Reference adapters for GitHub issues, repo docs and GitHub bot comments are in `engine/adapters/`.
+```yaml
+review:
+  lenses:
+    - {id: cross-system, kind: skill, skill: null, probe: {provider: org-kb, required_corpus: services}}
+    - {id: principal, kind: skill, skill: null}
+    - {id: deslop, kind: builtin}
+```
 
-**Name a review skill.** In `packs/example/stack.yaml` the `principal` lens has `skill: null`, so referee has no review of record and stops until you set it. Put the name of any PR-review skill you have installed in that field. `/deslop` and `referee --lens deslop` run without it.
+The example pack ships with `skill: null` on both the `cross-system` and `principal` lenses, so referee has no reviewer until you name a PR-review skill in one of them. The `org-kb` knowledge provider in the example is a placeholder for your own MCP server.
 
-Sentinel's bot policies are in `config/sentinel/default.json`. It covers common review bots such as `claude[bot]`, CodeRabbit, Semgrep, Codecov and Dependabot. Copy it and adjust the logins and policies for the bots your org runs.
+**The engine `stack.yaml`** binds sockets to commands. The sockets are `ticket`, `knowledge`, `skill-discovery`, `reviewer`, `verifier`, `bot-comments`, `skills-pack`, `incident` and `deploy-harness`. A socket you leave out is off, and a command that needs it refuses and names it.
 
-## What it runs, reads and sends
+```yaml
+sockets:
+  ticket:
+    command: "/path/to/detent/engine/adapters/gh-ticket"
+    version: "builtin"
+  bot-comments:
+    command: "/path/to/detent/engine/adapters/gh-bot-comments"
+    version: "builtin"
+```
 
-Detent ships no telemetry. It makes no network call of its own to any detent-run service.
+A command provider reads one JSON request on stdin and writes one JSON response on stdout. Exit 1 is retried once, then shown to you. A `providers:` list under a socket fans out to every entry and merges the results. A provider with `kind: skill` or `kind: mcp_tool` makes the engine print an instruction for the agent, because the CLI cannot call a skill or an MCP tool itself. Use absolute paths for adapters. A relative path resolves against the directory of your `stack.yaml`, so it fails in a work repo. The `version` field records the contract you wrote against, and the engine does not check it. If the engine says `has no 'sockets:' map`, you pointed it at the pack. Socket contracts are in `engine/sockets/`.
 
-**Hooks.** The plugin registers these through `hooks/hooks.json`. Most of them only add a reminder to the model's context or hold a stop open. Nothing here runs a program that changes your repo.
+Sentinel's bot policies are in `config/sentinel/default.json`: six bots, each with a policy of `auto_address`, `ignore` or `escalate`, and `max_iterations` of 10. Copy it and change the logins for the bots your org runs.
 
-| Event | Hook | What it does |
-|---|---|---|
-| SessionStart | `morning-brief-session.sh` | On the first session of a day, adds a one-line nudge to offer the brief. |
-| SessionStart, after Write or Edit | `comment-discipline.sh`, `voice-discipline.sh` | Remind the model of your comment and writing rules. |
-| After Bash | `sentinel-autoscan.sh` | After `gh pr create`, `gh pr ready` or `git push` on an open PR, starts a detached read-only scanner and asks for a referee review. |
-| After Bash | `eval-gate.sh`, `deslop-check.sh` | After a push, remind the model to run `engine eval --changed` or `/deslop`. |
-| After ExitPlanMode | `curator-reminder.sh` | Reminds the model to render the approved plan in curator. |
-| After Write or Edit | `curator-md-nudge.sh` | Suggests curator when a large markdown file is written. |
-| Stop | `curator-pending-feedback-check.sh`, `curator-stop-check.sh` | Keep the turn open when curator feedback is waiting or a review was never rendered. |
-| Stop | `courier-autofulfill.sh`, `referee-owed-check.sh`, `sentinel-inbox-check.sh` | Surface pending courier reads, owed PR reviews and unread scanner rounds. |
+## Skills
 
-Set `PR_AUTOREVIEW=off`, `REFEREE_AUTOREVIEW=off` or `SENTINEL_AUTOSCAN=off` to turn off the PR hooks. The hooks that need curator turn themselves off when it is not installed or when the session is a background job.
+Ten skills ship in the plugin. Four are slash-only and Claude never loads them by itself: clerk, examiner, herald and owl.
 
-**Network.**
+| Skill | Invoke | What it does | Writes or sends | Gated |
+|---|---|---|---|---|
+| clerk | `/detent:clerk <requirement or ticket key>` | Checks which sources it can reach, researches precedent, lists approaches, drafts tickets. Given an existing ticket it creates only what is missing. | Jira tickets through your Atlassian connector. Curator pages. Then `detent run new` for each key. | Yes. You approve the approach, then the ticket set. |
+| scout | automatic in research, or ask | Sends one question to every knowledge provider in the pack plus the repo docs, and returns one ranked brief with a source for each claim. | Nothing outside the session. | No, read-only. |
+| referee | automatic after push, or `/detent:referee <PR>` | Reviews a PR through the lenses the pack enables. Author mode plans fixes. Reviewer mode drafts comments. | Review comments on GitHub, or local fixes on your own branch. | Yes. Nothing posts or changes until you approve. |
+| deslop | `/detent:deslop [PR]` | Finds restating comments, defensive try/catch on trusted paths, casts to `any` and style drift in your own diff. | Proposals only, through referee's checkpoint. | Yes. It never edits on its own. |
+| scribe | `/detent:scribe` or ask for a reply | Reads a thread and the recent history of its channel, then drafts a reply for that surface. | A draft in Slack or Gmail, or text to paste. Never sends. | Draft only. |
+| herald | `/detent:herald [-N]` | Builds the morning brief from owl results, open PRs, engine runs, and tracker, mail and chat if connected. | `.plans/morning-brief-<date>.html` and `.local/brief-state.json`. | Items you mark Act start work. |
+| owl | `/detent:owl <objective>` | Runs an unattended loop in a separate process, one small verified step per iteration. | Commits on `owl/<slug>` and state in `<repo>/.owl/`. Never pushes. | You confirm the caps first. |
+| curator | automatic for long output | Renders a plan or report as a self-contained page and returns your clicks as JSON. | Pages in `.plans/`. State in `~/.curator`. | It is the gate surface. |
+| courier | automatic, or "fulfill reads" | Lets a headless step ask for data that only an interactive session can reach. Your session reads it and hands it back. | Requests in `.local/reads/`. | No. Detent stores no credentials. |
+| examiner | `/detent:examiner <subject>` | Asks every open question about a plan in one curator round, each with a recommended answer and what breaks if it is wrong. | Answers, in `decisions.json` when inside a run. | You answer each question. |
 
-- `gh` calls to the GitHub API. Sentinel, herald and the autoscan hook use it read-only: pull request state, comments and review threads. The respond stage is the one place that writes without a per-item gate: after you mark a PR ready, it can push fixes and reply to and resolve bot threads, up to the round cap in the sentinel config (10 by default).
-- Curator is a local server on `127.0.0.1`. It refuses requests with a non-local `Host` header.
-- Owl and the optional eval judge start `claude -p`. That is your own Claude Code install talking to Anthropic under your own login.
-- Provider commands in your `stack.yaml` do whatever you wrote them to do.
-- Clerk, scribe, herald and courier use the connectors already attached to your Claude Code session. Detent stores no tokens for them.
+Sentinel is a tool and a hook, not a skill. It sits in the same loop.
 
-**What goes where.** Jira, Slack, GitHub and email content is read only through the tools you have connected. Clerk creates tickets only after the ticket gate, referee posts review comments only after you approve the comment plan, and the first push and draft PR wait for the ship gate. Scribe only produces a draft or paste-ready text. The respond loop, described above, is the exception to per-item approval. Thread, ticket and PR text is treated as untrusted data and is never followed as an instruction.
+## Tools and CLI
 
-**What it writes on disk.**
+`detent` is the one command. It sends `curator`, `sentinel`, `owl`, `herald`, `courier` and `feedback` to their own programs and everything else to the engine.
 
-| Path | Contents |
+| Command | What it does |
 |---|---|
-| `.sdlc/<run-id>/` in the clone | One run: brief, research, decisions, stage status, event log. |
-| `.plans/` in the clone | Curator pages. |
-| `.local/` in the clone | Gitignored. Sentinel inbox, team profiles, voice file, courier requests, brief state. |
-| `.owl/` in a work repo | Owl logs and notes. Never committed by the loop. |
-| `~/.curator`, `~/.sentinel` | Curator session state and sentinel's list of comments it has seen. |
+| `detent run new --ticket <ref> --repo <path>` | Create a run and its worktree. |
+| `detent next` | Print the exact next command for the run. |
+| `detent stage begin <stage>`, `detent stage end <stage>` | Move a stage, with the checks above. |
+| `detent gate open <id>` | Render a pending gate. |
+| `detent socket call <name>` | Call one socket by hand. |
+| `detent dashboard`, `detent live <run-id>` | One curator page of all runs, or a live view of one run. |
+| `detent respond --pr <url>` | Arm the respond stage on an open PR with no ticket. |
+| `detent eval`, `detent bench`, `detent spend` | Evals, run timing, and measured Claude Code cost. |
+| `detent pack validate` | Check the provider pack. |
+| `detent sentinel scan --pr <url>` | One read-only scan of a PR. |
+| `detent curator open\|check\|poll\|drain\|reply\|log\|answer\|end\|status` | The review surface. |
 
-Owl never passes a permission-bypass flag. It runs under a scoped settings profile, owns git itself, rolls back a failed iteration, and stops at the iteration cap, the wall-clock cap (300 minutes by default), or three failures in a row.
+`detent help` lists the umbrella commands. `node engine/cli/engine.mjs help` prints the engine's commands as JSON. [GUIDE.md](GUIDE.md) covers all of them.
+
+## Hooks
+
+The plugin registers 15 hook entries that run 13 scripts, listed in `hooks/hooks.json`. Nine of the scripts stand down inside Claude Code background jobs (`CLAUDE_JOB_DIR`), and `comment-discipline`, `deslop-check` and `eval-gate` also stand down inside owl runs (`OWL_RUN`). `sentinel-autoscan` runs in both.
+
+| Event | Scripts | What they do |
+|---|---|---|
+| SessionStart | `morning-brief-session.sh` | On the first session of a day, offer the brief. |
+| SessionStart, and after Write or Edit | `comment-discipline.sh`, `voice-discipline.sh` | Remind the model of your code-comment rules and your writing voice. |
+| After Bash | `sentinel-autoscan.sh` | After a push, `gh pr create` or `gh pr ready` on an open PR, request a referee review and start a scanner for non-draft PRs. |
+| After Bash | `eval-gate.sh`, `deslop-check.sh` | After a push, remind the model to run the evals or `/detent:deslop`. |
+| After ExitPlanMode | `curator-reminder.sh` | Remind the model to render the approved plan in curator. |
+| After Write or Edit | `curator-md-nudge.sh` | Suggest curator when a large markdown file is written. |
+| Stop | `curator-pending-feedback-check.sh`, `curator-stop-check.sh` | Hold the turn open while curator feedback waits or a review was never rendered. |
+| Stop | `courier-autofulfill.sh`, `referee-owed-check.sh`, `sentinel-inbox-check.sh` | Surface pending reads, owed reviews and unread scanner rounds. |
+
+The scanner waits 330 seconds, then scans every 300 seconds for up to 8 rounds. A new head commit restarts the window, up to 12 windows. Results go to `.local/inbox/<owner>__<repo>__pr<N>/respond-inbox.jsonl`, and the log is `sentinel-autoscan.log` in the same folder. Draft PRs get a referee review but no scanner.
+
+Kill switches, each set to `off`: `PR_AUTOREVIEW`, `REFEREE_AUTOREVIEW`, `SENTINEL_AUTOSCAN`, `EVAL_GATE`, `DESLOP`, `VOICE_DISCIPLINE` and `MORNING_HERALD_SESSION`. [hooks/README.md](hooks/README.md) has the rest of the environment variables.
+
+## Safety model
+
+- **Gated:** clerk creating tickets, referee posting comments, the first push and the draft PR (the ship gate), and owl's caps, which you confirm before it starts.
+- **Not gated per item:** once a PR is non-draft, the respond stage and the `sentinel-inbox-check` Stop hook push fixes and reply to and resolve bot threads, up to the round cap, with or without an engine run.
+- **Never:** merging. Sentinel only reads. Scribe only drafts.
+- **Untrusted text:** ticket, thread and PR text is data. A skill reads it and does not follow instructions found in it.
+- **Owl:** runs under `--permission-mode dontAsk` with a settings profile and refuses a profile that sets `bypassPermissions`. The agent is denied `git commit` and `git push`. Owl commits for itself and never pushes. The default profile allows `node *` and `npm run*`, so read it before an unattended run. It stops at 8 iterations or 300 minutes, or after 3 failures in a row, unless you set other caps.
+- **Curator:** binds `127.0.0.1` and answers 403 to any other `Host` header.
+- **Network:** `gh` calls to GitHub, plus `claude -p` from owl and the optional eval judge. Your own provider commands do what you wrote them to do. Connectors come from your Claude Code session, and detent stores no tokens.
+
+Report a vulnerability through [SECURITY.md](SECURITY.md).
+
+## Evals and the leak gate
+
+`detent eval` scores the repo's agent-facing behavior against `evals/baseline.json`. There are seven suites: `context-adherence`, `sentinel-golden`, `clerk`, `scout`, `referee`, `scribe` and `self-feedback`. The verdict is `UPGRADE`, `NEUTRAL` or `DEGRADE`, with a variance band of 0.05. The gate in `evals/config.yaml` is in `blocking` mode and arms after 5 green baseline runs are on record. A deterministic check that passed in the baseline and fails now blocks at once.
+
+```sh
+detent eval --changed --no-judge     # what CI runs
+detent eval --rebaseline --no-judge  # after an intended change, then commit the baseline
+```
+
+The leak gate keeps company names and ticket keys out of the repo. `engine/scripts/company-strings-check.sh` greps for strings in `engine/.local/denylist.txt`, which you keep out of git. CI writes that file from the `LEAK_DENYLIST` secret, and a fork PR fails closed with exit 2 because it cannot read the secret. CI also runs gitleaks. [CONTRIBUTING.md](CONTRIBUTING.md) shows how to run the check yourself.
+
+## Where things live
+
+```
+.claude-plugin/    plugin and marketplace manifests
+skills/            the ten skills
+hooks/             hooks.json and the hook scripts
+engine/
+  cli/             detent.mjs and engine.mjs
+  stages/          stage prompts and CONTRACT.md
+  sockets/         socket contracts
+  adapters/        gh-ticket, repo-docs-knowledge, gh-bot-comments
+  curator/ sentinel/ owl/ herald/ courier/
+  eval/ bench/ spend/ routing/ handoff/ scout/ self-feedback/ pack/ sources/
+  scripts/         leak-gate script
+packs/example/     the example provider pack
+config/sentinel/   default bot policies
+evals/             cases, config and baseline
+docs/  scripts/  benchmarks/  teams/  lexicon/
+```
+
+Runtime state stays out of git. Runs are in `.sdlc/`, curator pages in `.plans/`, and sentinel inbox, team profiles, courier reads and brief state in `.local/`, all under the clone. Owl keeps `.owl/` in the work repo. Curator keeps `~/.curator` and sentinel keeps `~/.sentinel`.
+
+## Troubleshooting
+
+- **`curator open` fails.** Curator needs to bind `127.0.0.1` and needs `python3` on your `PATH`. A page that fails the check is refused, and `CURATOR_NO_CHECK=1` opens one unchecked.
+- **`pack validate` exits 2.** Read `errors[]`. Each entry names a path and a field.
+- **`has no 'sockets:' map`.** You gave the engine the provider pack. Point `--stack` at an engine `stack.yaml`.
+- **`spawn failed` from a provider.** Use an absolute path to the command.
+- **Hooks write state in the plugin cache.** `DETENT_ROOT` is not set. Run `scripts/detent-install.sh` and open a new shell.
+- **No scanner after a push.** Check `gh auth status`, then whether the PR is a draft, then `sentinel-autoscan.log`.
+- **A skill says a provider is missing.** The pack or `stack.yaml` has no entry for it. The skill says what it skipped.
 
 ## Status
 
-This is early software. Here is what has and has not been checked.
+This is early software. Here is what is and is not checked.
 
-| Part | State |
-|---|---|
-| `engine`, `sentinel`, `eval`, `herald`, `courier`, `routing`, `spend` | Unit tests in the repo (`node --test`). |
-| `curator` | Unit tests in the repo. Some of its server tests need to bind a local port. |
-| `owl` | Tested only against a stub `claude` binary. It has not been run against the real one. Treat it as experimental. |
-| Hooks | Shell tests in `hooks/tests/`. The autoscan hook has been tested with stubbed `gh` output and not against a live PR in this repo. |
-| Skills | Checked by a deterministic eval suite (frontmatter, kill switches, self-contained pages) and an optional model judge. Their behavior in long real sessions is not measured. |
-| Stages `plan`, `implement`, `recheck`, `ship`, `respond` | Written as prompts and a state machine. They have not been run end to end on a public project. |
-| Provider pack | `packs/example/stack.yaml` is a template. The engine reads it with a small built-in YAML parser that handles only the shapes in the example. |
+- **In CI** (`.github/workflows/eval.yml`): `detent eval --changed --no-judge`, and unit tests for `engine/eval`, `engine/self-feedback`, the curator artifact check and the curator CLI gate. A judge job runs only with an `ANTHROPIC_API_KEY` secret and is advisory. The leak gate runs in `leak-gate.yml`.
+- **Not in CI:** the engine CLI tests, sentinel tests, hook tests, adapter smoke tests and the owl tests. They exist in the repo and are listed in [CONTRIBUTING.md](CONTRIBUTING.md). Run them before you push.
+- **Owl** is tested against a stub `claude` binary, not the real one.
+- **The autoscan hook** is tested with stubbed `gh` output, not against a live PR in this repo.
+- **The stages** are prompts plus a state machine. They have not been run end to end on a public project.
+- **Known gaps.** The stage prompts in `engine/stages/` are not registered as plugin skills, so you point Claude at them by path. Two hook files, `hooks/cold-resume-warn.mjs` and `hooks/session-cost-statusline.mjs`, are on disk but not wired in `hooks.json`, and eval case S1-11 fails because of it.
 
-A worked example is coming. It will be a full run on a small public repo, with the run directory committed so you can read each artifact.
+A worked example is planned: a full run on a small public repo, with the run directory committed.
 
-## More
+## Credits
 
-- [GUIDE.md](GUIDE.md): day-to-day recipes, the stage details, writing a pack, evals and the leak gate.
-- [engine/README.md](engine/README.md): the sockets and the engine design.
-- [hooks/README.md](hooks/README.md): each hook and its environment switches.
-- [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+The staged pipeline, the visual plan review and the long-run safeguards are inspired by MIT-licensed tools by Kun Chen: no-mistakes, lavish-axi and gnhf. No code was copied. See [engine/NOTICE.md](engine/NOTICE.md).
 
-## License
+## Contributing, security and license
 
-Apache License 2.0. See [LICENSE](LICENSE).
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before a pull request and [SECURITY.md](SECURITY.md) to report a problem. More depth is in [GUIDE.md](GUIDE.md), [engine/README.md](engine/README.md) and [hooks/README.md](hooks/README.md). Detent is licensed under Apache 2.0, see [LICENSE](LICENSE).

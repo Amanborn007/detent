@@ -22,7 +22,7 @@ Contents:
 
 You bring work in any shape: a raw requirement, or an existing ticket. **clerk** turns a raw requirement into tickets. The **engine** takes one ticket through seven stages (intake, research, plan, implement, recheck, ship, respond) and ends with a draft PR that has been reviewed and checked.
 
-Every decision stops at a **gate**. A gate is a question with options, written to a file and rendered in **curator**, a local browser page where you click an option or annotate text. Your answer comes back as JSON. If curator is not installed, the engine prints how to answer by editing `decisions.json` by hand. The engine never answers a gate for you.
+Decisions stop at a **gate**. A gate is a question with options, written to `decisions.json` and rendered in **curator**, a local browser page where you click an option or annotate text. Your answer comes back as JSON. If curator is not installed, the engine prints how to answer by editing `decisions.json` by hand. The engine never answers a gate for you. Not every stage has one, and the engine itself enforces only the plan gate. Section 3 lists which gates are in code and which are rules in the stage prompts.
 
 Three rules hold everywhere:
 
@@ -42,16 +42,22 @@ cp detent.user.example.yaml detent.user.yaml   # skip if the install script alre
 
 Open `detent.user.yaml` and fill in your name, email, GitHub login, teams and tracker account. Leave the GitHub login empty if you want detent to read it from `gh api user`.
 
-Pick a provider pack. Copy `packs/example/stack.yaml` to `stack.yaml` in the repo you will work on, and replace each command with a program you have. If you have nothing yet, start with only the built-in adapters:
+Two more files wire detent up. They are separate, and `detent.user.yaml` points at only one of them.
 
-- `engine/adapters/gh-ticket` for the `ticket` socket (a GitHub issue).
-- `engine/adapters/repo-docs-knowledge` for the `knowledge` socket (grep over the repo's own docs).
-- `engine/adapters/gh-bot-comments` for the `bot-comments` socket.
+- The **provider pack** (`packs/example/stack.yaml` by default, or the file named by `pack.path` in `detent.user.yaml`) tells the skills which knowledge providers, review lenses and network check you have. Check it with `detent pack validate`.
+- The **engine stack file** is a `stack.yaml` with a top-level `sockets:` map. Copy `engine/stack.example.yaml` to `stack.yaml` in the repo you will work on, and replace each command with a program you have. The engine reads it from `<repo>/stack.yaml`, `<repo>/engine/stack.yaml` or the path in `--stack`. Do not copy the pack file here, because it has no `sockets:` map and the engine refuses it.
+
+If you have nothing yet, start with only the built-in adapters, and give each `command` as an absolute path. A relative path resolves against the directory of your `stack.yaml`, so `engine/adapters/gh-ticket` fails in a work repo.
+
+- `/path/to/detent/engine/adapters/gh-ticket` for the `ticket` socket (a GitHub issue).
+- `/path/to/detent/engine/adapters/repo-docs-knowledge` for the `knowledge` socket (grep over the repo's own docs).
+- `/path/to/detent/engine/adapters/gh-bot-comments` for the `bot-comments` socket.
 
 Leave the other sockets out. Check that everything is wired:
 
 ```sh
-node engine/cli/engine.mjs help          # one JSON line, exit 0
+detent help                              # the umbrella command's usage, exit 0
+detent pack validate                     # lists which providers and lenses are ON or OFF
 curator status                           # empty list on a fresh install
 node engine/sentinel/sentinel.mjs config-check --config config/sentinel/default.json
 ```
@@ -60,7 +66,9 @@ node engine/sentinel/sentinel.mjs config-check --config config/sentinel/default.
 
 ## 3. The stages and gates
 
-The engine runs seven stages in order. `engine stage end` refuses to finish a stage whose artifact is missing or whose gate is still pending. `engine next` always prints the command that moves the run forward.
+The engine runs seven stages in order. `detent stage begin` refuses to start a stage while an earlier stage is not done or skipped, or while a pending decision blocks it. `detent stage end` refuses to finish a stage whose artifact is missing or whose plan gate is still pending. `detent next` always prints the command that moves the run forward.
+
+The CLI enforces one gate itself, the plan `intent` gate (approve or revise). The drift gate and the ship gate are rules in the stage prompts under `engine/stages/`. The agent records them as pending decisions in `decisions.json`, and a pending decision blocks the stages it names. Recheck also checks that the recorded red commit is an ancestor of the green commit. That proves order only, not that the test was seen to fail.
 
 | Stage | Reads | Writes | Gate |
 |---|---|---|---|
@@ -121,7 +129,7 @@ Every engine command prints one JSON line with a `next_step`. Do what it says, t
 detent gate open <gate-id> --repo ~/code/your-repo
 ```
 
-With curator installed this prints the `curator open` and `curator await` commands. Answer in the browser. Run `detent dashboard` to see every active run with its stage and pending gates.
+With curator installed this prints a `curator open` command and a `curator poll` command. Answer in the browser. Run `detent dashboard` to see every active run with its stage and pending gates.
 
 ### 4.3 You pushed a PR
 
@@ -201,9 +209,9 @@ The engine contains no knowledge of your tracker, wiki, reviewer or test tooling
 
 Three rules about wiring:
 
-- **A socket you do not declare is off.** `engine socket call <name>` refuses and names the socket. A skill that needs it says which provider is missing and what it skipped.
-- **Providers are pinned.** Each carries a `version`. The engine calls `<command> --socket-version` and refuses to run on a mismatch. Adapters in this repo use `builtin`.
-- **The deploy harness is never automatic.** It runs on your explicit request, or at ready-to-merge if you set `gate_on_ready_to_merge: true`. The engine rejects a `stack.yaml` that wires it into a normal stage.
+- **A socket you do not declare is off.** `detent socket call <name>` refuses and names the socket. A skill that needs it says which provider is missing and what it skipped.
+- **Providers carry a `version` field.** It records which contract version you wrote the provider against. The engine does not check it at run time. Adapters in this repo use `builtin`.
+- **The deploy harness is meant to run on request only.** The contract in `engine/sockets/deploy-harness.md` says it runs on your explicit request, or at ready-to-merge if you set `gate_on_ready_to_merge: true`. Nothing in the engine CLI checks where you wire it, so keep it out of normal stages yourself.
 
 The engine reads `stack.yaml` from the work repo (or `engine/stack.yaml`, or the path in `--stack`). It uses a small built-in YAML parser for the shapes in `engine/stack.example.yaml`: nested maps, lists of maps and inline lists. Keep your file to those shapes.
 
@@ -252,7 +260,7 @@ Rules that apply to every provider: print one JSON object, include a `next_step`
 
 A **skills pack** is how a team adds stages without forking the engine. It is a versioned directory plus a `manifest` command that answers the contract in `engine/sockets/skills-pack.md`: which stages or skills it adds and where they splice in. List it under `sockets.skills-pack.packs` in `stack.yaml`. A pack that fails its manifest stops the pipeline. The engine will not run with a broken pack.
 
-A **provider pack** in the sense of `packs/example/stack.yaml` is a ready-made `stack.yaml` for one environment: a set of socket bindings you copy and edit. Keep one per environment, and keep any company-specific commands in your own repo.
+A **provider pack** in the sense of `packs/example/stack.yaml` is a different file from the engine's `stack.yaml`. It lists knowledge providers, review lenses, an incident skill, an analytics server and a network check, and the skills read it. Select it with `pack.path` in `detent.user.yaml`. A null field turns that feature off. The engine's own `stack.yaml` holds the socket bindings, and you start it from `engine/stack.example.yaml`. Keep one of each per environment, and keep any company-specific commands in your own repo.
 
 ---
 
@@ -277,7 +285,7 @@ A **provider pack** in the sense of `packs/example/stack.yaml` is a ready-made `
 
 **Courier.** A subagent or headless job cannot reach connectors that only an interactive session has. It writes a request into `.local/reads/`. The Stop hook tells the interactive session to read the source and fulfill the request. No credentials are stored.
 
-**Routing and cost.** `engine/routing` holds three model tiers (strong, fast, light) and a convention for consulting a stronger advisor when a stage blocks. It is recommend-only. See `docs/model-routing.md`. `detent spend` and `engine bench` report cost and timing from local logs. See `docs/benchmarking.md`.
+**Routing and cost.** `engine/routing` holds three model tiers (strong, fast, light) and a convention for consulting a stronger advisor when a stage blocks. It is recommend-only. See `docs/model-routing.md`. `detent spend` and `detent bench` report cost and timing from local logs. See `docs/benchmarking.md`.
 
 **Writing rules.** Every skill that drafts text for a person shares the evidence and voice rules in `docs/evidence-and-voice.md`. If you keep a voice file, point `voice.file` in `detent.user.yaml` at it and the voice hook will name it.
 
@@ -285,14 +293,14 @@ A **provider pack** in the sense of `packs/example/stack.yaml` is a ready-made `
 
 ## 8. Evals
 
-`engine eval` scores the repo's agent-facing behavior against a committed baseline. It checks skill frontmatter, hook kill switches, curator self-containment and sentinel's comment triage. The deterministic tier makes no network calls. An optional judge tier runs `claude -p` and needs a signed-in `claude` binary.
+`detent eval` scores the repo's agent-facing behavior against a committed baseline. It checks skill frontmatter, hook kill switches, curator self-containment and sentinel's comment triage. The deterministic tier makes no network calls. An optional judge tier runs `claude -p` and needs a signed-in `claude` binary.
 
 ```sh
-engine eval                       # every suite in evals/config.yaml
-engine eval --changed             # suites touched by your branch's diff
-engine eval --suite sentinel-golden
-engine eval --no-judge            # deterministic checks only
-engine eval --rebaseline --no-judge   # rewrite evals/baseline.json, then commit it
+detent eval                       # every suite in evals/config.yaml
+detent eval --changed             # suites touched by your branch's diff
+detent eval --suite sentinel-golden
+detent eval --no-judge            # deterministic checks only
+detent eval --rebaseline --no-judge   # rewrite evals/baseline.json, then commit it
 ```
 
 It prints one JSON line on stdout and a plain report on stderr. The verdict is `UPGRADE`, `NEUTRAL` or `DEGRADE`:
@@ -303,7 +311,7 @@ It prints one JSON line on stdout and a plain report on stderr. The verdict is `
 
 `gate.mode` in `evals/config.yaml` sets whether a `DEGRADE` fails CI. In blocking mode the gate arms only after `burn_in_prs` clean runs against the current baseline. A deterministic flip blocks right away. Exit codes: 0 ran, 1 environment failure, 2 refusal (or a blocking `DEGRADE`). Cases live in `evals/cases/<suite>/*.json`. The full mechanics, including the rebaseline procedure, are in `engine/eval/README.md`.
 
-To add a case, copy a neighbor in `evals/cases/<suite>/`, change its `id`, `check` and `params`, run `engine eval --suite <suite> --no-judge`, and commit the case. Rebaseline once to include it.
+To add a case, copy a neighbor in `evals/cases/<suite>/`, change its `id`, `check` and `params`, run `detent eval --suite <suite> --no-judge`, and commit the case. Rebaseline once to include it.
 
 ---
 
@@ -336,7 +344,7 @@ In CI the `leak-gate` workflow writes the list from a repository secret named `L
 | detent clone | Everything in this repo. `engine/` is generic and checked by the leak gate. |
 | `.sdlc/<run-id>/` in the clone | One run: `run.json`, `brief.md`, `research.md`, `decisions.json`, `stage-status.json`, `events.jsonl`, `plan/`, `handoff/`, and the `worktree/`. |
 | `.plans/` in the clone | Curator pages, gitignored. |
-| `.local/` in the clone | Gitignored: `inbox/` (sentinel rounds per PR), `team-profiles/`, `reads/` (courier), `brief-state.json`, `voice.md`. |
+| `.local/` in the clone | Gitignored: `inbox/` (sentinel rounds per PR), `team-profiles/`, `reads/` (courier), `brief-state.json`. |
 | `detent.user.yaml` | Your personal values, gitignored. |
 | `stack.yaml` | Your socket bindings, in the work repo or passed with `--stack`. |
 | `.owl/` in a work repo | Owl logs, notes and lock. Never committed by the loop. |
@@ -352,7 +360,7 @@ In CI the `leak-gate` workflow writes the list from a repository secret named `L
 
 **A hook does not fire.** Confirm the plugin is installed and restart Claude Code. The curator hooks turn themselves off when `curator` is missing and in background jobs. For autoscan, `SENTINEL_AUTOSCAN=off` disables it, and a draft PR is skipped on purpose. The per-PR log is `.local/inbox/<owner>__<repo>__pr<N>/sentinel-autoscan.log`. A failed scan round writes a `sentinel_scan_error` line instead of vanishing. Test the mechanics without waiting by using the recipe in `hooks/README.md`.
 
-**The engine refused my command (exit 2).** Exit 2 is a contract refusal such as an illegal stage transition, a missing artifact or a pending gate. The JSON has a `reason`. Running `engine next` prints the command that unblocks you.
+**The engine refused my command (exit 2).** Exit 2 is a contract refusal such as an illegal stage transition, a missing artifact or a pending gate. The JSON has a `reason`. Running `detent next` prints the command that unblocks you.
 
 **A skill says a provider is missing.** The socket it needs is not declared in your `stack.yaml`. Add a provider for it, or accept that the skill will skip that source. The skill tells you what it skipped.
 

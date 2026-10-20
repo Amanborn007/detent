@@ -62,7 +62,8 @@ logging. Exit codes are uniform across all sockets:
 | `deploy-harness` | [sockets/deploy-harness.md](sockets/deploy-harness.md) | **explicit trigger only** | heavyweight deploy-and-test in a real environment |
 
 Wiring lives in `stack.yaml` (see [stack.example.yaml](stack.example.yaml) for
-a fully commented AcmeCo example, version-pinned per socket).
+a fully commented AcmeCo example with a `version` per provider; the CLI does
+not enforce it yet).
 
 ## Reference adapters
 

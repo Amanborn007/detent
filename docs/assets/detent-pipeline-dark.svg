@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 64 992 232" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="detent-pipeline-dark-title detent-pipeline-dark-desc">
+<title id="detent-pipeline-dark-title">From ticket to draft PR</title>
+<desc id="detent-pipeline-dark-desc">Pipeline diagram showing the seven Detent stages from intake to respond, each with the artifact it writes, with your approval required at the plan gate and at the ship gate before the push, and a sentinel scan loop that repeats respond on each push.</desc>
+<defs>
+<style>@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap');</style>
+<marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bfc0c0"/></marker>
+<marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#e06a35"/></marker>
+<marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#6a95d8"/></marker>
+</defs>
+<rect width="992" height="296" fill="#2d3142"/>
+<path d="M 128,120 H 152" fill="none" stroke="#bfc0c0" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 248,120 H 272" fill="none" stroke="#bfc0c0" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 368,120 H 392" fill="none" stroke="#bfc0c0" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 424,120 H 448" fill="none" stroke="#bfc0c0" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 544,120 H 568" fill="none" stroke="#bfc0c0" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 664,120 H 688" fill="none" stroke="#bfc0c0" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 784,120 H 808" fill="none" stroke="#bfc0c0" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 840,120 H 864" fill="none" stroke="#bfc0c0" stroke-width="1.2" marker-end="url(#arrow)"/>
+<path d="M 888,152 V 196 Q 888,204 896,204 H 928 Q 936,204 936,196 V 152" fill="none" stroke="#bfc0c0" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<rect x="872" y="212" width="80" height="12" rx="2" fill="#2d3142"/>
+<text x="912" y="221" fill="#8e98ac" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">SENTINEL SCAN</text>
+<polygon points="408,104 424,120 408,136 392,120" fill="#2d3142"/>
+<polygon points="408,104 424,120 408,136 392,120" fill="rgba(224,106,53,0.12)" stroke="#e06a35" stroke-width="1.2"/>
+<text x="408" y="124" fill="#e06a35" font-size="8" font-weight="600" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">YOU</text>
+<text x="408" y="176" fill="#e06a35" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.12em">PLAN GATE</text>
+<text x="408" y="192" fill="#bfc0c0" font-size="9" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">you approve</text>
+<polygon points="824,104 840,120 824,136 808,120" fill="#2d3142"/>
+<polygon points="824,104 840,120 824,136 808,120" fill="rgba(224,106,53,0.12)" stroke="#e06a35" stroke-width="1.2"/>
+<text x="824" y="124" fill="#e06a35" font-size="8" font-weight="600" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">YOU</text>
+<text x="824" y="176" fill="#e06a35" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.12em">SHIP GATE</text>
+<text x="824" y="192" fill="#bfc0c0" font-size="9" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">push · draft PR</text>
+<rect x="32" y="88" width="96" height="64" rx="6" fill="#2d3142"/>
+<rect x="32" y="88" width="96" height="64" rx="6" fill="#393e53" stroke="#f5f5f5" stroke-width="1"/>
+<rect x="40" y="94" width="20" height="12" rx="2" fill="none" stroke="#f5f5f5" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="50" y="103" fill="#f5f5f5" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">01</text>
+<text x="80" y="124" fill="#f5f5f5" font-size="12" font-weight="600" font-family="'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="middle">Intake</text>
+<text x="80" y="140" fill="#bfc0c0" font-size="9" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">brief.md</text>
+<rect x="152" y="88" width="96" height="64" rx="6" fill="#2d3142"/>
+<rect x="152" y="88" width="96" height="64" rx="6" fill="#393e53" stroke="#f5f5f5" stroke-width="1"/>
+<rect x="160" y="94" width="20" height="12" rx="2" fill="none" stroke="#f5f5f5" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="170" y="103" fill="#f5f5f5" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">02</text>
+<text x="200" y="124" fill="#f5f5f5" font-size="12" font-weight="600" font-family="'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="middle">Research</text>
+<text x="200" y="140" fill="#bfc0c0" font-size="9" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">research.md</text>
+<rect x="272" y="88" width="96" height="64" rx="6" fill="#2d3142"/>
+<rect x="272" y="88" width="96" height="64" rx="6" fill="#393e53" stroke="#f5f5f5" stroke-width="1"/>
+<rect x="280" y="94" width="20" height="12" rx="2" fill="none" stroke="#f5f5f5" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="290" y="103" fill="#f5f5f5" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">03</text>
+<text x="320" y="124" fill="#f5f5f5" font-size="12" font-weight="600" font-family="'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="middle">Plan</text>
+<text x="320" y="140" fill="#bfc0c0" font-size="9" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">plan.md</text>
+<rect x="448" y="88" width="96" height="64" rx="6" fill="#2d3142"/>
+<rect x="448" y="88" width="96" height="64" rx="6" fill="#393e53" stroke="#f5f5f5" stroke-width="1"/>
+<rect x="456" y="94" width="20" height="12" rx="2" fill="none" stroke="#f5f5f5" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="466" y="103" fill="#f5f5f5" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">04</text>
+<text x="496" y="124" fill="#f5f5f5" font-size="12" font-weight="600" font-family="'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="middle">Implement</text>
+<text x="496" y="140" fill="#bfc0c0" font-size="9" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">commits</text>
+<rect x="568" y="88" width="96" height="64" rx="6" fill="#2d3142"/>
+<rect x="568" y="88" width="96" height="64" rx="6" fill="#393e53" stroke="#f5f5f5" stroke-width="1"/>
+<rect x="576" y="94" width="20" height="12" rx="2" fill="none" stroke="#f5f5f5" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="586" y="103" fill="#f5f5f5" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">05</text>
+<text x="616" y="124" fill="#f5f5f5" font-size="12" font-weight="600" font-family="'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="middle">Recheck</text>
+<text x="616" y="140" fill="#bfc0c0" font-size="9" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">recheck.md</text>
+<rect x="688" y="88" width="96" height="64" rx="6" fill="#2d3142"/>
+<rect x="688" y="88" width="96" height="64" rx="6" fill="#393e53" stroke="#f5f5f5" stroke-width="1"/>
+<rect x="696" y="94" width="20" height="12" rx="2" fill="none" stroke="#f5f5f5" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="706" y="103" fill="#f5f5f5" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">06</text>
+<text x="736" y="124" fill="#f5f5f5" font-size="12" font-weight="600" font-family="'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="middle">Ship</text>
+<text x="736" y="140" fill="#bfc0c0" font-size="9" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">draft PR</text>
+<rect x="864" y="88" width="96" height="64" rx="6" fill="#2d3142"/>
+<rect x="864" y="88" width="96" height="64" rx="6" fill="#393e53" stroke="#f5f5f5" stroke-width="1"/>
+<rect x="872" y="94" width="20" height="12" rx="2" fill="none" stroke="#f5f5f5" stroke-opacity="0.45" stroke-width="0.8"/>
+<text x="882" y="103" fill="#f5f5f5" font-size="7" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" letter-spacing="0.08em">07</text>
+<text x="912" y="124" fill="#f5f5f5" font-size="12" font-weight="600" font-family="'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" text-anchor="middle">Respond</text>
+<text x="912" y="140" fill="#bfc0c0" font-size="9" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">fix · reply</text>
+<line x1="32" y1="236" x2="960" y2="236" stroke="rgba(245,245,245,0.12)" stroke-width="0.8"/>
+<text x="32" y="256" fill="#bfc0c0" font-size="8" font-family="'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" letter-spacing="0.18em">LEGEND</text>
+<rect x="32" y="268" width="16" height="12" rx="2" fill="#393e53" stroke="#f5f5f5" stroke-width="1"/>
+<text x="64" y="278" fill="#bfc0c0" font-size="9" font-family="'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">Stage · artifact it writes</text>
+<polygon points="228,267 235,274 228,281 221,274" fill="rgba(224,106,53,0.12)" stroke="#e06a35" stroke-width="1"/>
+<text x="252" y="278" fill="#bfc0c0" font-size="9" font-family="'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">Stops for your approval</text>
+<line x1="392" y1="274" x2="416" y2="274" stroke="#bfc0c0" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+<text x="424" y="278" fill="#bfc0c0" font-size="9" font-family="'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">Repeats on each push until clean</text>
+</svg>
