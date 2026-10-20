@@ -200,3 +200,118 @@ test("engine output past the pipe buffer is not truncated when the reader is slo
   assert.ok(out.length > 20000, `payload should exceed the pipe buffer, got ${out.length}`);
   assert.equal(JSON.parse(out.trim()).unresolved.length, 800, "the whole JSON line arrives");
 });
+
+function parkAtPlan(ctx) {
+  throughResearch(ctx);
+  assert.equal(engine(["stage", "begin", "plan", "--repo", ctx.repo, "--run", ctx.runId]).code, 0);
+  writeArtifact(ctx.runDir, "plan/plan.md", "# plan\n");
+  assert.equal(engine(["stage", "end", "plan", "--repo", ctx.repo, "--run", ctx.runId]).code, 2);
+}
+
+test("gate collect for a run never drains a run whose id it is a prefix of", () => {
+  const a = mkRun({ slug: "fix-it" });
+  parkAtPlan(a);
+  const b = mkRun({ repo: a.repo, slug: "fix-it-v2" });
+  parkAtPlan(b);
+  const cdir = scratch();
+  mkCuratorStub(cdir);
+  const env = { PATH: `${cdir}:${BARE_PATH}`, CURATOR_LOG: join(cdir, "log") };
+  const ra = engine(["gate", "open", "intent", "--run", a.runId], { env });
+  const rb = engine(["gate", "open", "intent", "--run", b.runId], { env });
+  assert.ok(a.runId !== b.runId && b.runId.startsWith(`${a.runId}-`), `${a.runId} / ${b.runId}`);
+  const gateB = readJson(join(b.runDir, "decisions.json")).find((d) => d.gate === "intent");
+  const drain = JSON.stringify({ key: realpathSync(rb.json.html), status: "feedback",
+    prompts: [{ type: "decision", question: gateB.id, answer: "approve" }] });
+  engine(["gate", "collect", "--run", a.runId], { env: { ...env, STUB_DRAIN: drain } });
+  const log = readFileSync(join(cdir, "log"), "utf8");
+  assert.ok(!log.includes(realpathSync(rb.json.html)), `drain was handed B's page:\n${log}`);
+  assert.ok(log.includes(realpathSync(ra.json.html)));
+  const gateA = readJson(join(a.runDir, "decisions.json")).find((d) => d.gate === "intent");
+  assert.equal(gateA.status, "pending", "A's decision must stay pending");
+});
+
+test("a judgment decision cannot be resolved by the proceed-degraded answer and stays reopenable", () => {
+  const DEGRADED = "proceed degraded (accept degraded confidence)";
+  const ctx = mkRun();
+  parkAtPlan(ctx);
+  const p = join(ctx.runDir, "decisions.json");
+  writeJson(p, readJson(p).map((d) => d.gate === "intent"
+    ? { ...d, status: "answered", answer: "approve", answered_by: "human", answered_at: new Date().toISOString() } : d));
+  assert.equal(engine(["stage", "end", "plan", "--repo", ctx.repo, "--run", ctx.runId]).code, 0);
+  writeJson(p, [...readJson(p), { id: "D-095", raised_by: "research", blocks: ["implement"], cause: "judgment",
+    question: "Retry?", options: ["cap", "forever", DEGRADED], status: "pending" }]);
+  let r = collect(ctx, [{ type: "decision", question: "D-095", answer: DEGRADED }]);
+  assert.deepEqual(r.json.answered, [], "the degraded string must not resolve a judgment decision");
+  assert.equal(r.json.unresolved.length, 1);
+  assert.equal(readJson(p).find((d) => d.id === "D-095").status, "pending");
+
+  // a decision already left in the stuck state by an earlier collect
+  writeJson(p, readJson(p).map((d) => d.id === "D-095" ? { ...d, status: "answered", answer: DEGRADED } : d));
+  const cdir = scratch();
+  mkCuratorStub(cdir);
+  r = engine(["gate", "open", "D-095", "--run", ctx.runId], { env: { PATH: `${cdir}:${BARE_PATH}`, CURATOR_LOG: join(cdir, "log") } });
+  assert.equal(r.json.mode, "curator", r.stdout);
+  assert.ok(readFileSync(r.json.html, "utf8").includes('data-plan-question="D-095"'));
+  r = collect(ctx, [{ type: "decision", question: "D-095", answer: "cap" }]);
+  assert.deepEqual(r.json.answered, ["D-095"]);
+  assert.equal(readJson(p).find((d) => d.id === "D-095").answer, "cap");
+});
+
+test("the generated gate page passes the curator artifact check for ordinary options and gate names", () => {
+  const cases = [
+    { gate: "intent", options: ["run in sequence", "keep as is"] },
+    { gate: "intent", options: ["approve", "revise"] },
+    { gate: "intent", options: ["accept", "back to plan", "back to implement"] },
+    { gate: "approach", options: ["A", "B", "C"] },
+    { gate: "compare-options", options: ["option one", "option two", "option three"] },
+  ];
+  for (const c of cases) {
+    const ctx = mkRun();
+    parkAtPlan(ctx);
+    const p = join(ctx.runDir, "decisions.json");
+    const base = readJson(p);
+    const next = c.gate === "intent"
+      ? base.map((d) => d.gate === "intent" ? { ...d, options: c.options } : d)
+      : [...base, { id: "D-060", gate: c.gate, raised_by: "plan", blocks: ["plan"], question: "Which?", options: c.options, status: "pending" }];
+    writeJson(p, next);
+    const cdir = scratch();
+    mkCuratorStub(cdir);
+    const r = engine(["gate", "open", c.gate, "--run", ctx.runId], { env: { PATH: `${cdir}:${BARE_PATH}`, CURATOR_LOG: join(cdir, "log") } });
+    assert.equal(r.code, 0, r.stdout + r.stderr);
+    const chk = spawnSync(process.execPath, [CURATOR_CLI, "check", r.json.html], { encoding: "utf8" });
+    assert.equal(chk.status, 0, `${JSON.stringify(c)}\n${chk.stdout}${chk.stderr}`);
+  }
+});
+
+test("gate collect persists every drained item, including ones it cannot apply", () => {
+  const { ctx, gate, html } = atPlanGate();
+  const cdir = scratch();
+  mkCuratorStub(cdir);
+  const env = { PATH: `${cdir}:${BARE_PATH}`, CURATOR_LOG: join(cdir, "log") };
+  const drain = JSON.stringify({ key: realpathSync(html), status: "feedback",
+    prompts: [{ type: "decision", question: gate.id, answer: null, note: "need more info" }] });
+  const r = engine(["gate", "collect", "--run", ctx.runId], { env: { ...env, STUB_DRAIN: drain } });
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  const fb = join(ctx.runDir, "review-feedback.jsonl");
+  const lines = readFileSync(fb, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].note, "need more info");
+});
+
+test("gate collect persists drained feedback even when the page is refused as foreign", () => {
+  const { ctx, gate } = atPlanGate();
+  const cdir = scratch();
+  mkCuratorStub(cdir);
+  const other = join(cdir, "other.html");
+  writeFileSync(other, "<html></html>");
+  const drain = JSON.stringify({ key: other, status: "feedback",
+    prompts: [{ type: "selection", comment: "keep this note", selectedText: "step 2" },
+      { type: "decision", question: gate.id, answer: "approve" }] });
+  const r = engine(["gate", "collect", "--run", ctx.runId], {
+    env: { PATH: `${cdir}:${BARE_PATH}`, CURATOR_LOG: join(cdir, "log"), STUB_DRAIN: drain },
+  });
+  assert.equal(r.code, 1, r.stdout);
+  const lines = readFileSync(join(ctx.runDir, "review-feedback.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(lines.length, 2);
+  assert.equal(lines[0].comment, "keep this note");
+});
