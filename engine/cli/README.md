@@ -145,6 +145,22 @@ then:
   and prints exactly how a human answers by editing `decisions.json`
   (`status:"answered"`, `answer`, `answered_by:"human"`, `answered_at`).
 
+### `engine drive --run <id>` (experimental)
+
+`engine drive` is experimental, macOS and Linux only. It spends Claude credit, so it stops once the cumulative cost of one invocation reaches `--budget` (default 5 USD). Because children run with `--setting-sources project`, the target repo's own `.claude/settings.json` hooks run: only drive repos you trust.
+
+Runs the run end to end with one headless `claude -p` child per stage, following the stage skill. Flags: `--max-steps` (12), `--child-timeout-sec` (3600), `--model` (default `claude-sonnet-5-5`), `--budget`, `--allow-ship`, `--claude-bin`, `--profile <file>`. It stops with one JSON line:
+
+- `needs_human`: a pending decision blocks the run. It renders the gate page (`<run>-<gate>.html`), runs `curator open` when curator is on PATH, and exits. Answer in the page, run `engine gate collect --run <id>`, then drive again. Each drive first drains curator for this run's gate pages.
+- `before_ship` (unless `--allow-ship`), `max_steps`, `budget`, or `done`.
+- failures with exit 1: `no_progress`, `child_timeout` (the whole process group is killed), `child_failed`, `child_error`, `child_bad_output`, `child_no_cost`, and `child_answered_decision`.
+
+What the children may do. They get `--permission-mode dontAsk` plus a settings file built from `engine/cli/profiles/drive.json`: Read, Edit, Write, Glob, Grep, and Bash only for `node <this engine.mjs>`, `git status|diff|log|show`, the repo's declared verify command (`engine env --verify`, one plain command of a known test runner), and, for the implement stage only, `git add` and `git commit`. There is no blanket Bash grant, so `bash -c`, `env git push` and `git -C . push` are not allowed. A `--profile` that sets a bypass mode, `acceptEdits`, or a blanket `Bash`/`Bash(*)` grant is refused before any child starts. As a second layer the child's environment carries `GIT_CONFIG_*` entries that rewrite every push URL (`https://`, `http://`, `git@`, `ssh://`, `git://`, `file://`, absolute and relative paths) to an unknown transport, so a push fails whatever the command spelling. A child's test command can still run arbitrary code from the repo and reach the network; that is why only trusted repos are in scope.
+
+Decisions stay human. drive snapshots `decisions.json` before each child. If afterwards an existing decision changed, a pending one is no longer pending, one was removed, or a new one was filed already answered, drive restores the file and stops with `stopped: "child_answered_decision"`. A child may only append new pending decisions.
+
+Cost. Each child's `total_cost_usd` and `num_turns` (read from the `claude -p --output-format json` result) go into `events.jsonl` as `drive_child_done` and into the final summary. A result without them stops the run with `child_no_cost`.
+
 ### `engine gate collect --run <id> [--file <feedback.json>]`
 
 Non-blocking. Maps curator feedback into `decisions.json`. An answer resolves a

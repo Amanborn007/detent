@@ -33,6 +33,7 @@ if (group === '--help' || group === 'help' && rest.length === 0) {
     '  detent herald   <...>   herald morning brief (window|assemble|render)\n' +
     '  detent courier  <...>   courier connector reads (request|await|list|get|fulfill|fail)\n' +
     '  detent feedback <...>   agent self-feedback journal (add|list) — coverage gaps the AGENT logs; not curator human feedback\n' +
+    '  detent drive --run <id> run a run end to end with headless claude children (experimental, spends credit, see engine/cli/README.md)\n' +
     '  detent <cmd>    <...>   engine runner (run new|next|stage|gate|socket|dashboard|bench|help)\n');
   process.exit(0);
 }
@@ -43,7 +44,7 @@ if (ROUTES[group]) {
   args = [ROUTES[group].script, ...rest];
 } else {
   // default: the engine runner gets the full arg list unchanged
-  bin = 'node';
+  bin = process.execPath;
   args = [path.join(ENGINE_ROOT, 'cli', 'engine.mjs'), ...process.argv.slice(2)];
 }
 const r = spawnSync(bin, args, { stdio: 'inherit' });
