@@ -42,7 +42,7 @@ cp detent.user.example.yaml detent.user.yaml   # skip if the install script alre
 
 Open `detent.user.yaml` and fill in your name, email, GitHub login, teams and tracker account. Leave the GitHub login empty if you want detent to read it from `gh api user`.
 
-Pick a provider pack. Copy `packs/example/stack.yaml` to `stack.yaml` in the repo you will work on, and replace each command with a program you have. If you have nothing yet, start with only the built-in adapters:
+Wire the sockets. Copy `engine/stack.example.yaml` to `stack.yaml` in the repo you will work on, and replace each command with a program you have. Write each `command` as an absolute path, because the engine resolves a relative path from the directory that holds `stack.yaml`. If you have nothing yet, start with only the built-in adapters, each with `version: "builtin"`:
 
 - `engine/adapters/gh-ticket` for the `ticket` socket (a GitHub issue).
 - `engine/adapters/repo-docs-knowledge` for the `knowledge` socket (grep over the repo's own docs).
@@ -108,10 +108,10 @@ Clerk loads local team profiles if you have any, so its estimates fit how a team
 
 ### 4.2 You have a ticket
 
-Say the ticket is `PROJ-123` and your work repo is `~/code/your-repo`.
+Say the ticket is GitHub issue `your-org/your-repo#123` and your work repo is `~/code/your-repo`. The built-in `gh-ticket` adapter takes the `owner/name#number` form; a tracker adapter of your own can take keys like `PROJ-123`.
 
 ```sh
-detent run new --ticket PROJ-123 --repo ~/code/your-repo   # creates the run and a worktree
+detent run new --ticket your-org/your-repo#123 --repo ~/code/your-repo   # creates the run and a worktree
 detent next --repo ~/code/your-repo                        # prints the next command
 ```
 
@@ -252,7 +252,7 @@ Rules that apply to every provider: print one JSON object, include a `next_step`
 
 A **skills pack** is how a team adds stages without forking the engine. It is a versioned directory plus a `manifest` command that answers the contract in `engine/sockets/skills-pack.md`: which stages or skills it adds and where they splice in. List it under `sockets.skills-pack.packs` in `stack.yaml`. A pack that fails its manifest stops the pipeline. The engine will not run with a broken pack.
 
-A **provider pack** in the sense of `packs/example/stack.yaml` is a ready-made `stack.yaml` for one environment: a set of socket bindings you copy and edit. Keep one per environment, and keep any company-specific commands in your own repo.
+A **provider pack** such as `packs/example/stack.yaml` tells the skills which knowledge providers, review lenses and network check one environment has. Select it with `pack.path` in `detent.user.yaml`. It is a different file from the engine's `stack.yaml`, whose template is `engine/stack.example.yaml`. Keep one pack per environment, and keep any company-specific commands in your own repo.
 
 ---
 

@@ -1,0 +1,26 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node --test engine/*/test
+      - run: bash engine/owl/test/run-tests.sh
+      - run: |
+          for f in hooks/tests/*.sh scripts/tests/*.sh engine/scripts/tests/*.sh; do
+            bash "$f"
+          done

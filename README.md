@@ -1,6 +1,9 @@
 # detent
 
-Detent is a Claude Code plugin that walks a ticket to a merged pull request in gated stages, and stops for a human at every decision.
+[![test](https://github.com/Amanborn007/detent/actions/workflows/test.yml/badge.svg)](https://github.com/Amanborn007/detent/actions/workflows/test.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
+Detent is a Claude Code plugin that walks a ticket to a draft pull request in gated stages, and stops for a human at every decision.
 
 You give it a requirement or a ticket key. It researches, plans, implements, rechecks, ships a draft PR and handles the bot comments that arrive afterwards. Each stage ends at a gate. A gate is a decision you answer in a local browser page called curator, not in a wall of terminal text. Detent never merges. Creating tickets, the first push and the draft PR each wait for your approval.
 
@@ -10,6 +13,45 @@ Detent is two kinds of parts:
 - **Tools** are small Node and shell programs (`engine`, `curator`, `sentinel`, `owl`, `detent`). They hold the state machine, the gates and the scans, so those run the same way every time.
 
 Your tracker, knowledge sources, reviewer and verifier are not built in. They plug in through **sockets**, which are command-line contracts you declare in a YAML file. The engine itself names no company and no vendor.
+
+![detent demo](docs/demo/demo.gif)
+
+## Quickstart
+
+This takes about five minutes. You need Claude Code, Node.js 20, `git`, `bash` and a signed-in `gh` (see [Requirements](#requirements)).
+
+1. Install the plugin. Inside Claude Code, then restart it:
+
+   ```
+   /plugin marketplace add Amanborn007/detent
+   /plugin install detent@detent
+   ```
+
+2. Clone the repo and run the install script once. It puts `curator`, `engine` and `detent` on your `PATH` and creates `detent.user.yaml`. Open a new shell afterwards.
+
+   ```sh
+   git clone https://github.com/Amanborn007/detent && cd detent
+   scripts/detent-install.sh
+   ```
+
+3. Point detent at the repo you want to work on. Copy `engine/stack.example.yaml` to `stack.yaml` in that repo. Keep only the `ticket`, `knowledge` and `bot-comments` sockets and set them to the built-in adapters, each with `version: "builtin"`. These work with a GitHub issue and need no other service:
+
+   - `ticket`: `engine/adapters/gh-ticket`
+   - `knowledge`: one provider, `engine/adapters/repo-docs-knowledge`
+   - `bot-comments`: `engine/adapters/gh-bot-comments`
+
+   Write these `command` values as absolute paths into your clone. The engine resolves a relative path from the directory that holds `stack.yaml`, which is your work repo, not the clone.
+
+4. Start a run on one GitHub issue. The built-in ticket adapter takes `owner/name#number`:
+
+   ```sh
+   detent run new --ticket your-org/your-repo#123 --repo ~/code/your-repo
+   detent next --repo ~/code/your-repo
+   ```
+
+   Every command prints one JSON line with a `next_step`. Do what it says and run `next` again. When `next` reports a pending gate, run `detent gate open <gate-id> --repo ~/code/your-repo` and answer it in curator. The run stops at the plan gate before any code is written, and again at the ship gate before the first push and the draft PR.
+
+[GUIDE.md](GUIDE.md) covers each stage and gate in detail.
 
 ## What it does
 
@@ -81,11 +123,15 @@ To update, run `detent-upgrade`. It fast-forwards the clone, re-links the progra
 
 ## Configuration
 
-There are two files.
+There are three files.
 
 **`detent.user.yaml`** holds values that belong to you: name, email, GitHub login, your teams, your tracker account, a path to a file of writing-voice rules, and the GitHub org that clerk searches for precedent. Copy it from `detent.user.example.yaml`. It is gitignored. If you leave the GitHub login empty, detent reads it from `gh api user`.
 
-**A provider pack** tells the engine which programs fill each socket. The example is `packs/example/stack.yaml`. Copy it to `stack.yaml` in your work repo (or pass `--stack <path>`) and replace the commands with your own. The sockets are:
+**`stack.yaml`** tells the engine which programs fill each socket. The template is `engine/stack.example.yaml`. Copy it to `stack.yaml` in your work repo (or pass `--stack <path>`) and replace the commands with your own.
+
+**A provider pack** tells the skills which knowledge providers and review lenses you have. The example is `packs/example/stack.yaml`, and `pack.path` in `detent.user.yaml` selects it. Despite the name, it is a different file from `stack.yaml`.
+
+The sockets are:
 
 | Socket | Used by | What the provider does |
 |---|---|---|
@@ -103,7 +149,7 @@ A socket you leave out is off. The engine refuses a command that needs it and na
 
 Every provider is a command that reads one JSON request on stdin and writes one JSON response on stdout. Exit 0 is success, 1 is a provider failure (retried once, then shown to you), 2 is a contract violation (the stage stops and asks you). Contracts are in `engine/sockets/`. Reference adapters for GitHub issues, repo docs and GitHub bot comments are in `engine/adapters/`.
 
-**Name a review skill.** In `packs/example/stack.yaml` the `principal` lens has `skill: null`, so referee has no review of record and stops until you set it. Put the name of any PR-review skill you have installed in that field. `/deslop` and `referee --lens deslop` run without it.
+**Name a review skill.** In the pack file, `packs/example/stack.yaml`, the `principal` lens has `skill: null`, so referee has no review of record and stops until you set it. Put the name of any PR-review skill you have installed in that field. `/deslop` and `referee --lens deslop` run without it.
 
 Sentinel's bot policies are in `config/sentinel/default.json`. It covers common review bots such as `claude[bot]`, CodeRabbit, Semgrep, Codecov and Dependabot. Copy it and adjust the logins and policies for the bots your org runs.
 
