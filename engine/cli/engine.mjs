@@ -1610,7 +1610,7 @@ async function cmdDrive(flags) {
     let collectError = null;
     if (decisions.some((d) => d.status === "pending")) {
       try {
-        const d = drainCuratorFor(runId);
+        const d = drainCuratorFor(runId, runDir);
         if (d.items.length) collectResult(runId, runDir, d.items);
       } catch (e) {
         collectError = e.message;
