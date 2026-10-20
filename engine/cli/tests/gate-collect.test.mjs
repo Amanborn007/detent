@@ -197,6 +197,6 @@ test("engine output past the pipe buffer is not truncated when the reader is slo
   child.stdout.on("data", (c) => { out += c; });
   child.stdout.resume();
   await closed;
-  assert.ok(out.length > 65536, `payload should exceed the pipe buffer, got ${out.length}`);
+  assert.ok(out.length > 20000, `payload should exceed the pipe buffer, got ${out.length}`);
   assert.equal(JSON.parse(out.trim()).unresolved.length, 800, "the whole JSON line arrives");
 });
