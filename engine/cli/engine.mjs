@@ -386,7 +386,8 @@ function nextDecisionId(decisions) {
 // resolved: that answer is legal only for an external/infra/capability/data
 // unblock, never a bypass of the owner's own call.
 function isUnresolvedJudgment(d) {
-  return d.cause === "judgment" && d.answer === PROCEED_DEGRADED_ANSWER;
+  return d.cause === "judgment" && typeof d.answer === "string" &&
+    d.answer.trim().toLowerCase() === PROCEED_DEGRADED_ANSWER;
 }
 
 function pendingBlockers(decisions, stage) {
@@ -988,7 +989,8 @@ function cmdGateOpen(gateId, flags) {
   // us without a recorded benchmark (skipped automatically if the gate is
   // already answered, i.e. no real wait).
   let parkHandoff = null;
-  if (decision.status !== "answered") {
+  const resolved = decision.status === "answered" && !isUnresolvedJudgment(decision);
+  if (!resolved) {
     checkpointOnPark(runDir, `gate-open:${decision.gate || decision.id}`, decision.id);
     // The human now owns the next move, so this session has nothing left to do:
     // write the handoff and let it end rather than idle into a cold cache.
@@ -1013,7 +1015,7 @@ function cmdGateOpen(gateId, flags) {
     };
   }
 
-  if (decision.status === "answered") {
+  if (resolved) {
     out({
       ok: true,
       run_id: runId,
@@ -1068,7 +1070,7 @@ function cmdGateOpen(gateId, flags) {
 /** Pending decisions a human answers together with `decision` (same blocked stages). */
 function pendingFor(decisions, decision) {
   const blocks = new Set(decision.blocks || []);
-  return decisions.filter((d) => d.status === "pending" &&
+  return decisions.filter((d) => (d.status === "pending" || isUnresolvedJudgment(d)) &&
     (d.id === decision.id || (Array.isArray(d.blocks) && d.blocks.some((b) => blocks.has(b)))));
 }
 
@@ -1084,7 +1086,7 @@ function renderGateArtifact({ runId, runDir }, gate) {
   ).join("\n");
   const blocks = gate.decisions.map((d) => {
     const options = (d.options || []).map((o) =>
-      `<div class="option" data-plan-option="${escapeHtml(o)}"><h3>${escapeHtml(o)}</h3></div>`,
+      `<div class="option" data-plan-option="${escapeHtml(o)}"><strong>${escapeHtml(o)}</strong></div>`,
     ).join("\n");
     return `<section>
 <h2>Decision ${escapeHtml(d.id)}</h2>
@@ -1116,7 +1118,6 @@ ${options}
   main { max-width: 52rem; margin: 0 auto; }
   h1 { font-size: 1.5rem; margin: .2rem 0 1rem; }
   h2 { font-size: 1.1rem; margin: 2rem 0 .5rem; }
-  h3 { font-size: .95rem; margin: 0; }
   .eyebrow, .sub { font-family: var(--mono); font-size: .75rem; color: var(--muted); }
   pre { background: var(--paper-2); border: 1px solid var(--rule); padding: 1rem; overflow-x: auto;
         white-space: pre-wrap; font-family: var(--mono); font-size: .85rem; }
@@ -1130,8 +1131,8 @@ ${options}
 </head>
 <body>
 <main>
-<p class="eyebrow">${escapeHtml(runId)}${gate.stage ? ` · stage ${escapeHtml(gate.stage)}` : ""}</p>
-<h1>Needs your decision: ${escapeHtml(gate.name)}</h1>
+<p class="eyebrow">${escapeHtml(runId)} · gate ${escapeHtml(gate.name)}${gate.stage ? ` · stage ${escapeHtml(gate.stage)}` : ""}</p>
+<h1>Needs your decision</h1>
 ${blocks}
 <h2>What you are deciding on</h2>
 ${docHtml || `<p class="sub">No stage artifact has been written yet.</p>`}
@@ -1148,12 +1149,20 @@ ${docHtml || `<p class="sub">No stage artifact has been written yet.</p>`}
 // the decision's options resolves a decision; everything else stays pending.
 // ---------------------------------------------------------------------------
 
-function gateHtmlsOf(runId) {
+function gateHtmlsOf(runId, runDir) {
   const plansDir = join(detentRoot(), ".plans");
-  if (!existsSync(plansDir)) return new Set();
-  return new Set(readdirSync(plansDir)
-    .filter((f) => f.startsWith(`${runId}-`) && f.endsWith(".html"))
-    .map((f) => realpathSync(join(plansDir, f))));
+  const names = new Set(loadDecisions(runDir).map((d) => d.gate || d.id));
+  return new Set([...names]
+    .map((n) => join(plansDir, `${runId}-${n}.html`))
+    .filter((f) => existsSync(f))
+    .map((f) => realpathSync(f)));
+}
+
+function persistFeedback(runDir, items) {
+  if (items.length === 0) return;
+  const lines = items.map((item) => JSON.stringify({ ts: nowIso(),
+    ...(item && typeof item === "object" && !Array.isArray(item) ? item : { raw: item }) }) + "\n");
+  appendFileSync(join(runDir, "review-feedback.jsonl"), lines.join(""));
 }
 
 /** Parse a feedback file: a JSON array of items, a {prompts:[...]} payload, or curator-drain JSON lines. */
@@ -1175,10 +1184,10 @@ function parseFeedbackText(text, label) {
 }
 
 /** Run `curator drain` and return the prompts addressed to this run's gate pages. */
-function drainCuratorFor(runId) {
+function drainCuratorFor(runId, runDir) {
   const curator = curatorOnPath();
   if (!curator) return { items: [], note: "curator not on PATH" };
-  const htmls = gateHtmlsOf(runId);
+  const htmls = gateHtmlsOf(runId, runDir);
   if (htmls.size === 0) return { items: [], note: "no gate page rendered for this run yet" };
   const r = spawnSync(curator, ["drain", ...htmls], { encoding: "utf8", timeout: 30000 });
   if (r.error) throw new Error(`curator drain could not run: ${r.error.message}`);
@@ -1188,6 +1197,7 @@ function drainCuratorFor(runId) {
     let v;
     try { v = JSON.parse(line); } catch { throw new Error(`curator drain printed non-JSON: ${line.slice(0, 120)}`); }
     if (!Array.isArray(v.prompts) || v.prompts.length === 0) continue;
+    persistFeedback(runDir, v.prompts);
     let key = v.key;
     try { key = realpathSync(v.key); } catch { /* a key that no longer exists cannot be ours */ }
     if (!htmls.has(key)) throw new Error(`curator drain returned feedback for ${v.key}, which is not one of this run's gate pages`);
@@ -1204,16 +1214,19 @@ function applyFeedback(runDir, items) {
   for (const item of items) {
     if (!item || typeof item !== "object") throw new Error(`feedback item is not an object: ${JSON.stringify(item)}`);
     if (item.type !== "decision") {
-      appendFileSync(join(runDir, "review-feedback.jsonl"), JSON.stringify({ ts: nowIso(), ...item }) + "\n");
       feedback++;
       continue;
     }
     const d = decisions.find((x) => x.id === item.question);
     const base = { id: item.question, answer: item.answer ?? null, ...(item.note ? { note: item.note } : {}) };
     if (!d) { unresolved.push({ ...base, reason: "no such decision" }); continue; }
-    if (d.status !== "pending") { unresolved.push({ ...base, reason: `decision is ${d.status}, not pending` }); continue; }
+    if (d.status !== "pending" && !isUnresolvedJudgment(d)) { unresolved.push({ ...base, reason: `decision is ${d.status}, not pending` }); continue; }
     if (typeof item.answer !== "string" || !Array.isArray(d.options) || !d.options.includes(item.answer)) {
       unresolved.push({ ...base, reason: item.answer == null ? "no option chosen" : `'${item.answer}' is not one of the options` });
+      continue;
+    }
+    if (isUnresolvedJudgment({ cause: d.cause, answer: item.answer })) {
+      unresolved.push({ ...base, reason: "a judgment decision cannot be resolved by the proceed-degraded answer" });
       continue;
     }
     Object.assign(d, {
@@ -1224,7 +1237,7 @@ function applyFeedback(runDir, items) {
   }
   if (answered.length) saveDecisions(runDir, decisions);
   syncGateAnsweredEvents(runDir, decisions);
-  return { answered, unresolved, feedback, pending: decisions.filter((d) => d.status === "pending").map((d) => d.id) };
+  return { answered, unresolved, feedback, pending: decisions.filter((d) => d.status === "pending" || isUnresolvedJudgment(d)).map((d) => d.id) };
 }
 
 function collectResult(runId, runDir, items, extra = {}) {
@@ -1251,9 +1264,10 @@ function cmdGateCollect(flags) {
     const f = resolve(String(flags.file));
     if (!existsSync(f)) refuse(`feedback file not found: ${f}`, "pass a curator feedback JSON file");
     try { items = parseFeedbackText(readFileSync(f, "utf8"), f); } catch (e) { refuse(e.message, "fix the feedback file"); }
+    persistFeedback(runDir, items);
   } else {
     try {
-      const d = drainCuratorFor(runId);
+      const d = drainCuratorFor(runId, runDir);
       items = d.items;
       extra = d.note ? { curator: d.note } : {};
     } catch (e) { fail(e.message, "check `curator status`, or pass --file <feedback.json>"); }
