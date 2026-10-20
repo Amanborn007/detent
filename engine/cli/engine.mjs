@@ -2388,6 +2388,33 @@ function probeValue(cmd, args, cwd) {
   return r.stdout.trim() || null;
 }
 
+function shellQuote(p) {
+  return /^[A-Za-z0-9_/.:@%+=,-]+$/.test(p) ? p : `'${p.replace(/'/g, "'\\''")}'`;
+}
+
+// Fills one empty child of the top-level `user:` block; returns the new
+// lines, or null when no safely editable line exists there.
+function fillUserKey(lines, key, value) {
+  const start = lines.findIndex((l) => /^user:[ \t]*(#.*)?\r?$/.test(l));
+  if (start === -1) return null;
+  const ph = PLACEHOLDER_EMAIL.replace(".", "\\.");
+  let indent = null;
+  for (let i = start + 1; i < lines.length; i++) {
+    const l = lines[i];
+    if (!l.trim() || /^[ \t]*#/.test(l)) continue;
+    const lead = /^ */.exec(l)[0].length;
+    if (lead === 0) return null;
+    if (indent === null) indent = lead;
+    if (lead !== indent) continue;
+    const m = new RegExp(`^( {${indent}}${key}:)[ \\t]*(?:""|''|"${ph}"|${ph})?([ \\t]+#.*?)?([ \\t]*\\r?)$`).exec(l);
+    if (!m) continue;
+    const out = lines.slice();
+    out[i] = `${m[1]} ${JSON.stringify(value)}${m[2] || ""}${m[3].includes("\r") ? "\r" : ""}`;
+    return out;
+  }
+  return null;
+}
+
 function starterStack(clone) {
   const adapter = (n) => JSON.stringify(join(clone, "engine", "adapters", n));
   return [
@@ -2435,6 +2462,7 @@ function cmdSetup(flags) {
   const wrote = [];
   const leftAlone = [];
   const unresolved = [];
+  const unresolvedReasons = {};
 
   let text;
   if (existsSync(userPath)) {
@@ -2447,7 +2475,12 @@ function cmdSetup(flags) {
     text = readFileSync(example, "utf8");
     wrote.push(userPath);
   }
-  const user = (parseYamlSubset(text, userPath).user) || {};
+  let user;
+  try {
+    user = parseYamlSubset(text, userPath).user || {};
+  } catch (e) {
+    return refuse(`failed to parse ${userPath}: ${e.message}`, "fix or delete detent.user.yaml, then re-run detent setup");
+  }
   const isEmpty = (v) => v === undefined || v === null || v === "" || v === "''" || v === PLACEHOLDER_EMAIL;
   const gitCmd = process.env.DETENT_GIT_CMD || "git";
   const ghCmd = process.env.DETENT_GH_CMD || "gh";
@@ -2461,9 +2494,14 @@ function cmdSetup(flags) {
     const dotted = `user.${key}`;
     if (!isEmpty(user[key])) { leftAlone.push(dotted); continue; }
     const value = probe();
-    const line = new RegExp(`^(  ${key}:)[ \\t]*(?:""|''|${PLACEHOLDER_EMAIL.replace(".", "\\.")})?[ \\t]*$`, "m");
-    if (value === null || !line.test(text)) { unresolved.push(dotted); continue; }
-    text = text.replace(line, `$1 ${JSON.stringify(value)}`);
+    if (value === null) { unresolved.push(dotted); continue; }
+    const edited = fillUserKey(text.split("\n"), key, value);
+    if (edited === null) {
+      unresolved.push(dotted);
+      unresolvedReasons[dotted] = `no empty ${key}: line found under the top-level user: block`;
+      continue;
+    }
+    text = edited.join("\n");
     changed = true;
   }
   if (!Array.isArray(user.teams) || user.teams.length === 0) unresolved.push("user.teams");
@@ -2479,7 +2517,8 @@ function cmdSetup(flags) {
     wrote,
     left_alone: leftAlone,
     unresolved,
-    next_step: `detent run new --ticket <owner/repo#N> --repo ${repo}` +
+    ...(Object.keys(unresolvedReasons).length ? { unresolved_reasons: unresolvedReasons } : {}),
+    next_step: `detent run new --ticket <owner/repo#N> --repo ${shellQuote(repo)}` +
       (unresolved.length ? `; fill ${unresolved.join(", ")} in ${userPath} (run \`gh auth login\` first for user.github_login)` : ""),
   });
 }
