@@ -129,7 +129,7 @@ Every engine command prints one JSON line with a `next_step`. Do what it says, t
 detent gate open <gate-id> --repo ~/code/your-repo
 ```
 
-With curator installed this prints a `curator open` command and a `curator poll` command. Answer in the browser. Run `detent dashboard` to see every active run with its stage and pending gates.
+With curator installed this writes `.plans/<run-id>-<gate>.html`, a page with one question per pending decision and the plan or research text underneath, and prints a `curator open` command. Answer in the browser, then run `detent gate collect --run <run-id>`. It reads your clicks from curator and writes an answer into `decisions.json` only when it is exactly one of the decision's options. Anything else stays pending and is listed under `unresolved`. Comments you add are saved to `review-feedback.jsonl` in the run directory. Run `detent dashboard` to see every active run with its stage and pending gates.
 
 ### 4.3 You pushed a PR
 
@@ -270,7 +270,7 @@ A **provider pack** in the sense of `packs/example/stack.yaml` is a different fi
 
 | Command | Does |
 |---|---|
-| `detent run new --ticket <key>`, `detent next`, `detent stage ...`, `detent gate open <id>`, `detent socket call <name>`, `detent dashboard`, `detent bench <run-id>` | The engine runner. |
+| `detent run new --ticket <key>`, `detent next`, `detent stage ...`, `detent gate open <id>`, `detent gate collect --run <id>`, `detent socket call <name>`, `detent dashboard`, `detent bench <run-id>` | The engine runner. |
 | `detent curator ...` | Curator: `open`, `poll`, `reply`, `end`, `status`. |
 | `detent sentinel ...` | Sentinel: `scan`, `config-check`. |
 | `detent owl ...` | The owl orchestrator. |

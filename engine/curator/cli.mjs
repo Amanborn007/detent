@@ -19,7 +19,7 @@ const STATE_FILE = path.join(STATE_DIR, 'state.json');
 const POLL_FAILURES_FILE = path.join(STATE_DIR, 'poll-failures.json');
 
 const USAGE =
-  'Usage: curator open <file.html> | curator check <file.html> | curator poll <file> | curator drain | curator reply <file> -m "<msg>" | curator log <file> -m "<entry>" | curator answer <file> --question <id> --answer <value> [--note <text>] | curator end <file> | curator status';
+  'Usage: curator open <file.html> | curator check <file.html> | curator poll <file> | curator drain [<file>...] | curator reply <file> -m "<msg>" | curator log <file> -m "<entry>" | curator answer <file> --question <id> --answer <value> [--note <text>] | curator end <file> | curator status';
 
 function out(obj) {
   process.stdout.write(JSON.stringify(obj) + '\n');
@@ -466,7 +466,9 @@ async function cmdPoll(args) {
 // (the server resolves a non-empty queue immediately), so nothing blocks and no
 // background job needs to survive. Run it at the top of every turn.
 async function cmdDrain(args) {
-  parseArgs(args, {});
+  const { positionals } = parseArgs(args, {});
+  // Scoping to named files leaves every other session's queue untouched.
+  const only = positionals.length ? new Set(positionals.map((f) => canonicalFile(f, { mustExist: false }))) : null;
   const resolved = await resolveServer();
 
   // Discover sessions + pending counts without ever registering a waiter.
@@ -484,6 +486,7 @@ async function cmdDrain(args) {
     sessions = Object.entries((state && state.sessions) || {}).map(([key, s]) => ({ key, pending: (s.pending || []).length }));
   }
 
+  if (only) sessions = sessions.filter((s) => only.has(s.key));
   const pendingKeys = sessions.filter((s) => s.pending > 0).map((s) => s.key);
   if (pendingKeys.length === 0) {
     out({

@@ -18,7 +18,7 @@
 
 import {
   readFileSync, writeFileSync, appendFileSync, renameSync, existsSync,
-  mkdirSync, readdirSync, statSync, accessSync, constants, rmSync,
+  mkdirSync, readdirSync, statSync, accessSync, constants, rmSync, realpathSync, writeSync,
 } from "node:fs";
 import { join, resolve, dirname, delimiter, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,6 +56,10 @@ function primaryArtifact(stage) {
   return a ? a[0] : null;
 }
 
+// The answer a human records to accept a degraded state (CONTRACT.md,
+// "The proceed-degraded answer").
+const PROCEED_DEGRADED_ANSWER = "proceed degraded (accept degraded confidence)";
+
 // Named gates that block a stage's `end`. v0 ships one: the intent gate on plan.
 const STAGE_END_GATES = {
   plan: {
@@ -73,8 +77,22 @@ const STAGE_END_GATES = {
 // Output helpers — one JSON line, always a next_step, structured refusals.
 // ---------------------------------------------------------------------------
 
+// process.exit() drops a buffered stream write, and a pipe truncates past ~8KB.
+// Write synchronously and retry the EAGAIN a non-blocking pipe returns.
+function writeLineSync(line) {
+  const buf = Buffer.from(line, "utf8");
+  let off = 0;
+  while (off < buf.length) {
+    try {
+      off += writeSync(1, buf, off, buf.length - off);
+    } catch (e) {
+      if (e.code !== "EAGAIN") throw e;
+    }
+  }
+}
+
 function out(obj, code = 0) {
-  process.stdout.write(JSON.stringify(obj) + "\n");
+  writeLineSync(JSON.stringify(obj) + "\n");
   process.exit(code);
 }
 
@@ -364,8 +382,17 @@ function nextDecisionId(decisions) {
   return "D-" + String(max + 1).padStart(3, "0");
 }
 
+// A judgment decision answered with the degraded-proceed string is not
+// resolved: that answer is legal only for an external/infra/capability/data
+// unblock, never a bypass of the owner's own call.
+function isUnresolvedJudgment(d) {
+  return d.cause === "judgment" && d.answer === PROCEED_DEGRADED_ANSWER;
+}
+
 function pendingBlockers(decisions, stage) {
-  return decisions.filter((d) => d.status === "pending" && Array.isArray(d.blocks) && d.blocks.includes(stage));
+  return decisions.filter((d) =>
+    Array.isArray(d.blocks) && d.blocks.includes(stage) &&
+    (d.status === "pending" || isUnresolvedJudgment(d)));
 }
 
 // ---------------------------------------------------------------------------
@@ -1001,20 +1028,22 @@ function cmdGateOpen(gateId, flags) {
 
   const curator = curatorOnPath();
   if (curator) {
-    // curator open takes only a self-contained .html; the gate-request .json is not openable.
-    const html = join(detentRoot(), ".plans", `${runId}-${stage || "gate"}.html`);
+    const html = renderGateArtifact({ runId, runDir }, {
+      name: decision.gate || decision.id,
+      stage,
+      decisions: pendingFor(decisions, decision),
+    });
     out({
       ok: true,
       run_id: runId,
       mode: "curator",
       decision,
       gate_artifact: gateArtifact,
+      html,
       ...(parkHandoff || {}),
       next_step:
-        `author ${html} with a data-plan-question="${decision.id}" block (stage SKILL), then ` +
-        `curator open ${html} && curator poll ${html}` +
-        ` — poll does not touch decisions.json: transcribe each {type:"decision", question:"${decision.id}", answer}` +
-        ` it returns into ${join(runDir, "decisions.json")} verbatim with answered_by:"human"; then re-run the refused engine command`,
+        `curator open ${html} ; once the human has answered there, run: engine gate collect --run ${runId}` +
+        ` — it maps the curator answer into decisions.json; then re-run the refused engine command`,
     });
   }
   out({
@@ -1029,6 +1058,208 @@ function cmdGateOpen(gateId, flags) {
       `${join(runDir, "decisions.json")}: set status:"answered", answer:<one of ${JSON.stringify(decision.options || [])}>, ` +
       `answered_by:"human", answered_at:<ISO-8601>. Agents never write answers. Then re-run the refused engine command.`,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Gate page and `engine gate collect`: gate open writes one curator page per
+// (run, gate); collect maps the answers back. Only an exact option resolves one.
+// ---------------------------------------------------------------------------
+
+/** Pending decisions a human answers together with `decision` (same blocked stages). */
+function pendingFor(decisions, decision) {
+  const blocks = new Set(decision.blocks || []);
+  return decisions.filter((d) => d.status === "pending" &&
+    (d.id === decision.id || (Array.isArray(d.blocks) && d.blocks.some((b) => blocks.has(b)))));
+}
+
+function renderGateArtifact({ runId, runDir }, gate) {
+  const plansDir = join(detentRoot(), ".plans");
+  mkdirSync(plansDir, { recursive: true });
+  const file = join(plansDir, `${runId}-${gate.name}.html`);
+  const primary = (gate.stage && STAGE_ARTIFACTS[gate.stage]) || [];
+  const docs = [...new Set([...primary, ...Object.values(STAGE_ARTIFACTS).flat()])]
+    .filter((rel) => existsSync(join(runDir, rel)));
+  const docHtml = docs.map((rel, i) =>
+    `<details${i === 0 ? " open" : ""}><summary>${escapeHtml(rel)}</summary><p><strong>${i === 0 ? "The artifact this gate reviews" : "Earlier run artifact, for context"}: ${escapeHtml(rel)}</strong></p><pre>${escapeHtml(readFileSync(join(runDir, rel), "utf8"))}</pre></details>`,
+  ).join("\n");
+  const blocks = gate.decisions.map((d) => {
+    const options = (d.options || []).map((o) =>
+      `<div class="option" data-plan-option="${escapeHtml(o)}"><h3>${escapeHtml(o)}</h3></div>`,
+    ).join("\n");
+    return `<section>
+<h2>Decision ${escapeHtml(d.id)}</h2>
+<div data-plan-question="${escapeHtml(d.id)}">
+<p class="q-label">${escapeHtml(d.question || "")}</p>
+${d.context ? `<p class="sub">Context: ${escapeHtml(d.context)}</p>` : ""}
+<div class="options">
+${options}
+</div>
+</div>
+</section>`;
+  }).join("\n");
+  writeFileSync(file, `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gate ${escapeHtml(gate.name)}</title>
+<style>
+  :root { --paper:#faf8f5; --paper-2:#efece7; --ink:#16273c; --muted:#7e7c76; --rule:#e1ddd7;
+          --accent:#397882; --accent-tint:#bfe6ec; --mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --paper:#14181c; --paper-2:#1b2026; --ink:#e8e6e2; --muted:#98a2af;
+      --rule:#2b3037; --accent:#7fc3cd; --accent-tint:#1d3a40; }
+  }
+  * { box-sizing: border-box; min-width: 0; }
+  body { margin: 0; padding: 2rem 1rem 6rem; background: var(--paper); color: var(--ink);
+         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; line-height: 1.6; }
+  main { max-width: 52rem; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin: .2rem 0 1rem; }
+  h2 { font-size: 1.1rem; margin: 2rem 0 .5rem; }
+  h3 { font-size: .95rem; margin: 0; }
+  .eyebrow, .sub { font-family: var(--mono); font-size: .75rem; color: var(--muted); }
+  pre { background: var(--paper-2); border: 1px solid var(--rule); padding: 1rem; overflow-x: auto;
+        white-space: pre-wrap; font-family: var(--mono); font-size: .85rem; }
+  summary { cursor: pointer; font-family: var(--mono); font-size: .85rem; }
+  .q-label { font-weight: 600; }
+  .options { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .6rem; }
+  .option { border: 1px solid var(--rule); border-radius: .4rem; padding: .6rem 1rem; cursor: pointer; background: var(--paper-2); }
+  .option:hover { border-color: var(--accent); }
+  [data-curator-chosen] { border-color: var(--accent); background: var(--accent-tint); }
+</style>
+</head>
+<body>
+<main>
+<p class="eyebrow">${escapeHtml(runId)}${gate.stage ? ` · stage ${escapeHtml(gate.stage)}` : ""}</p>
+<h1>Needs your decision: ${escapeHtml(gate.name)}</h1>
+${blocks}
+<h2>What you are deciding on</h2>
+${docHtml || `<p class="sub">No stage artifact has been written yet.</p>`}
+</main>
+</body>
+</html>
+`);
+  return file;
+}
+
+// ---------------------------------------------------------------------------
+// engine gate collect — map curator feedback into decisions.json. Non-blocking
+// by design: it never waits for a human. Only an answer that is EXACTLY one of
+// the decision's options resolves a decision; everything else stays pending.
+// ---------------------------------------------------------------------------
+
+function gateHtmlsOf(runId) {
+  const plansDir = join(detentRoot(), ".plans");
+  if (!existsSync(plansDir)) return new Set();
+  return new Set(readdirSync(plansDir)
+    .filter((f) => f.startsWith(`${runId}-`) && f.endsWith(".html"))
+    .map((f) => realpathSync(join(plansDir, f))));
+}
+
+/** Parse a feedback file: a JSON array of items, a {prompts:[...]} payload, or curator-drain JSON lines. */
+function parseFeedbackText(text, label) {
+  const lines = (() => {
+    try { return [JSON.parse(text)]; } catch { return text.split("\n").filter((l) => l.trim()); }
+  })();
+  const items = [];
+  for (const line of lines) {
+    let v = line;
+    if (typeof line === "string") {
+      try { v = JSON.parse(line); } catch { throw new Error(`${label}: not valid JSON: ${line.slice(0, 120)}`); }
+    }
+    if (Array.isArray(v)) items.push(...v);
+    else if (v && Array.isArray(v.prompts)) items.push(...v.prompts);
+    else throw new Error(`${label}: expected an array of items or a {prompts:[...]} payload`);
+  }
+  return items;
+}
+
+/** Run `curator drain` and return the prompts addressed to this run's gate pages. */
+function drainCuratorFor(runId) {
+  const curator = curatorOnPath();
+  if (!curator) return { items: [], note: "curator not on PATH" };
+  const htmls = gateHtmlsOf(runId);
+  if (htmls.size === 0) return { items: [], note: "no gate page rendered for this run yet" };
+  const r = spawnSync(curator, ["drain", ...htmls], { encoding: "utf8", timeout: 30000 });
+  if (r.error) throw new Error(`curator drain could not run: ${r.error.message}`);
+  if (r.status !== 0) throw new Error(`curator drain exited ${r.status}: ${(r.stdout + r.stderr).trim().slice(-400)}`);
+  const items = [];
+  for (const line of r.stdout.split("\n").filter((l) => l.trim())) {
+    let v;
+    try { v = JSON.parse(line); } catch { throw new Error(`curator drain printed non-JSON: ${line.slice(0, 120)}`); }
+    if (!Array.isArray(v.prompts) || v.prompts.length === 0) continue;
+    let key = v.key;
+    try { key = realpathSync(v.key); } catch { /* a key that no longer exists cannot be ours */ }
+    if (!htmls.has(key)) throw new Error(`curator drain returned feedback for ${v.key}, which is not one of this run's gate pages`);
+    items.push(...v.prompts);
+  }
+  return { items };
+}
+
+function applyFeedback(runDir, items) {
+  const decisions = loadDecisions(runDir);
+  const answered = [];
+  const unresolved = [];
+  let feedback = 0;
+  for (const item of items) {
+    if (!item || typeof item !== "object") throw new Error(`feedback item is not an object: ${JSON.stringify(item)}`);
+    if (item.type !== "decision") {
+      appendFileSync(join(runDir, "review-feedback.jsonl"), JSON.stringify({ ts: nowIso(), ...item }) + "\n");
+      feedback++;
+      continue;
+    }
+    const d = decisions.find((x) => x.id === item.question);
+    const base = { id: item.question, answer: item.answer ?? null, ...(item.note ? { note: item.note } : {}) };
+    if (!d) { unresolved.push({ ...base, reason: "no such decision" }); continue; }
+    if (d.status !== "pending") { unresolved.push({ ...base, reason: `decision is ${d.status}, not pending` }); continue; }
+    if (typeof item.answer !== "string" || !Array.isArray(d.options) || !d.options.includes(item.answer)) {
+      unresolved.push({ ...base, reason: item.answer == null ? "no option chosen" : `'${item.answer}' is not one of the options` });
+      continue;
+    }
+    Object.assign(d, {
+      status: "answered", answer: item.answer, answered_by: "human", answered_via: "curator",
+      answered_at: new Date().toISOString(), ...(item.note ? { note: item.note } : {}),
+    });
+    answered.push(d.id);
+  }
+  if (answered.length) saveDecisions(runDir, decisions);
+  syncGateAnsweredEvents(runDir, decisions);
+  return { answered, unresolved, feedback, pending: decisions.filter((d) => d.status === "pending").map((d) => d.id) };
+}
+
+function collectResult(runId, runDir, items, extra = {}) {
+  if (items.length === 0) {
+    return { ok: true, run_id: runId, collected: 0, note: "nothing yet", answered: [], unresolved: [], feedback: 0, ...extra };
+  }
+  const r = applyFeedback(runDir, items);
+  return {
+    ok: true, run_id: runId, collected: items.length,
+    answered: r.answered, unresolved: r.unresolved, feedback: r.feedback, ...extra,
+    next_step: r.pending.length
+      ? `still pending: ${r.pending.join(", ")} — answer in curator, then: engine gate collect --run ${runId}`
+      : `all decisions answered — re-run the refused engine command`,
+  };
+}
+
+function cmdGateCollect(flags) {
+  const repo = repoOf(flags);
+  const { runId, runDir } = findRun(repo, flags);
+  let items;
+  let extra = {};
+  if (flags.file !== undefined) {
+    if (flags.file === true) refuse("--file requires a path", "engine gate collect --run <id> --file <feedback.json>");
+    const f = resolve(String(flags.file));
+    if (!existsSync(f)) refuse(`feedback file not found: ${f}`, "pass a curator feedback JSON file");
+    try { items = parseFeedbackText(readFileSync(f, "utf8"), f); } catch (e) { refuse(e.message, "fix the feedback file"); }
+  } else {
+    try {
+      const d = drainCuratorFor(runId);
+      items = d.items;
+      extra = d.note ? { curator: d.note } : {};
+    } catch (e) { fail(e.message, "check `curator status`, or pass --file <feedback.json>"); }
+  }
+  const res = collectResult(runId, runDir, items, extra);
+  out({ next_step: `waiting on a human: engine gate collect --run ${runId} again after they answer in curator`, ...res });
 }
 
 // ---------------------------------------------------------------------------
@@ -1906,7 +2137,7 @@ function cmdAdvisorConsult(flags) {
 // Dispatch.
 // ---------------------------------------------------------------------------
 
-const USAGE = "engine <run new|stage begin|stage end|gate open|socket call|next|dashboard|live|bench|eval|pack validate|respond|step|advisor consult|handoff|attempt|env|decide-why|spend|help> — see engine/cli/README.md";
+const USAGE = "engine <run new|stage begin|stage end|gate open|gate collect|socket call|next|dashboard|live|bench|eval|pack validate|respond|step|advisor consult|handoff|attempt|env|decide-why|spend|help> — see engine/cli/README.md";
 
 /**
  * cmdEval — wraps engine/eval/eval.mjs's runEval() for `engine eval`. An
@@ -2378,7 +2609,8 @@ function cmdHelp() {
       "run new": "engine run new --ticket <ref> [--repo <path>] [--slug <slug>] [--no-worktree] — create a run under the centralized <DETENT_ROOT>/.sdlc/ with a dedicated git worktree (the default flow)",
       "stage begin": "engine stage begin <stage> [--run <id>] [--repo <path>] — enter a stage (refuses illegal transitions)",
       "stage end": "engine stage end <stage> [--run <id>] [--repo <path>] — finish a stage (checks artifact + gates). implement: [--tdd-test <name> --tdd-red <sha> --tdd-green <sha> | --tdd-exempt <reason>] records the tdd block (implement records, never judges). recheck: asserts red_sha is an ancestor of green_sha via git cat-file/merge-base, proving ORDER only, never that the test was observed failing.",
-      "gate open": "engine gate open <gate-name-or-decision-id> [--run <id>] [--repo <path>] — render a pending human gate",
+      "gate open": "engine gate open <gate-name-or-decision-id> [--run <id>] [--repo <path>] — render a pending human gate; with curator on PATH it writes <DETENT_ROOT>/.plans/<run>-<gate>.html (one data-plan-question block per pending decision, stage artifacts embedded) and prints `curator open` then `engine gate collect`",
+      "gate collect": "engine gate collect --run <id> [--file <feedback.json>] — non-blocking: map curator answers into decisions.json (only an exact decision option resolves one; null/other answers stay pending and are listed under `unresolved`); selection/prompt feedback is appended to <run>/review-feedback.jsonl. Without --file it runs `curator drain` for the run's gate pages only.",
       "socket call": "engine socket call <name> [--payload-file <json>] [--stack <path>] — dispatch a socket per stack.yaml",
       "next": "engine next [--run <id>] [--repo <path>] — print the exact next command for the current run",
       "dashboard": "engine dashboard — render ALL runs under <DETENT_ROOT>/.sdlc/ into one curator artifact (stage, status, pending gates, age)",
@@ -2416,6 +2648,7 @@ function main() {
   if (a === "stage" && b === "begin") return cmdStageBegin(c, flags);
   if (a === "stage" && b === "end") return cmdStageEnd(c, flags);
   if (a === "gate" && b === "open") return cmdGateOpen(c, flags);
+  if (a === "gate" && b === "collect") return cmdGateCollect(flags);
   if (a === "socket" && b === "call") return cmdSocketCall(c, flags);
   if (a === "next") return cmdNext(flags);
   if (a === "dashboard") return cmdDashboard();
@@ -2434,9 +2667,14 @@ function main() {
   refuse(`unknown command: ${positional.join(" ") || "(none)"}`, USAGE);
 }
 
-try {
-  main();
-} catch (e) {
+function internalError(e) {
   // Loud, structured, never silent (error-handling rule: no swallowed errors).
   out({ ok: false, reason: `engine internal error: ${e.message}`, next_step: "this is a bug in engine.mjs — read the stack", stack: e.stack }, 1);
+}
+
+try {
+  const pending = main();
+  if (pending && typeof pending.catch === "function") pending.catch(internalError);
+} catch (e) {
+  internalError(e);
 }
