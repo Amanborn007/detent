@@ -167,15 +167,19 @@ Non-blocking. Maps curator feedback into `decisions.json`. An answer resolves a
 pending decision only if it is exactly one of its `options`
 (`status:"answered"`, `answered_by:"human"`, `answered_via:"curator"`). A `null`
 or non-option answer leaves the decision pending and is listed under
-`unresolved` with its note. Selection and prompt items are appended to
-`<run>/review-feedback.jsonl`. Without `--file` it runs
-`curator drain <this run's gate pages>`, so feedback for other pages stays
-queued, and it refuses feedback that curator attributes to any other page. With
+`unresolved` with its note. Every drained item, applied or not, is appended to
+`<run>/review-feedback.jsonl` before anything is validated. Without `--file` it
+runs `curator drain <this run's gate pages>`: exactly
+`.plans/<run-id>-<gate>.html` for the gates in this run's `decisions.json`, so
+another run whose id starts with this one is never touched and feedback for other
+pages stays queued. It refuses feedback that curator attributes to any other page. With
 nothing pending, no curator or no running server it returns
 `{collected:0, note:"nothing yet"}` immediately.
 
-A decision with `cause: "judgment"` that is answered with the proceed-degraded
-string still blocks the stages it names; see `engine/stages/CONTRACT.md`.
+A decision with `cause: "judgment"` cannot be resolved with the proceed-degraded
+string: `gate collect` rejects it as an answer, and a decision already holding it
+counts as pending, so `gate open` renders it again and a real answer resolves it.
+See `engine/stages/CONTRACT.md`.
 
 ### `engine socket call <name> [--payload-file f] [--stack <path>]`
 
