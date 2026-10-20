@@ -213,11 +213,12 @@ Sentinel is a tool and a hook, not a skill. It sits in the same loop.
 
 ## Hooks
 
-The plugin registers 15 hook entries that run 13 scripts, listed in `hooks/hooks.json`. Nine of the scripts stand down inside Claude Code background jobs (`CLAUDE_JOB_DIR`), and `comment-discipline`, `deslop-check` and `eval-gate` also stand down inside owl runs (`OWL_RUN`). `sentinel-autoscan` runs in both.
+The plugin registers 16 hook entries that run 14 scripts, listed in `hooks/hooks.json`. Nine of the scripts stand down inside Claude Code background jobs (`CLAUDE_JOB_DIR`), and `comment-discipline`, `deslop-check` and `eval-gate` also stand down inside owl runs (`OWL_RUN`). `sentinel-autoscan` runs in both.
 
 | Event | Scripts | What they do |
 |---|---|---|
 | SessionStart | `morning-brief-session.sh` | On the first session of a day, offer the brief. |
+| SessionStart | `cold-resume-warn.mjs` | When a resumed session's last turn is over an hour old, say the prompt cache has expired before the first turn runs. |
 | SessionStart, and after Write or Edit | `comment-discipline.sh`, `voice-discipline.sh` | Remind the model of your code-comment rules and your writing voice. |
 | After Bash | `sentinel-autoscan.sh` | After a push, `gh pr create` or `gh pr ready` on an open PR, request a referee review and start a scanner for non-draft PRs. |
 | After Bash | `eval-gate.sh`, `deslop-check.sh` | After a push, remind the model to run the evals or `/detent:deslop`. |
@@ -228,7 +229,18 @@ The plugin registers 15 hook entries that run 13 scripts, listed in `hooks/hooks
 
 The scanner waits 330 seconds, then scans every 300 seconds for up to 8 rounds. A new head commit restarts the window, up to 12 windows. Results go to `.local/inbox/<owner>__<repo>__pr<N>/respond-inbox.jsonl`, and the log is `sentinel-autoscan.log` in the same folder. Draft PRs get a referee review but no scanner.
 
-Kill switches, each set to `off`: `PR_AUTOREVIEW`, `REFEREE_AUTOREVIEW`, `SENTINEL_AUTOSCAN`, `EVAL_GATE`, `DESLOP`, `VOICE_DISCIPLINE` and `MORNING_HERALD_SESSION`. [hooks/README.md](../hooks/README.md) has the rest of the environment variables.
+`engine/statusline/session-cost-statusline.mjs` shows this session's spend and the share run in sub-agents. A plugin cannot set a status line, so add it to `~/.claude/settings.json` yourself:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "node /path/to/detent/engine/statusline/session-cost-statusline.mjs"
+  }
+}
+```
+
+Kill switches, each set to `off`: `PR_AUTOREVIEW`, `REFEREE_AUTOREVIEW`, `SENTINEL_AUTOSCAN`, `EVAL_GATE`, `DESLOP`, `VOICE_DISCIPLINE`, `MORNING_HERALD_SESSION` and `COLD_RESUME_WARN`. [hooks/README.md](../hooks/README.md) has the rest of the environment variables.
 
 ## Safety model
 
@@ -294,7 +306,7 @@ This is early software. Here is what is and is not checked.
 - **Owl** is tested against a stub `claude` binary, not the real one.
 - **The autoscan hook** is tested with stubbed `gh` output, not against a live PR in this repo.
 - **The stages** are prompts plus a state machine. They have not been run end to end on a public project.
-- **Known gaps.** The stage prompts in `engine/stages/` are not registered as plugin skills, so you point Claude at them by path. Two hook files, `hooks/cold-resume-warn.mjs` and `hooks/session-cost-statusline.mjs`, are on disk but not wired in `hooks.json`, and eval case S1-11 fails because of it.
+- **Known gaps.** The stage prompts in `engine/stages/` are not registered as plugin skills, so you point Claude at them by path.
 
 A worked example is planned: a full run on a small public repo, with the run directory committed.
 
