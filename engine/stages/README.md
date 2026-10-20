@@ -31,7 +31,7 @@ The stages are ordinary skills invoked by hand; state lives in files, so nothing
 to stay resident between invocations.
 
 1. In the target repo: `/sdlc-intake PROJ-2534`.
-   - Fetches the ticket via `sockets.ticket.fetch` from `stack.yaml`.
+   - Fetches the ticket with `detent socket call ticket`, per `stack.yaml`.
    - Creates `${DETENT_ROOT}/.sdlc/2026-07-04-proj-2534-<slug>/` (centralized in
      the detent clone, with the run's git worktree by default) with `run.json`,
      `stage-status.json`, `brief.md`, and pending `D-*` blocks in `decisions.json`.
@@ -76,8 +76,8 @@ node "${CLAUDE_PLUGIN_ROOT:-${DETENT_ROOT:-.}}/engine/cli/engine.mjs" dashboard 
 Parallel lanes own the engine blueprint, the sockets layer, curator, and the
 sentinel; this directory only *consumes* their interfaces:
 
-- **`stack.yaml` sockets** — intake calls `sockets.ticket.fetch`; research iterates
-  `sockets.knowledge.providers[]` and calls `sockets.skill_discovery`; ship calls
+- **`stack.yaml` sockets** — intake calls `sockets.ticket`; research iterates
+  `sockets.knowledge.providers[]` and calls `sockets.skill-discovery`; ship calls
   `sockets.reviewer` and `sockets.verifier`; respond falls back to
   `sockets.bot-comments` where sentinel is absent. The exact schema is owned by the
   sockets lane; the stage skills assume "a named socket resolves to a runnable

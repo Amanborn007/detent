@@ -250,8 +250,8 @@ Mechanically this reuses the existing gate rule — no new override machinery:
   what it feeds, and its `enable_action`. Options are the inline unblock controls:
   retry (now reachable), provide an offline copy at a path, or **proceed degraded**.
 - Because that decision `blocks: ["implement"]`, the standard gate rule already forbids
-  implement while it is `pending`. So even if the human answers the "Approve plan v1?"
-  decision, implement stays locked until each critical blocked source's
+  implement while it is `pending`. So even if the human answers the plan's `intent`
+  gate, implement stays locked until each critical blocked source's
   `access-degraded` decision is resolved by one of:
   1. **proceed degraded** — the human accepts the degraded confidence (recorded in
      `decisions.json`, `answered_by: "human"`); or

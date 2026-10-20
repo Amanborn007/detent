@@ -110,8 +110,8 @@ the draft plan included a retry-metrics dashboard the brief never asked for. Fil
 **D-006** (pending, blocks implement, quoting the divergence). `intent_check: done`
 (the check ran and its divergences are filed — approval is still ahead).
 
-Plan appends the approval gate **D-005** ("Approve plan v1 for implementation?",
-options approve / revise, blocks implement) and renders
+`engine stage end plan` appends the `intent` gate **D-005** (options approve /
+revise, blocks implement) and renders
 `.plans/2026-07-04-proj-2534-retry-webhooks-plan.html` — self-contained HTML with one
 `data-plan-question` block per pending decision:
 
