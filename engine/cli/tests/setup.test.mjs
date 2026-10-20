@@ -1,7 +1,8 @@
 // setup.test.mjs — `engine setup` fills detent.user.yaml, writes a starter stack.yaml.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { engine, mkRepo, detentHome } from "./helpers.mjs";
@@ -114,4 +115,80 @@ test("the written stack.yaml is accepted by the engine (knowledge socket call)",
   const r = engine(["socket", "call", "knowledge", "--payload-file", pf, "--repo", repo]);
   assert.equal(r.code, 0, r.stdout + r.stderr);
   assert.equal(r.json.ok, true);
+});
+
+function gitStub(name) {
+  const d = mkdtempSync(join(tmpdir(), "setup-stubs-"));
+  const git = stub(d, "git", `case "$2" in user.name) printf '%s\\n' '${name}';; user.email) echo ada@example.invalid;; esac`);
+  return { DETENT_GIT_CMD: git, DETENT_GH_CMD: stub(d, "gh", "echo octocat") };
+}
+
+test("setup writes a git name containing replacement patterns verbatim", () => {
+  const repo = mkRepo();
+  const r = engine(["setup", "--repo", repo], { env: gitStub("Pay $& Me $1") });
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  assert.ok(readFileSync(userYaml(), "utf8").includes('name: "Pay $& Me $1"'));
+});
+
+test("setup edits only the user block when an earlier block has a name key", () => {
+  const repo = mkRepo();
+  writeFileSync(userYaml(), 'org:\n  name: ""\nuser:\n  name: ""\n  email: ""\n  github_login: ""\n  teams: []\n');
+  const r = engine(["setup", "--repo", repo], { env: probes() });
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  const y = readFileSync(userYaml(), "utf8");
+  assert.match(y, /org:\n  name: ""\nuser:\n  name: "Ada Lovelace"\n/);
+  assert.ok(!r.json.unresolved.includes("user.name"));
+});
+
+test("setup lists a user key it cannot locate as unresolved and never writes it elsewhere", () => {
+  const repo = mkRepo();
+  writeFileSync(userYaml(), 'org:\n  name: ""\nuser:\n  email: ""\n  github_login: ""\n  teams: []\n');
+  const r = engine(["setup", "--repo", repo], { env: probes() });
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  const y = readFileSync(userYaml(), "utf8");
+  assert.match(y, /org:\n  name: ""\n/);
+  assert.doesNotMatch(y, /Ada Lovelace/);
+  assert.ok(r.json.unresolved.includes("user.name"));
+});
+
+test("setup handles a user block indented by four spaces", () => {
+  const repo = mkRepo();
+  writeFileSync(userYaml(), 'user:\n    name: ""\n    email: ""\n    github_login: ""\n    teams: []\n');
+  const r = engine(["setup", "--repo", repo], { env: probes() });
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  const y = readFileSync(userYaml(), "utf8");
+  assert.match(y, /\n    name: "Ada Lovelace"\n/);
+  assert.match(y, /\n    email: "ada@example\.invalid"\n/);
+  assert.deepEqual(r.json.unresolved.filter((k) => /name|email|github/.test(k)), []);
+});
+
+test("setup replaces a quoted placeholder email that has a trailing comment", () => {
+  const repo = mkRepo();
+  writeFileSync(userYaml(), 'user:\n  name: ""\n  email: "you@example.com"  # change me\n  github_login: ""\n  teams: []\n');
+  const r = engine(["setup", "--repo", repo], { env: probes() });
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  const y = readFileSync(userYaml(), "utf8");
+  assert.match(y, /email: "ada@example\.invalid"/);
+  assert.doesNotMatch(y, /you@example\.com/);
+  assert.ok(!r.json.unresolved.includes("user.email"));
+});
+
+test("setup quotes a repo path with spaces in next_step", () => {
+  const base = mkRepo();
+  const repo = join(base, "my repo");
+  mkdirSync(repo);
+  spawnSync("git", ["init", "-q", repo]);
+  const r = engine(["setup", "--repo", repo], { env: probes() });
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  assert.ok(r.json.next_step.includes(`--repo '${repo}'`), r.json.next_step);
+});
+
+test("setup refuses a malformed detent.user.yaml with one JSON line and exit 2", () => {
+  const repo = mkRepo();
+  writeFileSync(userYaml(), "user:\n  name: x\n junk line\n");
+  const r = engine(["setup", "--repo", repo], { env: probes() });
+  assert.equal(r.code, 2, r.stdout + r.stderr);
+  assert.equal(r.json.ok, false);
+  assert.match(r.json.reason, /detent\.user\.yaml/);
+  assert.doesNotMatch(r.stderr, /at .*engine\.mjs/);
 });
