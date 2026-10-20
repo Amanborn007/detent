@@ -116,10 +116,10 @@ Clerk loads local team profiles if you have any, so its estimates fit how a team
 
 ### 4.2 You have a ticket
 
-Say the ticket is `PROJ-123` and your work repo is `~/code/your-repo`.
+Say the ticket is GitHub issue `your-org/your-repo#123` and your work repo is `~/code/your-repo`. The built-in `gh-ticket` adapter takes the `owner/name#number` form; a tracker adapter of your own can take keys like `PROJ-123`.
 
 ```sh
-detent run new --ticket PROJ-123 --repo ~/code/your-repo   # creates the run and a worktree
+detent run new --ticket your-org/your-repo#123 --repo ~/code/your-repo   # creates the run and a worktree
 detent next --repo ~/code/your-repo                        # prints the next command
 ```
 
