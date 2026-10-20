@@ -73,7 +73,13 @@ const STAGE_END_GATES = {
 // Output helpers — one JSON line, always a next_step, structured refusals.
 // ---------------------------------------------------------------------------
 
+// There is no `engine` binary on PATH; under the detent wrapper, name the one that exists.
+function forCaller(text) {
+  return process.env.DETENT_CLI === "1" ? text.replace(/\bengine (?=(?:run|stage|gate|socket|next|dashboard|live|bench|eval|pack|respond|step|advisor|handoff|attempt|env|decide-why|spend|help)\b)/g, "detent ") : text;
+}
+
 function out(obj, code = 0) {
+  if (typeof obj.next_step === "string") obj.next_step = forCaller(obj.next_step);
   process.stdout.write(JSON.stringify(obj) + "\n");
   process.exit(code);
 }

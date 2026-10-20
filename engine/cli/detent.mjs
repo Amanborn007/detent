@@ -46,5 +46,5 @@ if (ROUTES[group]) {
   bin = 'node';
   args = [path.join(ENGINE_ROOT, 'cli', 'engine.mjs'), ...process.argv.slice(2)];
 }
-const r = spawnSync(bin, args, { stdio: 'inherit' });
+const r = spawnSync(bin, args, { stdio: 'inherit', env: { ...process.env, DETENT_CLI: '1' } });
 process.exit(r.status ?? 1);
