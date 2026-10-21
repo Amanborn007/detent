@@ -336,35 +336,76 @@ function runRepoOf(runDir) {
 }
 
 const RUN_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
+// A ref (ticket key or id fragment) never carries a path separator or a leading dot.
+const RUN_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function sameDir(a, b) {
+  if (!a || !b) return false;
+  try { return realpathSync(a) === realpathSync(b); } catch { return resolve(a) === resolve(b); }
+}
+
+function runIdsIn(sdlc) {
+  return existsSync(sdlc) ? readdirSync(sdlc).filter((d) => existsSync(join(sdlc, d, "run.json"))) : [];
+}
+
+// A ref of only digits and dashes is a date, which every run of the day shares.
+const DATE_ONLY = /^[\d-]+$/;
+
+/** Tier 2 of run resolution: a ticket key, then a substring that is neither a date nor a bare prefix. */
+function matchRunRef(sdlc, ref) {
+  const ids = runIdsIn(sdlc);
+  const want = slugify(ref);
+  const byTicket = ids.filter((id) => {
+    try { return slugify(String(readJson(join(sdlc, id, "run.json")).ticket_ref || "")) === want; } catch { return false; }
+  });
+  if (byTicket.length) return byTicket.sort();
+  const low = ref.toLowerCase();
+  if (DATE_ONLY.test(low)) return [];
+  return ids.filter((id) => id.includes(low) && !id.startsWith(low)).sort();
+}
+
+function runIsActive(runDir) {
+  try {
+    return Object.values(loadStatus(runDir).stages).some((s) => !["done", "skipped"].includes(s.status));
+  } catch { return false; }
+}
 
 function findRun(repo, flags) {
   const sdlc = sdlcHome();
   if (flags.run) {
-    if (flags.run === true || !RUN_ID_RE.test(flags.run)) {
+    if (flags.run === true || !RUN_REF_RE.test(flags.run)) {
       refuse(`invalid run id ${JSON.stringify(flags.run)}: a run id matches ${RUN_ID_RE}`, "pass the run id exactly as `engine dashboard` lists it");
     }
-    // --run resolves regardless of --repo: multi-repo tasks share the one home.
-    const runDir = join(sdlc, flags.run);
-    if (!existsSync(join(runDir, "run.json"))) {
-      refuse(`no run '${flags.run}' under ${sdlc}`, "engine run new --ticket <ref> to create one, or check --run");
+    const ref = String(flags.run);
+    // An exact id resolves regardless of --repo: multi-repo tasks share the one home.
+    if (RUN_ID_RE.test(ref) && existsSync(join(sdlc, ref, "run.json"))) return { runId: ref, runDir: join(sdlc, ref) };
+    const hits = matchRunRef(sdlc, ref);
+    if (hits.length === 1) return { runId: hits[0], runDir: join(sdlc, hits[0]) };
+    if (hits.length > 1) {
+      refuse(`'${ref}' matches ${hits.length} runs — ambiguous`, "pass the full --run <run-id>", { runs: hits });
     }
-    return { runId: flags.run, runDir };
+    refuse(`no run '${ref}' under ${sdlc}`, "engine run new --ticket <ref> to create one, or check --run");
   }
   if (!existsSync(sdlc)) {
     refuse(`no .sdlc/ directory in ${sdlc.replace(/\/\.sdlc$/, "")} — no runs exist`, "engine run new --ticket <ref> [--repo <path>]");
   }
-  // Without --run, scope to runs whose run.json records this work repo.
-  const runs = readdirSync(sdlc)
-    .filter((d) => existsSync(join(sdlc, d, "run.json")))
-    .filter((d) => runRepoOf(join(sdlc, d)) === repo);
-  if (runs.length === 0) {
+  const mine = runIdsIn(sdlc).filter((d) => sameDir(runRepoOf(join(sdlc, d)), repo));
+  if (mine.length === 0) {
     refuse(`no runs for repo ${repo} under ${sdlc}`,
       "engine run new --ticket <ref> [--repo <path>], or pass --run <run-id> (runs list: engine dashboard)");
   }
-  if (runs.length > 1) {
-    refuse(`multiple runs for repo ${repo} under ${sdlc} — ambiguous`, "pass --run <run-id>", { runs: runs.sort() });
+  const active = mine.filter((d) => runIsActive(join(sdlc, d)));
+  if (active.length === 0) {
+    refuse(`every run for repo ${repo} is finished`, "engine run new --ticket <ref> for new work, or pass --run <run-id>", { runs: mine.sort() });
   }
-  return { runId: runs[0], runDir: join(sdlc, runs[0]) };
+  const created = (d) => { try { return String(readJson(join(sdlc, d, "run.json")).created_at || ""); } catch { return ""; } };
+  active.sort((a, b) => (created(b) < created(a) ? -1 : created(b) > created(a) ? 1 : (b < a ? -1 : 1)));
+  return { runId: active[0], runDir: join(sdlc, active[0]) };
+}
+
+/** For commands that also take the run as a positional id. */
+function findRunFor(flags, positionalId) {
+  return findRun(repoOf(flags), { ...flags, run: positionalId || flags.run || undefined });
 }
 
 function loadStatus(runDir) {
@@ -934,10 +975,6 @@ function cmdStageEnd(stage, flags) {
 function cmdStep(label, flags) {
   if (!label || typeof label !== "string" || !label.trim()) {
     refuse("step requires a label",
-      "engine step <label> --run <id> [--repo <path>] [--kind tool|thinking|plan|answer] [--status todo|doing|done]");
-  }
-  if (!flags.run || flags.run === true) {
-    refuse("step requires --run <id>",
       "engine step <label> --run <id> [--repo <path>] [--kind tool|thinking|plan|answer] [--status todo|doing|done]");
   }
   const repo = repoOf(flags);
@@ -1911,15 +1948,7 @@ function cmdDashboard() {
 // ---------------------------------------------------------------------------
 
 function cmdLive(runId, flags) {
-  const id = runId || (flags.run && flags.run !== true ? String(flags.run) : null);
-  if (!id) {
-    refuse("live requires a run id",
-      "engine live <run-id> [--run <id>] [--watch [--interval-ms 500] [--timeout-s N]]  (list runs: engine dashboard)");
-  }
-  const runDir = join(sdlcHome(), id);
-  if (!existsSync(join(runDir, "run.json"))) {
-    refuse(`no run '${id}' under ${sdlcHome()}`, "check the run id (engine dashboard lists all runs)");
-  }
+  const { runId: id, runDir } = findRunFor(flags, runId);
   const root = detentRoot();
   const plansDir = join(root, ".plans");
   mkdirSync(plansDir, { recursive: true });
@@ -2104,12 +2133,7 @@ function cmdLive(runId, flags) {
 // ---------------------------------------------------------------------------
 
 function cmdBench(runId, flags) {
-  const id = runId || (flags.run && flags.run !== true ? flags.run : null);
-  if (!id) refuse("bench requires a run id", "engine bench <run-id>  (list runs: engine dashboard)");
-  const runDir = join(sdlcHome(), id);
-  if (!existsSync(join(runDir, "run.json"))) {
-    refuse(`no run '${id}' under ${sdlcHome()}`, "check the run id (engine dashboard lists all runs)");
-  }
+  const { runId: id, runDir } = findRunFor(flags, runId);
   // Make sure any human answers recorded since the last CLI touch are on the
   // timeline before we measure gate wait.
   syncGateAnsweredEvents(runDir, loadDecisions(runDir));
@@ -2278,12 +2302,7 @@ function cmdEval(flags) {
  * cut the episode — but nothing can do it silently.
  */
 function cmdHandoff(runId, flags) {
-  const id = runId || (flags.run && flags.run !== true ? flags.run : null);
-  if (!id) refuse("handoff requires a run id", "engine handoff <run-id>  (list runs: engine dashboard)");
-  const runDir = join(sdlcHome(), id);
-  if (!existsSync(join(runDir, "run.json"))) {
-    refuse(`no run '${id}' under ${sdlcHome()}`, "check the run id (engine dashboard lists all runs)");
-  }
+  const { runId: id, runDir } = findRunFor(flags, runId);
 
   // --stage lands in a filesystem path below, so it is validated against the
   // known stage list first: "../../x" would otherwise escape the handoff
@@ -2351,12 +2370,7 @@ function cmdHandoff(runId, flags) {
  * ends, and the whole point is that a dead end stays dead.
  */
 function cmdAttempt(approach, flags) {
-  const runId = flags.run && flags.run !== true ? flags.run : null;
-  if (!runId) refuse("attempt requires --run", 'engine attempt "<approach>" --run <id> --outcome failed');
-  const runDir = join(sdlcHome(), runId);
-  if (!existsSync(join(runDir, "run.json"))) {
-    refuse(`no run '${runId}' under ${sdlcHome()}`, "check the run id (engine dashboard lists all runs)");
-  }
+  const { runId, runDir } = findRunFor(flags, null);
 
   // `--none`: assert that nothing was rejected. Runs created before
   // attempts.jsonl was initialized at birth have no log, and the handoff
@@ -2435,12 +2449,7 @@ function cmdAttempt(approach, flags) {
  * `decisions.json`.
  */
 function cmdDecideWhy(flags) {
-  const runId = flags.run && flags.run !== true ? flags.run : null;
-  if (!runId) refuse("decide-why requires --run", 'engine decide-why --run <id> --decision <D-00N> --option "<opt>" --why "<reason>"');
-  const runDir = join(sdlcHome(), runId);
-  if (!existsSync(join(runDir, "run.json"))) {
-    refuse(`no run '${runId}' under ${sdlcHome()}`, "check the run id (engine dashboard lists all runs)");
-  }
+  const { runId, runDir } = findRunFor(flags, null);
   const decision = flags.decision && flags.decision !== true ? String(flags.decision) : null;
   const option = flags.option && flags.option !== true ? String(flags.option) : null;
   const why = flags.why && flags.why !== true ? String(flags.why) : null;
@@ -2495,12 +2504,7 @@ function cmdDecideWhy(flags) {
  * stale entry a human can see.
  */
 function cmdEnv(flags) {
-  const runId = flags.run && flags.run !== true ? flags.run : null;
-  if (!runId) refuse("env requires --run", 'engine env --run <id> --verify "<test command>" [--build "<cmd>"] [--gotcha "<trap>"]');
-  const runDir = join(sdlcHome(), runId);
-  if (!existsSync(join(runDir, "run.json"))) {
-    refuse(`no run '${runId}' under ${sdlcHome()}`, "check the run id (engine dashboard lists all runs)");
-  }
+  const { runId, runDir } = findRunFor(flags, null);
   const path = join(runDir, "env.json");
   let env = { commands: {}, gotchas: [] };
   if (existsSync(path)) {
