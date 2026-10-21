@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Replays a `claude -p --verbose --output-format stream-json` transcript as terminal-style text, and optionally as one
-// self-contained HTML page. Usage: node render-transcript.mjs <transcript.jsonl|-> [--html out.html] [--prompt "text"]
+// self-contained HTML page. Usage: node render-transcript.mjs <transcript.jsonl|-> [more.jsonl ...] [--html out.html] [--prompt "text"]
 import { readFileSync, writeFileSync } from "node:fs";
 
 const RESULT_LINES = 4;
@@ -77,7 +77,7 @@ export function renderText(items) {
       out.push(`  ⎿ ${head}${shown[0] ?? ""}`, ...shown.slice(1).map((l) => `     ${l}`));
       if (more > 0) out.push(`     … +${more} more lines`);
       out.push("");
-    } else out.push(`— ${it.text}`);
+    } else out.push(`— ${it.text}`, "");
   }
   return out.join("\n") + "\n";
 }
@@ -132,9 +132,8 @@ function main(argv) {
     } else if (a.startsWith("--")) throw new Error(`unknown flag ${a}`);
     else pos.push(a);
   }
-  if (pos.length !== 1) throw new Error("usage: render-transcript.mjs <transcript.jsonl|-> [--html out.html] [--prompt \"text\"]");
-  const file = pos[0];
-  const items = toItems(parseTranscript(readFileSync(file === "-" ? 0 : file, "utf8"), file), flags.prompt);
+  if (pos.length < 1) throw new Error("usage: render-transcript.mjs <transcript.jsonl|-> [more.jsonl ...] [--html out.html] [--prompt \"text\"]");
+  const items = pos.flatMap((file) => toItems(parseTranscript(readFileSync(file === "-" ? 0 : file, "utf8"), file), flags.prompt));
   process.stdout.write(renderText(items));
   if (flags.html) writeFileSync(flags.html, renderHtml(items, "detent in Claude Code: replay"));
 }
