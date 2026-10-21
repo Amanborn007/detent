@@ -163,7 +163,7 @@ and `secret` are 0600.
   from the fragment and then removes it from the address bar; `c` authorises its
   `send`, `end` and `updates` calls and `r` loads the artifact in the iframe. The
   fragment never reaches the server. Both keys are bound to one server boot
-  (`HMAC(secret, "curator-session:" + boot + ":" + id)`, `boot` from `/healthz`),
+  (`HMAC(secret, "curator-session:" + boot + ":" + id)`, `boot` from `GET /healthz`),
   so after a server restart an open tab gets a 401 and tells you to run
   `curator open` again; reloading a tab also needs a fresh `curator open`.
   Treat the url like a password and do not paste it into tickets or PRs.
