@@ -98,7 +98,7 @@ test("H2: managed permissions.allow and unknown permission keys are refused", as
 test("M1: claudeTmp must be a fresh private dir strictly under the step root", async () => {
   const { buildImplementEnv } = await load();
   const ctx = mkCtx();
-  const env = (over) => buildImplementEnv({ PATH: "/usr/bin" }, { ...ctx, ...over });
+  const env = (over) => buildImplementEnv({ PATH: "/usr/bin", USER: "u" },{ ...ctx, ...over });
   for (const bad of ["/tmp", "/private/tmp", ctx.userTmp, tmpdir(), ctx.sroot, dirname(ctx.sroot), ctx.home, "relative"]) {
     assert.throws(() => env({ claudeTmp: bad }), Error, bad);
   }
@@ -140,7 +140,7 @@ test("M2: the per-uid claude tmp dirs and the user's TMPDIR are denied for read"
 test("L1/L3/L4: shell, chrome and CLAUDE.md loading are pinned", async () => {
   const { buildImplementEnv, buildImplementArgs } = await load();
   const ctx = mkCtx();
-  const env = buildImplementEnv({ PATH: "/usr/bin" }, ctx);
+  const env = buildImplementEnv({ PATH: "/usr/bin", USER: "u" },ctx);
   assert.equal(env.CLAUDE_CODE_SHELL, "/bin/bash");
   assert.equal(env.CLAUDE_CODE_DISABLE_CLAUDE_MDS, "1");
   assert.ok(buildImplementArgs(ctx).includes("--no-chrome"));
@@ -149,7 +149,7 @@ test("L1/L3/L4: shell, chrome and CLAUDE.md loading are pinned", async () => {
 test("auth: the child gets the real HOME as given and loads no user, project or local settings", async () => {
   const { buildImplementEnv, buildImplementArgs } = await load();
   const ctx = mkCtx();
-  assert.equal(buildImplementEnv({ PATH: "/usr/bin", HOME: "/elsewhere" }, ctx).HOME, ctx.home);
+  assert.equal(buildImplementEnv({ PATH: "/usr/bin", USER: "u", HOME: "/elsewhere" }, ctx).HOME, ctx.home);
   const a = buildImplementArgs(ctx);
   assert.equal(a[a.indexOf("--setting-sources") + 1], "");
 });
