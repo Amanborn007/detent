@@ -79,7 +79,7 @@ const STAGE_END_GATES = {
 
 // There is no `engine` binary on PATH; under the detent wrapper, name the one that exists.
 function forCaller(text) {
-  return process.env.DETENT_CLI === "1" ? text.replace(/\bengine (?=(?:setup|run|stage|gate|socket|next|dashboard|live|bench|eval|pack|respond|step|advisor|handoff|attempt|env|decide-why|spend|help)\b)/g, "detent ") : text;
+  return process.env.DETENT_CLI === "1" ? text.replace(/\bengine (?=(?:setup|run|stage|gate|drive|socket|next|dashboard|live|bench|eval|pack|respond|step|advisor|handoff|attempt|env|decide-why|spend|help)\b)/g, "detent ") : text;
 }
 
 // process.exit() drops a buffered stream write, and a pipe truncates past ~8KB.
