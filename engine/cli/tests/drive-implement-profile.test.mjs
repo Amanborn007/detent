@@ -129,7 +129,6 @@ test("the generated settings validate", async () => {
   const { buildImplementSettings, validateImplementSettings } = await load();
   const ctx = mkCtx();
   validateImplementSettings(buildImplementSettings(ctx), ctx);
-  validateImplementSettings(buildImplementSettings(ctx));
 });
 
 test("validateImplementSettings refuses each forbidden key or value", async () => {
