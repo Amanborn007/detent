@@ -335,9 +335,14 @@ function runRepoOf(runDir) {
   }
 }
 
+const RUN_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
+
 function findRun(repo, flags) {
   const sdlc = sdlcHome();
   if (flags.run) {
+    if (flags.run === true || !RUN_ID_RE.test(flags.run)) {
+      refuse(`invalid run id ${JSON.stringify(flags.run)}: a run id matches ${RUN_ID_RE}`, "pass the run id exactly as `engine dashboard` lists it");
+    }
     // --run resolves regardless of --repo: multi-repo tasks share the one home.
     const runDir = join(sdlc, flags.run);
     if (!existsSync(join(runDir, "run.json"))) {
@@ -648,14 +653,13 @@ function requireKnownStage(stage) {
   }
 }
 
-function cmdStageBegin(stage, flags) {
-  requireKnownStage(stage);
-  const repo = repoOf(flags);
-  const { runId, runDir } = findRun(repo, flags);
+/** Pure stage begin: returns {ok:true, payload} or {ok:false, refusal}; never prints or exits. */
+function beginStage(stage, repo, runId, runDir) {
+  const no = (reason, next_step, extra = {}) => ({ ok: false, refusal: { reason, next_step, extra } });
   const status = loadStatus(runDir);
   const entry = status.stages[stage];
   if (entry.status === "done") {
-    refuse(`stage '${stage}' is already done — re-running a stage is a NEW run (run-ids are immutable)`,
+    return no(`stage '${stage}' is already done — re-running a stage is a NEW run (run-ids are immutable)`,
       "engine run new --ticket <ref> to start a fresh run");
   }
   // D2: begin refuses when any prior stage is not done. A "skipped" stage
@@ -664,7 +668,7 @@ function cmdStageBegin(stage, flags) {
   const priors = STAGES.slice(0, STAGES.indexOf(stage));
   const notDone = priors.filter((s) => !["done", "skipped"].includes(status.stages[s].status));
   if (notDone.length > 0) {
-    refuse(
+    return no(
       `illegal transition: cannot begin '${stage}' — prior stage(s) not done: ${notDone.join(", ")}`,
       `engine next --run ${runId} to see the current stage`,
       { blocking_stages: notDone },
@@ -679,7 +683,7 @@ function cmdStageBegin(stage, flags) {
     status.stages[stage] = { status: "blocked", blocked_on: ids, updated_at: nowIso() };
     saveStatus(runDir, status);
     appendEvent(runDir, { event: "stage_blocked", stage, blocked_on: ids });
-    refuse(
+    return no(
       `gate rule: pending decision(s) block '${stage}': ${ids.join(", ")} — the engine never skips a pending gate`,
       `engine gate open ${blockers[0].gate || ids[0]} --run ${runId} --repo ${repo}`,
       { blocked_on: ids },
@@ -689,15 +693,27 @@ function cmdStageBegin(stage, flags) {
   saveStatus(runDir, status);
   appendEvent(runDir, { event: "stage_begin", stage });
   const artifacts = STAGE_ARTIFACTS[stage];
-  out({
+  return {
     ok: true,
-    run_id: runId,
-    stage,
-    status: "in_progress",
-    next_step: artifacts
-      ? `produce ${artifacts.join(" and ")} in ${runDir}, then: engine stage end ${stage} --run ${runId} --repo ${repo}`
-      : `do the ${stage} work, then: engine stage end ${stage} --run ${runId} --repo ${repo}`,
-  });
+    payload: {
+      ok: true,
+      run_id: runId,
+      stage,
+      status: "in_progress",
+      next_step: artifacts
+        ? `produce ${artifacts.join(" and ")} in ${runDir}, then: engine stage end ${stage} --run ${runId} --repo ${repo}`
+        : `do the ${stage} work, then: engine stage end ${stage} --run ${runId} --repo ${repo}`,
+    },
+  };
+}
+
+function cmdStageBegin(stage, flags) {
+  requireKnownStage(stage);
+  const repo = repoOf(flags);
+  const { runId, runDir } = findRun(repo, flags);
+  const r = beginStage(stage, repo, runId, runDir);
+  if (!r.ok) refuse(r.refusal.reason, r.refusal.next_step, r.refusal.extra);
+  out(r.payload);
 }
 
 /**
@@ -783,14 +799,13 @@ function parkStageOnGate(runDir, status, stage, gateDef, gate) {
   return handoffOnPark(runDir, stage);
 }
 
-function cmdStageEnd(stage, flags) {
-  requireKnownStage(stage);
-  const repo = repoOf(flags);
-  const { runId, runDir } = findRun(repo, flags);
+/** Pure stage end: returns {ok:true, payload} or {ok:false, refusal}; never prints or exits. */
+function endStage(stage, repo, runId, runDir, tddRecord) {
+  const no = (reason, next_step, extra = {}) => ({ ok: false, refusal: { reason, next_step, extra } });
   const status = loadStatus(runDir);
   const entry = status.stages[stage];
   if (entry.status !== "in_progress" && entry.status !== "blocked") {
-    refuse(`cannot end '${stage}': it is '${entry.status}', not in_progress (was it ever begun?)`,
+    return no(`cannot end '${stage}': it is '${entry.status}', not in_progress (was it ever begun?)`,
       `engine stage begin ${stage} --run ${runId} --repo ${repo}`);
   }
   const endBlockers = pendingBlockers(loadDecisions(runDir), stage);
@@ -804,39 +819,16 @@ function cmdStageEnd(stage, flags) {
   // re-run fixes them all rather than one refusal per file.
   const missing = (STAGE_ARTIFACTS[stage] || []).filter((a) => !existsSync(join(runDir, a)));
   if (missing.length > 0) {
-    refuse(`cannot end '${stage}': required artifact missing: ${missing.join(", ")} (expected in ${runDir})`,
+    return no(`cannot end '${stage}': required artifact missing: ${missing.join(", ")} (expected in ${runDir})`,
       `write ${missing.join(" and ")}, then re-run: engine stage end ${stage} --run ${runId} --repo ${repo}`,
       { missing_artifact: missing });
-  }
-  // implement RECORDS its tdd block here (test_name, red_sha, green_sha, or
-  // an exempt reason); it never judges its own ordering. Optional at the CLI
-  // level, omitting it just means recheck will refuse until it is recorded.
-  let tddRecord = null;
-  if (stage === "implement") {
-    const exempt = flags["tdd-exempt"] && flags["tdd-exempt"] !== true ? String(flags["tdd-exempt"]) : null;
-    const testName = flags["tdd-test"] && flags["tdd-test"] !== true ? String(flags["tdd-test"]) : null;
-    const redSha = flags["tdd-red"] && flags["tdd-red"] !== true ? String(flags["tdd-red"]) : null;
-    const greenSha = flags["tdd-green"] && flags["tdd-green"] !== true ? String(flags["tdd-green"]) : null;
-    if (exempt && (testName || redSha || greenSha)) {
-      refuse("--tdd-exempt cannot be combined with --tdd-test/--tdd-red/--tdd-green",
-        "record either a real tdd block or an exemption, never both");
-    }
-    if (exempt) {
-      tddRecord = { exempt };
-    } else if (testName || redSha || greenSha) {
-      if (!(testName && redSha && greenSha)) {
-        refuse("recording a tdd block requires --tdd-test, --tdd-red, and --tdd-green together",
-          'engine stage end implement --tdd-test "<name>" --tdd-red <sha> --tdd-green <sha>  (or --tdd-exempt "<reason>" for a CONDITIONAL-skip run)');
-      }
-      tddRecord = { test_name: testName, red_sha: redSha, green_sha: greenSha };
-    }
   }
   // recheck ASSERTS the ordering implement recorded, from git objects, never
   // from prose. Structural, so it refuses loudly rather than filing a gate.
   if (stage === "recheck") {
     const tddCheck = checkTddOrdering(repo, status);
     if (!tddCheck.ok) {
-      refuse(`cannot end 'recheck': TDD ordering check failed, ${tddCheck.reason}`,
+      return no(`cannot end 'recheck': TDD ordering check failed, ${tddCheck.reason}`,
         "fix the tdd block implement recorded in stage-status.json (or record a genuine --tdd-exempt at implement), then re-run: engine stage end recheck",
         { tdd_check: tddCheck });
     }
@@ -848,14 +840,14 @@ function cmdStageEnd(stage, flags) {
     const gate = raiseEndGate(runDir, stage, gateDef);
     if (gate.status === "pending") {
       const ho = parkStageOnGate(runDir, status, stage, gateDef, gate);
-      refuse(
+      return no(
         `cannot end '${stage}': the ${gateDef.name} gate (${gate.id}) is pending — a human must answer it`,
         `engine gate open ${gateDef.name} --run ${runId} --repo ${repo}`,
         { gate: gateDef.name, decision_id: gate.id, ...ho },
       );
     }
     if (gate.status === "answered" && gate.answer === "revise") {
-      refuse(
+      return no(
         `the ${gateDef.name} gate verdict is 'revise' — loop back, update ${primaryArtifact(stage) || "the stage artifact"}, and re-raise the gate (new decision block)`,
         `revise per the gate annotations, then engine stage end ${stage} again after a fresh gate approval`,
         { gate: gateDef.name, decision_id: gate.id, verdict: "revise" },
@@ -879,7 +871,7 @@ function cmdStageEnd(stage, flags) {
   // next command, and an insufficient handoff downgrades the advice rather
   // than withholding it.
   const ho = handoffOnPark(runDir, stage);
-  out({
+  return { ok: true, payload: {
     ok: true,
     run_id: runId,
     stage,
@@ -893,7 +885,40 @@ function cmdStageEnd(stage, flags) {
     next_step: next
       ? `engine stage begin ${next} --run ${runId} --repo ${repo}`
       : "run complete — all stages done",
-  });
+  } };
+}
+
+
+function cmdStageEnd(stage, flags) {
+  requireKnownStage(stage);
+  const repo = repoOf(flags);
+  const { runId, runDir } = findRun(repo, flags);
+  // implement RECORDS its tdd block here (test_name, red_sha, green_sha, or
+  // an exempt reason); it never judges its own ordering. Optional at the CLI
+  // level, omitting it just means recheck will refuse until it is recorded.
+  let tddRecord = null;
+  if (stage === "implement") {
+    const exempt = flags["tdd-exempt"] && flags["tdd-exempt"] !== true ? String(flags["tdd-exempt"]) : null;
+    const testName = flags["tdd-test"] && flags["tdd-test"] !== true ? String(flags["tdd-test"]) : null;
+    const redSha = flags["tdd-red"] && flags["tdd-red"] !== true ? String(flags["tdd-red"]) : null;
+    const greenSha = flags["tdd-green"] && flags["tdd-green"] !== true ? String(flags["tdd-green"]) : null;
+    if (exempt && (testName || redSha || greenSha)) {
+      refuse("--tdd-exempt cannot be combined with --tdd-test/--tdd-red/--tdd-green",
+        "record either a real tdd block or an exemption, never both");
+    }
+    if (exempt) {
+      tddRecord = { exempt };
+    } else if (testName || redSha || greenSha) {
+      if (!(testName && redSha && greenSha)) {
+        refuse("recording a tdd block requires --tdd-test, --tdd-red, and --tdd-green together",
+          'engine stage end implement --tdd-test "<name>" --tdd-red <sha> --tdd-green <sha>  (or --tdd-exempt "<reason>" for a CONDITIONAL-skip run)');
+      }
+      tddRecord = { test_name: testName, red_sha: redSha, green_sha: greenSha };
+    }
+  }
+  const r = endStage(stage, repo, runId, runDir, tddRecord);
+  if (!r.ok) refuse(r.refusal.reason, r.refusal.next_step, r.refusal.extra);
+  out(r.payload);
 }
 
 // ---------------------------------------------------------------------------
@@ -1158,6 +1183,7 @@ ${options}
 <main>
 <p class="eyebrow">${escapeHtml(runId)} · gate ${escapeHtml(gate.name)}${gate.stage ? ` · stage ${escapeHtml(gate.stage)}` : ""}</p>
 <h1>Needs your decision</h1>
+${gate.noteHtml || ""}
 ${blocks}
 <h2>What you are deciding on</h2>
 ${docHtml || `<p class="sub">No stage artifact has been written yet.</p>`}
@@ -1302,452 +1328,19 @@ function cmdGateCollect(flags) {
 }
 
 // ---------------------------------------------------------------------------
-// engine drive (experimental) — run a run end to end; stop only when a human
-// decision/review is needed. Each stage is one headless `claude -p` child that
-// follows the stage SKILL; drive itself only decides, spawns and measures.
+// engine drive — contained intake -> research -> plan (see engine/cli/drive/drive.mjs).
+// The orchestration lives in its own module; it gets the engine's internals by injection.
 // ---------------------------------------------------------------------------
 
-const ENGINE_FILE = fileURLToPath(import.meta.url);
-const ENGINE_ROOT = resolve(dirname(ENGINE_FILE), "..");
-const DRIVE_PROFILE_FILE = join(dirname(ENGINE_FILE), "profiles", "drive.json");
-const DRIVE_DEFAULT_MODEL = "claude-sonnet-5-5";
-const DRIVE_DEFAULT_BUDGET_USD = 5;
-
-const DRIVE_DENY_ALWAYS = [
-  "Bash(git push*)", "Bash(git reset*)", "Bash(git rebase*)", "Bash(git merge*)", "Bash(git clean*)",
-  "Bash(git stash*)", "Bash(git checkout*)", "Bash(gh pr create*)", "Bash(gh pr merge*)",
-  "Bash(gh *)", "Bash(git config*)", "Bash(git remote*)", "Bash(git -c*)",
-];
-const DRIVE_DENY_NON_IMPLEMENT = ["Bash(git commit*)", "Bash(git add*)"];
-
-// Every URL form a push can take; env config outranks file config, so a child cannot undo it.
-const PUSH_BLOCK_PREFIXES = ["https://", "http://", "git@", "ssh://", "git://", "file://", "/", "."];
-
-// A declared verify command is allowed only when it is one plain command of a known runner.
-const VERIFY_RUNNERS = new Set(["npm", "pnpm", "yarn", "node", "pytest", "python", "python3", "go", "cargo",
-  "make", "mvn", "gradle", "./gradlew", "bundle", "rspec", "deno", "bun", "dotnet"]);
-
-function driveRefuse(label, why) {
-  refuse(`drive profile ${label}: ${why}`, "fix the profile (or drop --profile to use the packaged one); drive never runs a child with a bypass mode or blanket Bash");
-}
-
-/** Refuse any profile that bypasses permissions or grants blanket tool access. */
-function validateDriveProfile(profile, label) {
-  if (profile === null || typeof profile !== "object" || Array.isArray(profile)) driveRefuse(label, "is not a JSON object");
-  const walk = (v, path) => {
-    if (typeof v === "string") {
-      if (/bypassPermissions|dangerously-skip-permissions/i.test(v)) driveRefuse(label, `mentions a bypass mode at ${path}`);
-    } else if (Array.isArray(v)) {
-      v.forEach((x, i) => walk(x, `${path}[${i}]`));
-    } else if (v && typeof v === "object") {
-      for (const [k, x] of Object.entries(v)) {
-        if (/bypass|dangerous/i.test(k) && x) driveRefuse(label, `sets ${path}.${k}`);
-        if (k === "defaultMode" && x !== "dontAsk") driveRefuse(label, `sets ${path}.defaultMode to ${JSON.stringify(x)}; drive requires dontAsk`);
-        walk(x, `${path}.${k}`);
-      }
-    }
+async function cmdDriveEntry(flags) {
+  const { cmdDrive } = await import("./drive/drive.mjs");
+  const E = {
+    STAGES, STAGE_ARTIFACTS, STAGE_END_GATES, out, refuse, fail, nowIso, readJson, appendEvent, detentRoot, repoOf, findRun,
+    loadStatus, loadDecisions, saveDecisions, nextDecisionId, pendingBlockers, syncGateAnsweredEvents, beginStage, endStage,
+    raiseEndGate, renderGateArtifact, drainCuratorFor, collectResult, curatorOnPath, escapeHtml, parseYamlSubset, runExec,
+    engineFile: fileURLToPath(import.meta.url),
   };
-  walk(profile, "$");
-  const perms = profile.permissions;
-  if (perms !== undefined && (perms === null || typeof perms !== "object")) driveRefuse(label, "permissions is not an object");
-  const allow = perms && perms.allow !== undefined ? perms.allow : [];
-  if (!Array.isArray(allow)) driveRefuse(label, "permissions.allow is not an array");
-  for (const a of allow) {
-    if (typeof a !== "string") driveRefuse(label, "permissions.allow has a non-string entry");
-    const inner = /^Bash\((.*)\)$/s.exec(a);
-    if (a === "Bash" || a === "*" || a === "WebFetch" || a === "WebSearch" || (inner && /^[\s:*]*$/.test(inner[1]))) {
-      driveRefuse(label, `allows ${JSON.stringify(a)}, a blanket grant`);
-    }
-  }
-}
-
-function loadDriveBaseProfile(flags) {
-  const custom = flags.profile;
-  if (custom === true) refuse("--profile requires a path", "engine drive --run <id> --profile <file>");
-  const file = custom ? resolve(String(custom)) : DRIVE_PROFILE_FILE;
-  if (!existsSync(file)) refuse(`drive profile not found: ${file}`, "pass an existing --profile <file>");
-  let profile;
-  try { profile = JSON.parse(readFileSync(file, "utf8")); } catch (e) { driveRefuse(file, `is not valid JSON (${e.message})`); }
-  validateDriveProfile(profile, file);
-  return { profile, file };
-}
-
-/** The verify command the run recorded, as allow rules; none when it is not safe to allow. */
-function verifyAllowRules(runDir) {
-  const p = join(runDir, "env.json");
-  if (!existsSync(p)) return { rules: [] };
-  let cmd;
-  try { cmd = readJson(p).commands?.verify; } catch (e) { return { rules: [], warning: `env.json unreadable: ${e.message}` }; }
-  if (typeof cmd !== "string" || !cmd.trim()) return { rules: [] };
-  cmd = cmd.trim();
-  const simple = /^[A-Za-z0-9_./:@=+,-]+( [A-Za-z0-9_./:@=+,-]+)*$/.test(cmd) && VERIFY_RUNNERS.has(cmd.split(" ")[0]);
-  if (!simple) {
-    return { rules: [], warning: `verify command ${JSON.stringify(cmd)} is compound or not a known runner, so the child may not run it` };
-  }
-  return { rules: [`Bash(${cmd})`, `Bash(${cmd} *)`] };
-}
-
-function driveSettingsFor(base, stage, runDir, label) {
-  const settings = JSON.parse(JSON.stringify(base));
-  settings.permissions = { ...(settings.permissions || {}), defaultMode: "dontAsk" };
-  const verify = verifyAllowRules(runDir);
-  settings.permissions.allow = [
-    ...(settings.permissions.allow || []),
-    `Bash(node ${ENGINE_FILE} *)`,
-    `Read(/${ENGINE_ROOT}/**)`,
-    ...(stage === "implement" ? ["Bash(git add*)", "Bash(git commit*)"] : []),
-    ...verify.rules,
-  ];
-  validateDriveProfile(settings, label);
-  return { settings, warning: verify.warning };
-}
-
-/** Child env: every push URL form is rewritten to an unknown transport, whatever the command spelling. */
-function driveChildEnv() {
-  const env = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
-  let n = Number.parseInt(env.GIT_CONFIG_COUNT ?? "0", 10);
-  if (!Number.isInteger(n) || n < 0) n = 0;
-  for (const prefix of PUSH_BLOCK_PREFIXES) {
-    env[`GIT_CONFIG_KEY_${n}`] = "url.no-push://.pushInsteadOf";
-    env[`GIT_CONFIG_VALUE_${n}`] = prefix;
-    n++;
-  }
-  env.GIT_CONFIG_COUNT = String(n);
-  return env;
-}
-
-const canon = (v) => JSON.stringify(v, (_k, x) => (x && typeof x === "object" && !Array.isArray(x)
-  ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1))) : x));
-
-/** A child may only append new pending decisions. Returns why it did not, or null. */
-function decisionsViolation(before, after) {
-  const now = new Map(after.map((d) => [d.id, d]));
-  for (const b of before) {
-    const a = now.get(b.id);
-    if (!a) return `decision ${b.id} was removed`;
-    if (b.status === "pending" && a.status !== "pending") return `decision ${b.id} went from pending to ${a.status}`;
-    if (canon(a) !== canon(b)) return `${b.gate ? `gate decision ${b.id} (${b.gate})` : `decision ${b.id}`} was edited`;
-  }
-  const known = new Set(before.map((d) => d.id));
-  for (const a of after) {
-    if (!known.has(a.id) && a.status !== "pending") return `new decision ${a.id} was filed already ${a.status}`;
-  }
-  return null;
-}
-
-// What the run needs next: done | needs_human | raise_gate | spawn. `blockers` are the pending decisions a human must answer.
-function nextAction(status, decisions, runDir) {
-  const stage = STAGES.find((s) => !["done", "skipped"].includes(status.stages[s].status));
-  if (!stage) return { action: "done", stage: null, blockers: [] };
-  const entry = status.stages[stage];
-  const human = (blockers) => ({ action: "needs_human", stage, blockers });
-  const blockers = pendingBlockers(decisions, stage);
-  if (blockers.length) return human(blockers);
-  if (entry.status === "blocked") {
-    const pending = decisions.filter((d) => (entry.blocked_on || []).includes(d.id) && d.status === "pending");
-    if (pending.length) return human(pending);
-  }
-  if (entry.status === "in_progress") {
-    // A decision the stage itself filed mid-run: the child stopped on it, so re-spawning would loop.
-    const own = decisions.filter((d) => d.status === "pending" && d.raised_by === stage);
-    if (own.length) return human(own);
-    const gateDef = STAGE_END_GATES[stage];
-    const artifacts = STAGE_ARTIFACTS[stage] || [];
-    if (gateDef && artifacts.every((a) => existsSync(join(runDir, a)))) {
-      const gate = decisions.find((d) => d.gate === gateDef.name);
-      if (!gate) return { action: "raise_gate", stage, blockers: [] };
-      if (gate.status === "pending") return human([gate]);
-    }
-  }
-  return { action: "spawn", stage, blockers: [] };
-}
-
-function pidAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; }
-}
-
-function acquireDriveLock(runDir) {
-  const p = join(runDir, "drive.lock");
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      writeFileSync(p, String(process.pid), { flag: "wx" });
-      process.on("exit", () => {
-        try { if (readFileSync(p, "utf8") === String(process.pid)) rmSync(p); } catch { /* lock already gone */ }
-      });
-      return;
-    } catch (e) {
-      if (e.code !== "EEXIST") throw e;
-      const held = parseInt(readFileSync(p, "utf8"), 10);
-      if (pidAlive(held)) {
-        refuse(`another drive holds ${p} (pid ${held})`, `wait for it to stop, or kill pid ${held} and re-run`);
-      }
-      process.stderr.write(`drive: removing stale ${p} (pid ${held} is not running)\n`);
-      rmSync(p);
-    }
-  }
-  throw new Error(`could not acquire ${p}`);
-}
-
-/** File fingerprint of the run dir (minus the worktree and drive's own bookkeeping). */
-function snapshotRun(runDir) {
-  const files = {};
-  const skip = new Set(["worktree", "drive.lock", "events.jsonl"]);
-  const walk = (dir, rel) => {
-    for (const e of readdirSync(dir, { withFileTypes: true })) {
-      if (rel === "" && skip.has(e.name)) continue;
-      const p = join(dir, e.name);
-      if (e.isDirectory()) walk(p, `${rel}${e.name}/`);
-      else { const st = statSync(p); files[`${rel}${e.name}`] = `${st.mtimeMs}:${st.size}`; }
-    }
-  };
-  walk(runDir, "");
-  const sp = join(runDir, "stage-status.json");
-  return JSON.stringify({
-    files,
-    status: existsSync(sp) ? readFileSync(sp, "utf8") : null,
-    pending: loadDecisions(runDir).filter((d) => d.status === "pending").map((d) => d.id).sort(),
-  });
-}
-
-let activeChild = null;
-
-function killChildOnSignal() {
-  for (const sig of ["SIGINT", "SIGTERM"]) {
-    process.on(sig, () => {
-      if (activeChild) { try { process.kill(-activeChild.pid, "SIGKILL"); } catch { /* already gone */ } }
-      process.exit(sig === "SIGINT" ? 130 : 143);
-    });
-  }
-}
-
-function runChild(bin, args, { cwd, input, timeoutMs, env }) {
-  return new Promise((resolveP, rejectP) => {
-    // detached: the child leads its own process group, so a timeout kills its descendants too.
-    const child = spawn(bin, args, { cwd, env, detached: true, stdio: ["pipe", "pipe", "pipe"] });
-    activeChild = child;
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    let killTimer = null;
-    const killGroup = (sig) => {
-      try { process.kill(-child.pid, sig); } catch (e) { if (e.code !== "ESRCH") throw e; }
-    };
-    const timer = setTimeout(() => {
-      timedOut = true;
-      killGroup("SIGTERM");
-      killTimer = setTimeout(() => killGroup("SIGKILL"), 5000);
-    }, timeoutMs);
-    child.stdout.on("data", (d) => { stdout += d; });
-    child.stderr.on("data", (d) => { stderr += d; });
-    child.on("error", (e) => { clearTimeout(timer); rejectP(e); });
-    child.on("close", (code, signal) => {
-      clearTimeout(timer);
-      clearTimeout(killTimer);
-      activeChild = null;
-      resolveP({ code, signal, stdout, stderr, timedOut });
-    });
-    // A child that exits without reading stdin raises EPIPE here; its exit code is what we report.
-    child.stdin.on("error", () => {});
-    child.stdin.end(input);
-  });
-}
-
-/** The result object of `claude -p --output-format json`; loud on anything else. */
-function parseChildResult(stdout) {
-  let v;
-  try { v = JSON.parse(stdout.trim()); } catch { return { bad: `child stdout is not JSON: ${stdout.trim().slice(-300)}` }; }
-  if (Array.isArray(v)) v = [...v].reverse().find((e) => e && e.type === "result");
-  if (!v || typeof v !== "object") return { bad: "child JSON has no result object" };
-  return { result: v };
-}
-
-function positiveFlag(flags, name, dflt, { integer }) {
-  if (flags[name] === undefined) return dflt;
-  const n = Number(flags[name]);
-  if (flags[name] === true || !Number.isFinite(n) || n <= 0 || (integer && !Number.isInteger(n))) {
-    refuse(`--${name} must be a positive ${integer ? "integer" : "number"}`, `engine drive --run <id> --${name} <n>`);
-  }
-  return n;
-}
-
-function stopForHuman({ runId, runDir }, stage, blockers, collectError, spend) {
-  const html = renderGateArtifact({ runId, runDir }, {
-    name: blockers[0].gate || blockers[0].id, stage, decisions: blockers,
-  });
-  let url;
-  let curatorError;
-  const curator = curatorOnPath();
-  if (curator) {
-    const r = spawnSync(curator, ["open", html], { encoding: "utf8", timeout: 30000 });
-    if (r.error || r.status !== 0) {
-      curatorError = r.error ? r.error.message : (r.stdout + r.stderr).trim().slice(-300);
-      process.stderr.write(`drive: curator open failed (non-fatal): ${curatorError}\n`);
-    } else {
-      try { url = JSON.parse(r.stdout.trim().split("\n").pop()).url; } catch { curatorError = "curator open printed no JSON url"; }
-    }
-  }
-  const ids = blockers.map((d) => d.id);
-  appendEvent(runDir, { event: "drive_stopped", reason: "needs_human", stage, decisions: ids, ...spend });
-  out({
-    ok: true, run_id: runId, stopped: "needs_human", stage, decisions: ids, html,
-    ...(url ? { url } : {}),
-    ...(curatorError ? { curator_error: curatorError } : {}),
-    ...(collectError ? { collect_error: collectError } : {}),
-    ...spend,
-    next_step: `answer in curator${url ? ` (${url})` : ` (open ${html})`}, then: engine gate collect --run ${runId} and engine drive --run ${runId}`,
-  });
-}
-
-async function cmdDrive(flags) {
-  const repo = repoOf(flags);
-  const { runId, runDir } = findRun(repo, flags);
-  const maxSteps = positiveFlag(flags, "max-steps", 12, { integer: true });
-  const timeoutSec = positiveFlag(flags, "child-timeout-sec", 3600, { integer: false });
-  const budget = positiveFlag(flags, "budget", DRIVE_DEFAULT_BUDGET_USD, { integer: false });
-  if (flags.model === true) refuse("--model requires a model id", "engine drive --run <id> --model <id>");
-  const model = flags.model || DRIVE_DEFAULT_MODEL;
-  if (flags["claude-bin"] === true) refuse("--claude-bin requires a path", "engine drive --run <id> --claude-bin <path>");
-  const claudeBin = flags["claude-bin"] || process.env.ENGINE_CLAUDE_BIN || "claude";
-  const allowShip = flags["allow-ship"] === true;
-  const base = loadDriveBaseProfile(flags);
-  acquireDriveLock(runDir);
-  killChildOnSignal();
-  const settingsDir = mkdtempSync(join(tmpdir(), "detent-drive-"));
-  process.on("exit", () => { try { rmSync(settingsDir, { recursive: true, force: true }); } catch { /* temp dir already gone */ } });
-
-  let steps = 0;
-  let totalCost = 0;
-  let totalTurns = 0;
-  const spend = () => ({ total_cost_usd: Number(totalCost.toFixed(6)), total_turns: totalTurns, budget_usd: budget });
-  for (;;) {
-    let decisions = loadDecisions(runDir);
-    syncGateAnsweredEvents(runDir, decisions);
-    let collectError = null;
-    if (decisions.some((d) => d.status === "pending")) {
-      try {
-        const d = drainCuratorFor(runId, runDir);
-        if (d.items.length) collectResult(runId, runDir, d.items);
-      } catch (e) {
-        collectError = e.message;
-        process.stderr.write(`drive: collecting curator feedback failed (continuing): ${collectError}\n`);
-      }
-      decisions = loadDecisions(runDir);
-    }
-    const status = loadStatus(runDir);
-    let next = nextAction(status, decisions, runDir);
-    if (next.action === "raise_gate") {
-      const gateDef = STAGE_END_GATES[next.stage];
-      const gate = raiseEndGate(runDir, next.stage, gateDef);
-      parkStageOnGate(runDir, status, next.stage, gateDef, gate);
-      next = { action: "needs_human", stage: next.stage, blockers: [gate] };
-    }
-    if (next.action === "done") {
-      appendEvent(runDir, { event: "drive_stopped", reason: "done", ...spend() });
-      out({ ok: true, run_id: runId, done: true, status: "done", steps, ...spend(), next_step: "run complete — all stages done" });
-    }
-    if (next.action === "needs_human") stopForHuman({ runId, runDir }, next.stage, next.blockers, collectError, spend());
-    const stage = next.stage;
-    if (stage === "ship" && !allowShip) {
-      appendEvent(runDir, { event: "drive_stopped", reason: "before_ship", ...spend() });
-      out({ ok: true, run_id: runId, stopped: "before_ship", stage, steps, ...spend(),
-        next_step: `review the run, then: engine drive --run ${runId} --allow-ship (push and PR creation stay blocked for the child)` });
-    }
-    if (steps >= maxSteps) {
-      appendEvent(runDir, { event: "drive_stopped", reason: "max_steps", steps, ...spend() });
-      out({ ok: true, run_id: runId, stopped: "max_steps", stage, steps, ...spend(),
-        next_step: `engine drive --run ${runId} to continue` });
-    }
-
-    const skill = join(ENGINE_ROOT, "stages", stage, "SKILL.md");
-    if (!existsSync(skill)) refuse(`no stage skill for '${stage}' at ${skill}`, "drive needs engine/stages/<stage>/SKILL.md");
-    const runJson = readJson(join(runDir, "run.json"));
-    const cwd = runJson.worktree && existsSync(runJson.worktree) ? runJson.worktree : runDir;
-    const deny = stage === "implement" ? DRIVE_DENY_ALWAYS : [...DRIVE_DENY_ALWAYS, ...DRIVE_DENY_NON_IMPLEMENT];
-    const built = driveSettingsFor(base.profile, stage, runDir, base.file);
-    if (built.warning) process.stderr.write(`drive: ${built.warning}\n`);
-    const settingsFile = join(settingsDir, `settings-${stage}.json`);
-    writeFileSync(settingsFile, JSON.stringify(built.settings, null, 2) + "\n");
-    const args = ["-p", "--output-format", "json", "--permission-mode", "dontAsk",
-      "--setting-sources", "project", "--settings", settingsFile, "--model", model,
-      "--add-dir", runDir, "--disallowedTools", ...deny];
-    const prompt = [
-      `Run id: ${runId}`,
-      `Run dir: ${runDir}`,
-      `Engine: ${ENGINE_FILE}`,
-      `Stage: ${stage}`,
-      `Stage skill: ${skill}`,
-      "",
-      `Follow that SKILL for this stage. Begin with \`node ${ENGINE_FILE} stage begin ${stage} --run ${runId}\` if not in progress, ` +
-        `finish with \`node ${ENGINE_FILE} stage end ${stage} --run ${runId}\`. If a human decision is needed, append it as a new ` +
-        `pending decision in ${join(runDir, "decisions.json")} per ${join(ENGINE_ROOT, "stages", "CONTRACT.md")} and stop; ` +
-        "never change or answer an existing decision. Never push or open PRs.",
-    ].join("\n");
-
-    const before = snapshotRun(runDir);
-    const decisionsPath = join(runDir, "decisions.json");
-    const decisionsText = existsSync(decisionsPath) ? readFileSync(decisionsPath, "utf8") : null;
-    const decisionsBefore = loadDecisions(runDir);
-    steps++;
-    appendEvent(runDir, { event: "drive_step", step: steps, stage, cwd, model });
-    let child;
-    try {
-      child = await runChild(claudeBin, args, { cwd, input: prompt, timeoutMs: timeoutSec * 1000, env: driveChildEnv() });
-    } catch (e) {
-      fail("claude_spawn_failed", "install claude or pass --claude-bin / ENGINE_CLAUDE_BIN", { stage, detail: `${claudeBin}: ${e.message}`, ...spend() });
-    }
-
-    let violation;
-    try {
-      violation = decisionsViolation(decisionsBefore, loadDecisions(runDir));
-    } catch (e) {
-      violation = `decisions.json is no longer valid JSON (${e.message})`;
-    }
-    if (violation) {
-      if (decisionsText === null) rmSync(decisionsPath, { force: true });
-      else writeFileSync(decisionsPath, decisionsText);
-      appendEvent(runDir, { event: "drive_stopped", reason: "child_answered_decision", stage, detail: violation, ...spend() });
-      fail("child_answered_decision", "inspect the run; decisions.json was restored to its pre-child state. Only a human answers a decision",
-        { stopped: "child_answered_decision", stage, detail: violation, ...spend() });
-    }
-
-    const tail = child.stderr.trim().slice(-800);
-    if (child.timedOut) {
-      fail("child_timeout", "raise --child-timeout-sec or inspect the stage",
-        { stage, detail: `child exceeded --child-timeout-sec ${timeoutSec} and was killed`, stderr_tail: tail, ...spend() });
-    }
-    if (child.code !== 0) {
-      fail("child_failed", "read stderr_tail, fix, then re-run engine drive",
-        { stage, exit_code: child.code, signal: child.signal, stderr_tail: tail, ...spend() });
-    }
-    const parsed = parseChildResult(child.stdout);
-    if (parsed.bad) fail("child_bad_output", "child must print the `--output-format json` result", { stage, detail: parsed.bad, stderr_tail: tail, ...spend() });
-    const { total_cost_usd: cost, num_turns: turns } = parsed.result;
-    const haveCost = Number.isFinite(cost) && cost >= 0 && Number.isInteger(turns) && turns >= 0;
-    if (haveCost) {
-      totalCost += cost;
-      totalTurns += turns;
-      appendEvent(runDir, { event: "drive_child_done", step: steps, stage, total_cost_usd: cost, num_turns: turns,
-        cumulative_cost_usd: Number(totalCost.toFixed(6)) });
-    }
-    if (parsed.result.is_error) {
-      fail("child_error", "read detail, fix, then re-run engine drive",
-        { stage, detail: String(parsed.result.result ?? "").slice(0, 800), stderr_tail: tail, ...spend() });
-    }
-    if (!haveCost) {
-      fail("child_no_cost", "the child result lacks total_cost_usd/num_turns, so --budget cannot be enforced; check the claude version",
-        { stage, detail: "result object has no numeric total_cost_usd and integer num_turns", ...spend() });
-    }
-    if (snapshotRun(runDir) === before) {
-      fail("no_progress", `inspect ${runDir} and the stage skill, then re-run engine drive`,
-        { stage, detail: "child changed no stage status, decision or artifact", ...spend() });
-    }
-    if (totalCost >= budget) {
-      appendEvent(runDir, { event: "drive_stopped", reason: "budget", stage, steps, ...spend() });
-      out({ ok: true, run_id: runId, stopped: "budget", stage, steps, ...spend(),
-        next_step: `spent ${spend().total_cost_usd} of ${budget} USD; raise it and continue: engine drive --run ${runId} --budget <usd>` });
-    }
-  }
+  return cmdDrive(flags, E);
 }
 
 // ---------------------------------------------------------------------------
@@ -3258,7 +2851,7 @@ function cmdHelp() {
       "stage end": "engine stage end <stage> [--run <id>] [--repo <path>] — finish a stage (checks artifact + gates). implement: [--tdd-test <name> --tdd-red <sha> --tdd-green <sha> | --tdd-exempt <reason>] records the tdd block (implement records, never judges). recheck: asserts red_sha is an ancestor of green_sha via git cat-file/merge-base, proving ORDER only, never that the test was observed failing.",
       "gate open": "engine gate open <gate-name-or-decision-id> [--run <id>] [--repo <path>] — render a pending human gate; with curator on PATH it writes <DETENT_ROOT>/.plans/<run>-<gate>.html (one data-plan-question block per pending decision, stage artifacts embedded) and prints `curator open` then `engine gate collect`",
       "gate collect": "engine gate collect --run <id> [--file <feedback.json>] — non-blocking: map curator answers into decisions.json (only an exact decision option resolves one; null/other answers stay pending and are listed under `unresolved`); selection/prompt feedback is appended to <run>/review-feedback.jsonl. Without --file it runs `curator drain` for the run's gate pages only.",
-      "drive": "engine drive --run <id> [--claude-bin <b>] [--model claude-sonnet-5-5] [--budget 5] [--max-steps 12] [--child-timeout-sec 3600] [--allow-ship] [--profile <file>] — experimental (macOS/Linux, spends Claude credit): run the run end to end with one headless `claude -p` child per stage. Stops only for a human decision (stopped:needs_human, with a curator page), before ship (unless --allow-ship), at --max-steps, at --budget (USD, cumulative per invocation), or on failure (no_progress, child_timeout, child_failed, child_error, child_answered_decision). Children get a scoped permission profile (no blanket Bash), push is blocked by git env config, and a child that answers or edits an existing decision stops the run. Runs the target repo's own .claude/settings.json hooks: only drive repos you trust.",
+      "drive": "engine drive --run <id> [--stack <path>] [--budget 5] [--model claude-sonnet-5-5] [--max-steps 12] [--child-timeout-sec 3600] [--profile <file>] [--claude-bin <b>] — experimental (macOS/Linux, spends Claude credit): runs intake, research and plan with one contained `claude -p --restricted` child per stage (file tools only, no Bash, allowlisted env, read-only repo export, outbox validated by drive), then always stops: at the plan gate or a decision (stopped:needs_human), at before_implement, at --max-steps, at --budget, or on a failure (state_tampered, outbox_rejected, secret_detected, child_*). Child text goes to <run>/drive-last.json, never stdout. --allow-ship is refused; implement and ship stay interactive.",
       "socket call": "engine socket call <name> [--payload-file <json>] [--stack <path>] — dispatch a socket per stack.yaml",
       "next": "engine next [--run <id>] [--repo <path>] — print the exact next command for the current run",
       "dashboard": "engine dashboard — render ALL runs under <DETENT_ROOT>/.sdlc/ into one curator artifact (stage, status, pending gates, age)",
@@ -3298,7 +2891,7 @@ function main() {
   if (a === "stage" && b === "end") return cmdStageEnd(c, flags);
   if (a === "gate" && b === "open") return cmdGateOpen(c, flags);
   if (a === "gate" && b === "collect") return cmdGateCollect(flags);
-  if (a === "drive") return cmdDrive(flags);
+  if (a === "drive") return cmdDriveEntry(flags);
   if (a === "socket" && b === "call") return cmdSocketCall(c, flags);
   if (a === "next") return cmdNext(flags);
   if (a === "dashboard") return cmdDashboard();

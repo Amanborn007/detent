@@ -135,7 +135,7 @@ detent gate open <gate-id> --repo ~/code/your-repo
 
 With curator installed this writes `.plans/<run-id>-<gate>.html`, a page with one question per pending decision and the plan or research text underneath, and prints a `curator open` command. Answer in the browser, then run `detent gate collect --run <run-id>`. It reads your clicks from curator and writes an answer into `decisions.json` only when it is exactly one of the decision's options. Anything else stays pending and is listed under `unresolved`. Comments you add are saved to `review-feedback.jsonl` in the run directory. Run `detent dashboard` to see every active run with its stage and pending gates.
 
-**Letting the engine drive.** `detent drive --run <run-id>` runs the stages for you with one headless Claude child per stage and stops when it needs your decision, before ship, or when it has spent `--budget` (default 5 USD). In a Claude Code session, `/detent:drive` launches it in the background and walks you through the gate page. `detent drive` is experimental, works on macOS and Linux only, and spends Claude credit. Children run with `--setting-sources project`, so the target repo's own `.claude/settings.json` hooks run: only drive repos you trust. Children cannot push and cannot answer decisions; the details are in [engine/cli/README.md](engine/cli/README.md).
+**Letting the engine drive.** `detent drive --run <run-id>` runs the stages for you with one headless Claude child per stage and stops when it needs your decision, before implement, or when it has spent `--budget` (default 5 USD). In a Claude Code session, `/detent:drive` launches it in the background and walks you through the gate page. `detent drive` is experimental, works on macOS and Linux only, and spends Claude credit. It covers intake, research and plan only; children get file tools and no Bash, so the target repo's hooks and scripts never run. The details are in [engine/cli/README.md](engine/cli/README.md).
 
 ### 4.3 You pushed a PR
 
@@ -277,6 +277,7 @@ A **provider pack** in the sense of `packs/example/stack.yaml` is a different fi
 | Command | Does |
 |---|---|
 | `detent run new --ticket <key>`, `detent next`, `detent stage ...`, `detent gate open <id>`, `detent gate collect --run <id>`, `detent socket call <name>`, `detent dashboard`, `detent bench <run-id>` | The engine runner. |
+| `detent drive --run <id>` | Experimental. Runs intake, research and plan with contained headless children, then stops for you. Spends Claude credit. |
 | `detent curator ...` | Curator: `open`, `poll`, `reply`, `end`, `status`. |
 | `detent sentinel ...` | Sentinel: `scan`, `config-check`. |
 | `detent owl ...` | The owl orchestrator. |
@@ -284,6 +285,8 @@ A **provider pack** in the sense of `packs/example/stack.yaml` is a different fi
 | `detent courier ...` | Connector-read broker: `request`, `await`, `list`, `get`, `fulfill`, `fail`. |
 | `detent feedback ...` | A journal where the agent logs gaps it noticed in its own coverage. |
 | `detent eval ...` | The eval harness. |
+
+**Drive (experimental).** `detent drive --run <id>` runs intake, research and plan for you with one headless `claude -p --restricted` child per stage, then stops at the plan gate, at any decision, or at `before_implement`. It never implements or ships: you run those stages yourself, interactively. Each child gets file tools only (no Bash, no MCP, no web) on a read-only copy of your repo, with a scrubbed environment, and hands its work back through an outbox that drive validates before it writes any run state. The budget is `--budget` USD per invocation (default 5), enforced per child with `--max-budget-usd`; claude can overshoot by one turn. macOS and Linux, Claude Code 2.1.306 or newer. What it contains and what it does not are in `engine/cli/README.md` and [SECURITY.md](SECURITY.md).
 
 **Curator.** Serves self-contained HTML pages on `127.0.0.1` and records annotations and decisions. State is in `~/.curator`. A page may not load external scripts, fonts or images. The curator skill writes the page and runs the feedback loop in a subagent so poll output stays out of the main conversation.
 
