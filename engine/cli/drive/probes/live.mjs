@@ -1,0 +1,176 @@
+// Opt-in live probes (--live). They spend a few cents on a small model.
+// PB2-PB5 run claude inside the probe profile behind a plain-http proxy; the
+// alternative run uses claude's own Bash sandbox with OAuth and no outer profile.
+import http from "node:http";
+import https from "node:https";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { buildProbeProfile, defaultDenyRead } from "./seatbelt-deny-default.mjs";
+import { result } from "./report.mjs";
+import { run, which } from "./exec.mjs";
+import { ALLOWED_PROXY_PATHS, LIVE_BUDGET_TOTAL_USD, LIVE_MODEL, evalLive, liveCheckScript, parseKv } from "./live-checks.mjs";
+
+const FORWARD_HEADERS = ["content-type", "accept", "anthropic-version", "anthropic-beta", "user-agent"];
+
+export function startMessagesProxy({ apiKey, placeholder, upstream = "https://api.anthropic.com" }) {
+  const stats = { total: 0, forwarded: 0, refused: 0, bad_token: 0, paths: {} };
+  const up = new URL(upstream);
+  const server = http.createServer((req, res) => {
+    stats.total++;
+    const path = (req.url || "").split("?")[0];
+    stats.paths[path] = (stats.paths[path] || 0) + 1;
+    if (req.headers["x-api-key"] !== placeholder) { stats.bad_token++; res.writeHead(401).end(); req.resume(); return; }
+    if (req.method !== "POST" || !ALLOWED_PROXY_PATHS.includes(path)) { stats.refused++; res.writeHead(403).end(); req.resume(); return; }
+    const headers = { "x-api-key": apiKey, host: up.host };
+    for (const h of FORWARD_HEADERS) if (req.headers[h]) headers[h] = req.headers[h];
+    const out = https.request({ hostname: up.hostname, port: up.port || 443, path: req.url, method: "POST", headers }, (r) => {
+      res.writeHead(r.statusCode || 502, r.headers);
+      r.pipe(res);
+    });
+    out.on("error", () => { if (!res.headersSent) res.writeHead(502); res.end(); });
+    stats.forwarded++;
+    req.pipe(out);
+  });
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve({
+      port: server.address().port,
+      stats: () => ({ ...stats, paths: { ...stats.paths } }),
+      close: () => new Promise((r) => server.close(() => r())),
+    }));
+  });
+}
+
+function parseClaudeJson(stdout) {
+  try {
+    const j = JSON.parse(stdout.trim().split("\n").pop());
+    return { answered: j.is_error === false, subtype: String(j.subtype ?? ""), cost: Number(j.total_cost_usd) || 0, turns: Number(j.num_turns) || 0 };
+  } catch {
+    return { answered: false, subtype: "unparsed", cost: 0, turns: 0 };
+  }
+}
+
+function prompt(script, args) {
+  return `Run exactly this command with the Bash tool, wait for it to finish, then reply with the single word DONE: sh ${script} ${args.join(" ")}`;
+}
+
+function stage(dir, { canary, loopbackPort, keychainService, writeTest }) {
+  for (const d of [dir, join(dir, "home"), join(dir, "tmp"), join(dir, "work")]) mkdirSync(d, { recursive: true });
+  const script = join(dir, "live-check.sh");
+  writeFileSync(script, liveCheckScript());
+  writeFileSync(join(dir, "parent.pid"), String(process.pid));
+  writeFileSync(join(dir, "canary.txt"), canary);
+  const out = join(dir, "results.txt");
+  return { script, out, args: [out, join(dir, "parent.pid"), join(dir, "canary.txt"), "$REAL_HOME", String(loopbackPort), JSON.stringify(keychainService), writeTest] };
+}
+
+async function hostControls(realHome) {
+  const kc = await run("/usr/bin/security", ["find-generic-password", "-s", "Claude Code-credentials"], { timeout: 10000 });
+  const net = await run("curl", ["-m", "5", "-sS", "-f", "-o", "/dev/null", "https://example.com"], { timeout: 10000 });
+  return {
+    sshConfigExists: existsSync(join(realHome, ".ssh", "config")),
+    claudeCredsExist: existsSync(join(realHome, ".claude", ".credentials.json")),
+    keychainItemFound: kc.code === 0,
+    netExternalOk: net.code === 0,
+  };
+}
+
+export async function runLive({ T, realHome, canary, nonce, log }) {
+  const results = [];
+  let spent = 0;
+  const add = (probe, expected, actual, status, note) => results.push(result({ probe, expected, actual, status, note }));
+  const claude = which("claude");
+  if (!claude) { add("live.claude_binary", "found", "absent", "inconclusive", "claude is not on PATH"); return results; }
+  const claudeReal = realpathSync(claude);
+  const controls = await hostControls(realHome);
+  const affordable = (cap) => spent + cap <= LIVE_BUDGET_TOTAL_USD + 1e-9;
+  const writeTest = join(realHome, `.detent-probe-write-${nonce}`);
+  const clean = () => rmSync(writeTest, { force: true });
+  const managed = "/Library/Application Support/ClaudeCode/managed-settings.json";
+  let forced = false;
+  try { forced = /"sandbox"/.test(readFileSync(managed, "utf8")); } catch { /* absent or unreadable means not forced */ }
+  add("live.pb6_managed_sandbox", "no forced sandbox setting", forced ? "managed settings carry a sandbox key" : "none", forced ? "fail" : "pass", "boolean only; the file is not printed");
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    for (const id of ["live.pb2_proxy_only", "live.pb3_fake_home", "live.pb4_binary_dir_only", "live.pb5_bash_under_outer"]) {
+      add(id, "claude answers", "not_run", "skipped", "set ANTHROPIC_API_KEY to run the outer-sandbox probes");
+    }
+  } else if (affordable(0.06)) {
+    const placeholder = `probe-${nonce}`;
+    const proxy = await startMessagesProxy({ apiKey, placeholder });
+    try {
+      const dir = join(T, "live-a");
+      const st = stage(dir, { canary, loopbackPort: proxy.port, keychainService: "nonexistent-probe", writeTest });
+      const profile = buildProbeProfile({ scratch: dir, loopbackPort: proxy.port, denyRead: defaultDenyRead(realHome) });
+      const env = {
+        PATH: process.env.PATH, HOME: join(dir, "home"), TMPDIR: join(dir, "tmp"), CLAUDE_CODE_TMPDIR: join(dir, "tmp"), LANG: "C",
+        ANTHROPIC_BASE_URL: `http://127.0.0.1:${proxy.port}`, ANTHROPIC_API_KEY: placeholder,
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", DISABLE_AUTOUPDATER: "1",
+      };
+      const args = st.args.map((a) => (a === "$REAL_HOME" ? realHome : a));
+      const r = await run("sandbox-exec", ["-p", profile, claudeReal, "-p", "--bare", "--restricted", "--model", LIVE_MODEL,
+        "--max-turns", "3", "--max-budget-usd", "0.04", "--output-format", "json", "--tools", "Bash", "--allowedTools", "Bash",
+        "--settings", JSON.stringify({ sandbox: { enabled: false } }), "--no-session-persistence"],
+      { env, cwd: join(dir, "work"), timeout: 180000, input: prompt(st.script, args) });
+      const c = parseClaudeJson(r.stdout);
+      spent += c.cost;
+      const ps = proxy.stats();
+      const onlyMessages = Object.keys(ps.paths).every((p) => ALLOWED_PROXY_PATHS.includes(p));
+      add("live.pb2_proxy_only", "answered via proxy, only /v1/messages paths", `answered=${c.answered} forwarded=${ps.forwarded} refused=${ps.refused} bad_token=${ps.bad_token} other_paths=${!onlyMessages}`,
+        c.answered && ps.forwarded > 0 && ps.refused === 0 && ps.bad_token === 0 && onlyMessages ? "pass" : "fail");
+      add("live.pb3_fake_home", "answered with an empty fake HOME", `answered=${c.answered} subtype=${c.subtype}`, c.answered ? "pass" : "fail");
+      const kv = existsSync(st.out) ? parseKv(readFileSync(st.out, "utf8")) : {};
+      add("live.pb5_bash_under_outer", "Bash ran with sandbox.enabled=false under --restricted", kv.bash_ran === 1 ? "bash_ran" : `no_bash(subtype=${c.subtype})`, kv.bash_ran === 1 ? "pass" : "fail");
+      if (kv.bash_ran === 1) results.push(...evalLive("live.outer", kv, controls, { keychainService: "nonexistent-probe", expectLoopback: true }));
+    } finally { await proxy.close(); clean(); }
+    if (affordable(0.02)) {
+      const proxy2 = await startMessagesProxy({ apiKey, placeholder: `probe-${nonce}` });
+      try {
+        const dir = join(T, "live-c");
+        for (const d of [dir, join(dir, "home"), join(dir, "tmp"), join(dir, "work")]) mkdirSync(d, { recursive: true });
+        const profile = buildProbeProfile({
+          scratch: dir, loopbackPort: proxy2.port,
+          denyRead: [...defaultDenyRead(realHome), "/Users", "/Volumes", "/private/tmp", "/private/var/folders"],
+          reallowRead: [dir, dirname(claudeReal)],
+        });
+        const env = {
+          PATH: process.env.PATH, HOME: join(dir, "home"), TMPDIR: join(dir, "tmp"), CLAUDE_CODE_TMPDIR: join(dir, "tmp"), LANG: "C",
+          ANTHROPIC_BASE_URL: `http://127.0.0.1:${proxy2.port}`, ANTHROPIC_API_KEY: `probe-${nonce}`,
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", DISABLE_AUTOUPDATER: "1",
+        };
+        const r = await run("sandbox-exec", ["-p", profile, claudeReal, "-p", "--bare", "--restricted", "--model", LIVE_MODEL,
+          "--max-turns", "1", "--max-budget-usd", "0.02", "--output-format", "json", "--tools", "", "--no-session-persistence"],
+        { env, cwd: join(dir, "work"), timeout: 120000, input: "Reply with the single word OK." });
+        const c = parseClaudeJson(r.stdout);
+        spent += c.cost;
+        add("live.pb4_binary_dir_only", "answered with /Users unreadable except the binary dir and scratch", `answered=${c.answered} exit=${r.code} subtype=${c.subtype}`, c.answered ? "pass" : "fail",
+          /Operation not permitted/.test(r.stderr) ? "stderr mentions a sandbox denial" : undefined);
+      } finally { await proxy2.close(); }
+    } else add("live.pb4_binary_dir_only", "answered", "not_run", "skipped", "budget cap reached");
+  } else add("live.pb2_proxy_only", "claude answers", "not_run", "skipped", "budget cap reached");
+
+  if (affordable(0.04)) {
+    const dir = join(T, "live-alt");
+    const st = stage(dir, { canary, loopbackPort: 0, keychainService: "Claude Code-credentials", writeTest });
+    const env = { ...process.env };
+    for (const k of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "PROBE_CANARY"]) delete env[k];
+    const settings = { sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false } };
+    const args = st.args.map((a) => (a === "$REAL_HOME" ? realHome : a));
+    const r = await run(claudeReal, ["-p", "--model", LIVE_MODEL, "--max-turns", "3", "--max-budget-usd", "0.04", "--output-format", "json",
+      "--tools", "Bash", "--allowedTools", "Bash", "--settings", JSON.stringify(settings), "--setting-sources", "project",
+      "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"],
+    { env, cwd: join(dir, "work"), timeout: 180000, input: prompt(st.script, args) });
+    const c = parseClaudeJson(r.stdout);
+    spent += c.cost;
+    const kv = existsSync(st.out) ? parseKv(readFileSync(st.out, "utf8")) : {};
+    add("live.alt_builtin.bash_ran", "Bash ran under claude's own sandbox", kv.bash_ran === 1 ? "bash_ran" : `no_bash(answered=${c.answered} subtype=${c.subtype})`, kv.bash_ran === 1 ? "pass" : "inconclusive",
+      kv.bash_ran === 1 ? undefined : "the rest of this group is not evaluated; check that this shell is not itself sandboxed");
+    if (kv.bash_ran === 1) results.push(...evalLive("live.alt_builtin", kv, controls, { keychainService: "Claude Code-credentials", expectLoopback: false }));
+    clean();
+  } else add("live.alt_builtin.bash_ran", "ran", "not_run", "skipped", "budget cap reached");
+
+  add("live.cost", `<= ${LIVE_BUDGET_TOTAL_USD.toFixed(2)} USD`, `${spent.toFixed(4)} USD`, spent <= LIVE_BUDGET_TOTAL_USD ? "pass" : "fail");
+  log?.(`live spend ${spent.toFixed(4)} USD`);
+  return results;
+}
