@@ -498,9 +498,9 @@ function stopForHuman(E, ctx, stage, blockers, collectError) {
     name: blockers[0].gate || blockers[0].id, stage, decisions: blockers, noteHtml,
   });
   let url;
-  const curator = E.curatorOnPath();
+  const curator = E.siblingCurator();
   if (curator) {
-    const r = spawnSync(curator, ["open", html], { encoding: "utf8", timeout: 30000 });
+    const r = spawnSync(process.execPath, [curator, "open", html], { encoding: "utf8", timeout: 30000 });
     if (r.status === 0) {
       try { url = JSON.parse(r.stdout.trim().split("\n").pop()).url; } catch { /* the page still exists on disk */ }
     } else {
