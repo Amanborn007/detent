@@ -2515,7 +2515,7 @@ function cmdAnswer(verb, id, flags) {
 function cmdDoctor(flags) {
   const repo = repoOf(flags);
   const checks = [];
-  const add = (name, ok, detail) => checks.push({ name, status: ok ? "PASS" : "FAIL", detail });
+  const add = (name, ok, detail, warn = false) => checks.push({ name, status: ok ? "PASS" : warn ? "WARN" : "FAIL", detail });
   const major = Number(process.versions.node.split(".")[0]);
   add("node", major >= 20, `v${process.versions.node}${major >= 20 ? "" : " (need 20 or newer)"}`);
   const git = spawnSync("git", ["--version"], { encoding: "utf8" });
@@ -2558,7 +2558,8 @@ function cmdDoctor(flags) {
     const missing = commands.filter((c) => !runnable(c));
     add("sockets", missing.length === 0, missing.length ? `not found or not executable: ${missing.join(", ")}` : `${commands.length} exec socket command(s) found`);
   }
-  add("DETENT_ROOT", !!process.env.DETENT_ROOT, process.env.DETENT_ROOT || "not set; export DETENT_ROOT=<your detent clone>");
+  if (process.env.DETENT_ROOT) add("DETENT_ROOT", true, process.env.DETENT_ROOT);
+  else add("DETENT_ROOT", false, `not set; falling back to the detent clone this CLI lives in: ${detentRoot()}`, true);
   const failed = checks.filter((c) => c.status === "FAIL");
   out({
     ok: failed.length === 0, checks,
