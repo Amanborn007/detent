@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, chmodSync, realpathSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, chmodSync, realpathSync, mkdirSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -252,4 +252,21 @@ test("stdout null: exit 2, not a JSON envelope", () => {
   const r = run(req(mkRepo()), { mode: "nullout" });
   assert.equal(r.code, 2);
   assert.equal(r.json.error, "claude stdout is not a JSON envelope: not an object");
+});
+
+test("runtime port fails to load: JSON error, exit 1, no stack", () => {
+  const root = mkdtempSync(join(tmpdir(), "clrev-noruntime-"));
+  mkdirSync(join(root, "engine", "adapters"), { recursive: true });
+  const copy = join(root, "engine", "adapters", "claude-reviewer");
+  copyFileSync(ADAPTER, copy);
+  chmodSync(copy, 0o755);
+  const stub = mkStub();
+  const r = spawnSync(copy, [], {
+    input: JSON.stringify(req(mkRepo())), encoding: "utf8",
+    env: { ...process.env, DETENT_CLAUDE_BIN: stub.bin, STUB_MODE: "valid" },
+  });
+  assert.equal(r.status, 1, r.stderr);
+  const json = JSON.parse(r.stdout);
+  assert.match(json.error, /claude-reviewer crashed/);
+  assert.ok(json.next_step);
 });
