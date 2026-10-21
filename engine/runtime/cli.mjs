@@ -1,6 +1,6 @@
 // `engine runtime run|capabilities` — the port's verb. engine.mjs lazy-imports this and injects its output helpers.
 import { readFileSync } from "node:fs";
-import { getRuntime, resolveRuntimeName, RuntimeError, UnknownRuntimeError, CapabilityError } from "./runtime.mjs";
+import { getRuntime, resolveRuntimeName, RuntimeError, UnknownRuntimeError, CapabilityError, RuntimeConfigError } from "./runtime.mjs";
 
 const USAGE = "engine runtime run [--runtime <name>] [--bin <path>] (request JSON on stdin) | engine runtime capabilities [--runtime <name>]";
 
@@ -13,6 +13,7 @@ function flagValue(flags, name, E) {
 function refusalNext(e) {
   if (e instanceof UnknownRuntimeError) return `set --runtime or DETENT_RUNTIME to one of: ${e.known.join(", ")}`;
   if (e instanceof CapabilityError) return `drop that field, or pick a runtime that declares it: engine runtime capabilities --runtime ${e.runtime}`;
+  if (e instanceof RuntimeConfigError) return `set ${e.setting}; see engine/runtime/CONTRACT.md (openai-compatible)`;
   return "fix the request JSON; the schema is in engine/runtime/CONTRACT.md";
 }
 

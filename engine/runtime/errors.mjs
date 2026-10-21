@@ -20,3 +20,6 @@ export class CapabilityError extends RuntimeError {
     this.requested = requested;
   }
 }
+export class RuntimeConfigError extends RuntimeError {
+  constructor(message, setting) { super(message, "bad_config"); this.setting = setting; }
+}
