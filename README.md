@@ -13,7 +13,24 @@ From `detent setup` to the plan gate in 20 seconds, on the real engine. A stub s
   <img alt="A terminal runs detent setup, then detent run new for a ticket, then the stages one line each, and stops at the plan gate with 'waiting on you: plan approval' and the path of the gate page." src="docs/demo/demo.gif" width="720">
 </p>
 
-<!-- DRIVE-CLIP: add the in-Claude-Code recording here once `detent drive` ships. Script: docs/demo/RECORDING.md -->
+This is a real run of `detent drive` with Claude Haiku 5.5 on a toy repo, with a $1 budget cap. Drive ran intake and research, then stopped because a human has to answer a question before it plans. The JSON is reformatted for reading and paths are shortened.
+
+```
+$ detent drive --run 2026-10-21-acme-widgets-1 --repo ~/demo-repo --budget 1 --model claude-haiku-5-5
+{
+  "ok": true,
+  "run_id": "2026-10-21-acme-widgets-1",
+  "stopped": "needs_human",
+  "steps": 2,
+  "total_cost_usd": 0.019042,
+  "total_turns": 28,
+  "budget_usd": 1,
+  "stage": "plan",
+  "decisions": ["D-004"],
+  "html": "~/detent-home/.plans/2026-10-21-acme-widgets-1-D-004.html",
+  "next_step": "answer in curator (open ~/detent-home/.plans/2026-10-21-acme-widgets-1-D-004.html), then run: detent drive --run 2026-10-21-acme-widgets-1"
+}
+```
 
 The plan gate opens as a local page. You click approve or revise.
 
