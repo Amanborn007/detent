@@ -2,12 +2,24 @@
 const TOKEN = /[A-Za-z_$][A-Za-z0-9_$]*/g;
 export const MIN_NAME = 4;
 export const MAX_DEFINERS = 3;
+// Aider-style: generic words and language builtins say nothing about which file is meant.
+export const STOPLIST = new Set((
+  "path node name data value values result results type types key keys index args options config error errors file files list item items " +
+  "init main test tests self this info text line lines string number object array map set size count state props params param context " +
+  "input output response request message event handler callback default class const function return import export from async await " +
+  "true false null undefined void static public private protected interface enum struct impl trait super extends implements " +
+  "break continue switch case catch throw try finally while else elif yield lambda print None True False dict tuple bool int float " +
+  "len str range open read write close load save parse build make create update delete get put post run start stop next prev"
+).split(/\s+/));
+const SPECIFIC_BOOST = 10;
+const AMBIGUOUS_FACTOR = 0.1;
+const isSpecific = (n) => n.length >= 8 || /[a-z][A-Z]/.test(n) || /[A-Za-z0-9]_[A-Za-z0-9]/.test(n);
 const round = (x, p = 1e6) => Math.round(x * p) / p;
 
 export function buildEdges(files, symbols) {
   const definers = new Map();
   for (const s of symbols) {
-    if (s.name.length < MIN_NAME) continue;
+    if (s.name.length < MIN_NAME || STOPLIST.has(s.name.toLowerCase())) continue;
     if (!definers.has(s.name)) definers.set(s.name, new Set());
     definers.get(s.name).add(s.file);
   }
@@ -18,7 +30,10 @@ export function buildEdges(files, symbols) {
     for (const tok of text.match(TOKEN) || []) if (definers.has(tok)) counts.set(tok, (counts.get(tok) || 0) + 1);
     const to = new Map();
     for (const [name, n] of counts) {
-      for (const d of definers.get(name)) if (d !== path) to.set(d, (to.get(d) || 0) + n);
+      // A definer mentioning its own name is not a reference (also stops duplicate definers forming a rank-hoarding cycle).
+      if (definers.get(name).has(path)) continue;
+      const w = (isSpecific(name) ? SPECIFIC_BOOST : 1) * (definers.get(name).size > 1 ? AMBIGUOUS_FACTOR : 1);
+      for (const d of definers.get(name)) to.set(d, (to.get(d) || 0) + n * w);
     }
     if (to.size) {
       edges[path] = Object.fromEntries([...to].sort((a, b) => (a[0] < b[0] ? -1 : 1))
