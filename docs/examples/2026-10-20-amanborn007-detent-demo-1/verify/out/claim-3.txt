@@ -1,0 +1,2 @@
+When the first word alone is longer than `maxLength`, that word is cut at `maxLength`
+cap 5 -> "super"

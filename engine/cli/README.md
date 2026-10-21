@@ -45,6 +45,12 @@ violation) with a structured `reason`.
 
 ## Commands
 
+### `engine setup --repo <path> [--force]`
+
+First-run setup. Creates `<DETENT_ROOT>/detent.user.yaml` from `detent.user.example.yaml` if it is missing, and fills `user.name` and `user.email` (from `git config`) and `user.github_login` (from `gh api user --jq .login`) only where they are empty or still the example placeholder. A value that is already set is never changed. It then writes `<repo>/stack.yaml` with `engine_version: "1"` and the three built-in adapters (`ticket`, `knowledge` with the `repo-docs` provider, `bot-comments`), each `version: "builtin"` and each command an absolute path into the detent clone.
+
+The JSON line has `wrote`, `left_alone`, `unresolved` (values it could not detect, for example `user.teams`, or `user.github_login` when `gh` is not logged in) and `next_step`. Refuses (exit 2), before writing anything, when `--repo` is missing or is not a git repo, or when `stack.yaml` already exists and `--force` is not given. `DETENT_GIT_CMD` and `DETENT_GH_CMD` replace the `git` and `gh` programs used for the probes (tests use them).
+
 ### `engine run new --ticket <ref> [--repo <path>] [--slug <slug>] [--no-worktree]`
 
 Creates `<DETENT_ROOT>/.sdlc/<run-id>/` with `run.json`, `stage-status.json`

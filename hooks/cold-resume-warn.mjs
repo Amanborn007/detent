@@ -14,6 +14,8 @@
  *   the work. The hook states the cost and leaves the call, because a gate
  *   that blocks a legitimate resume gets disabled, and then it protects nothing.
  *
+ * Set COLD_RESUME_WARN=off to disable.
+ *
  * Reads the hook payload on stdin, prints to stdout (SessionStart stdout becomes
  * session context). Never fails the session: any error exits 0 silently, since
  * a broken advisory must not stop work.
@@ -68,6 +70,7 @@ function humanGap(ms) {
 }
 
 function main() {
+  if (process.env.COLD_RESUME_WARN === "off") return;
   const raw = readStdin();
   if (!raw.trim()) return;
   let payload;

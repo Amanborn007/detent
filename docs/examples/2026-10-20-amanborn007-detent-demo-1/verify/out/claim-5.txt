@@ -1,0 +1,2 @@
+`maxLength` below 1, or not an integer, throws `RangeError`
+0 -> RangeError: maxLength must be an integer of at least 1; -1 -> RangeError: maxLength must be an integer of at least 1; 2.5 -> RangeError: maxLength must be an integer of at least 1; "10" -> RangeError: maxLength must be an integer of at least 1; NaN -> RangeError: maxLength must be an integer of at least 1

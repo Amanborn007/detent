@@ -56,6 +56,12 @@ sockets:
     args: ["--mode", "engine"]
     version: "5.0.3"
     timeout: "10m"
+  # Built-in option: sends the diff to a signed-in `claude` CLI and spends tokens.
+  # reviewer:
+  #   command: "/path/to/detent/engine/adapters/claude-reviewer"
+  #   args: ["--model", "sonnet"]
+  #   version: "builtin"
+  #   timeout: "5m"
 
   # ---- PR verification ------------------------------------------------------
   # Runs tests AND captures end-to-end evidence artifacts. A pass without
@@ -65,6 +71,13 @@ sockets:
     args: ["--evidence-dir", ".verify"]
     version: "1.7.0"
     timeout: "30m"
+  # Built-in option: runs your test command, then your evidence command.
+  # Both run in the shell inside the repo, so keep them in this trusted file.
+  # verifier:
+  #   command: "/path/to/detent/engine/adapters/cmd-verifier"
+  #   args: ["--test", "npm test", "--evidence", "./scripts/capture-evidence.sh"]
+  #   version: "builtin"
+  #   timeout: "10m"
 
   # ---- standing PR loop ------------------------------------------------------
   # Polled until the PR merges. See sockets/bot-comments.md.

@@ -77,6 +77,11 @@ const STAGE_END_GATES = {
 // Output helpers — one JSON line, always a next_step, structured refusals.
 // ---------------------------------------------------------------------------
 
+// There is no `engine` binary on PATH; under the detent wrapper, name the one that exists.
+function forCaller(text) {
+  return process.env.DETENT_CLI === "1" ? text.replace(/\bengine (?=(?:setup|run|stage|gate|socket|next|dashboard|live|bench|eval|pack|respond|step|advisor|handoff|attempt|env|decide-why|spend|help)\b)/g, "detent ") : text;
+}
+
 // process.exit() drops a buffered stream write, and a pipe truncates past ~8KB.
 // Write synchronously and retry the EAGAIN a non-blocking pipe returns.
 function writeLineSync(line) {
@@ -92,6 +97,7 @@ function writeLineSync(line) {
 }
 
 function out(obj, code = 0) {
+  if (typeof obj.next_step === "string") obj.next_step = forCaller(obj.next_step);
   writeLineSync(JSON.stringify(obj) + "\n");
   process.exit(code);
 }
@@ -426,6 +432,7 @@ function cmdRunNew(flags) {
   const wantWorktree = !flags["no-worktree"];
   let worktree = null;
   let branch = null;
+  let baseSha = null;
   if (wantWorktree) {
     const head = spawnSync("git", ["-C", repo, "rev-parse", "--verify", "-q", "HEAD"], { encoding: "utf8" });
     if (head.status !== 0) {
@@ -434,6 +441,7 @@ function cmdRunNew(flags) {
         "commit something first, or pass --no-worktree to run without a dedicated worktree",
       );
     }
+    baseSha = head.stdout.trim();
     branch = `sdlc/${runId}`;
     worktree = join(runDir, "worktree");
     mkdirSync(runDir, { recursive: true });
@@ -453,6 +461,7 @@ function cmdRunNew(flags) {
     repo,
     worktree,
     branch,
+    base_sha: baseSha,
     created_at: nowIso(),
   });
   const stages = {};
@@ -783,6 +792,13 @@ function cmdStageEnd(stage, flags) {
   if (entry.status !== "in_progress" && entry.status !== "blocked") {
     refuse(`cannot end '${stage}': it is '${entry.status}', not in_progress (was it ever begun?)`,
       `engine stage begin ${stage} --run ${runId} --repo ${repo}`);
+  }
+  const endBlockers = pendingBlockers(loadDecisions(runDir), stage);
+  if (endBlockers.length > 0) {
+    const ids = endBlockers.map((d) => d.id);
+    refuse(`cannot end '${stage}': pending decision(s) block it: ${ids.join(", ")}`,
+      `engine gate open ${endBlockers[0].gate || ids[0]} --run ${runId} --repo ${repo}`,
+      { blocked_on: ids });
   }
   // Required artifacts per CONTRACT.md. Every missing one is named, so a single
   // re-run fixes them all rather than one refusal per file.
@@ -1878,7 +1894,9 @@ function runExec(entry, payload, stackPath, providerName) {
     timeout,
   });
   let r = attempt();
-  if (r.status === 1) {
+  // A JSON body on exit 1 is a deliberate provider answer, so retrying cannot change it.
+  const jsonBody = (x) => { try { return JSON.parse(x.stdout); } catch { return undefined; } };
+  if (r.status === 1 && jsonBody(r) === undefined) {
     process.stderr.write(`warning: provider '${providerName}' exited 1, retrying once\n`);
     r = attempt();
   }
@@ -1886,7 +1904,13 @@ function runExec(entry, payload, stackPath, providerName) {
     return { ok: false, code: 1, stderr: `spawn failed: ${r.error.message}` };
   }
   if (r.status !== 0) {
-    return { ok: false, code: r.status === 2 ? 2 : 1, stderr: (r.stderr || "").trim() };
+    const body = r.status === 1 || r.status === 2 ? jsonBody(r) : undefined;
+    return {
+      ok: false,
+      code: r.status === 2 ? 2 : 1,
+      stderr: (r.stderr || "").trim(),
+      ...(body !== undefined ? { response: body } : {}),
+    };
   }
   try {
     return { ok: true, code: 0, response: JSON.parse(r.stdout) };
@@ -1943,9 +1967,11 @@ function cmdSocketCall(name, flags) {
   if (kind === "exec") {
     const r = runExec(entry, payload, stackPath, name);
     if (!r.ok) {
-      const msg = `socket '${name}' exec provider failed (exit ${r.code}): ${r.stderr}`;
-      if (r.code === 2) refuse(msg, "the provider rejected the request as a contract violation — fix the payload or the provider");
-      fail(msg, "check the provider command in stack.yaml, then re-invoke");
+      const why = r.stderr || (r.response && typeof r.response.error === "string" ? r.response.error : "");
+      const msg = `socket '${name}' exec provider failed (exit ${r.code}): ${why}`;
+      const extra = r.response !== undefined ? { response: r.response } : {};
+      if (r.code === 2) refuse(msg, "the provider rejected the request as a contract violation — fix the payload or the provider", extra);
+      fail(msg, "check the provider command in stack.yaml, then re-invoke", extra);
     }
     out({
       ok: true,
@@ -2609,7 +2635,7 @@ function cmdAdvisorConsult(flags) {
 // Dispatch.
 // ---------------------------------------------------------------------------
 
-const USAGE = "engine <run new|stage begin|stage end|gate open|gate collect|drive|socket call|next|dashboard|live|bench|eval|pack validate|respond|step|advisor consult|handoff|attempt|env|decide-why|spend|help> — see engine/cli/README.md";
+const USAGE = "engine <setup|run new|stage begin|stage end|gate open|gate collect|drive|socket call|next|dashboard|live|bench|eval|pack validate|respond|step|advisor consult|handoff|attempt|env|decide-why|spend|help> — see engine/cli/README.md";
 
 /**
  * cmdEval — wraps engine/eval/eval.mjs's runEval() for `engine eval`. An
@@ -3074,10 +3100,159 @@ function cmdPackValidate(flags) {
   out({ ok: true, ...summary, next_step: "pack is valid — proceed" });
 }
 
+// ---------------------------------------------------------------------------
+// engine setup — first-run config. Fills empty detent.user.yaml fields from
+// git/gh and writes a starter stack.yaml wired to the built-in adapters.
+// ---------------------------------------------------------------------------
+
+const PLACEHOLDER_EMAIL = "you@example.com";
+
+function probeValue(cmd, args, cwd) {
+  const r = spawnSync(cmd, args, { encoding: "utf8", cwd, timeout: 15000 });
+  if (r.error || r.status !== 0) return null;
+  return r.stdout.trim() || null;
+}
+
+function shellQuote(p) {
+  return /^[A-Za-z0-9_/.:@%+=,-]+$/.test(p) ? p : `'${p.replace(/'/g, "'\\''")}'`;
+}
+
+// Fills one empty child of the top-level `user:` block; returns the new
+// lines, or null when no safely editable line exists there.
+function fillUserKey(lines, key, value) {
+  const start = lines.findIndex((l) => /^user:[ \t]*(#.*)?\r?$/.test(l));
+  if (start === -1) return null;
+  const ph = PLACEHOLDER_EMAIL.replace(".", "\\.");
+  let indent = null;
+  for (let i = start + 1; i < lines.length; i++) {
+    const l = lines[i];
+    if (!l.trim() || /^[ \t]*#/.test(l)) continue;
+    const lead = /^ */.exec(l)[0].length;
+    if (lead === 0) return null;
+    if (indent === null) indent = lead;
+    if (lead !== indent) continue;
+    const m = new RegExp(`^( {${indent}}${key}:)[ \\t]*(?:""|''|"${ph}"|${ph})?([ \\t]+#.*?)?([ \\t]*\\r?)$`).exec(l);
+    if (!m) continue;
+    const out = lines.slice();
+    out[i] = `${m[1]} ${JSON.stringify(value)}${m[2] || ""}${m[3].includes("\r") ? "\r" : ""}`;
+    return out;
+  }
+  return null;
+}
+
+function starterStack(clone) {
+  const adapter = (n) => JSON.stringify(join(clone, "engine", "adapters", n));
+  return [
+    "# Starter stack.yaml written by `detent setup`. Add other sockets from",
+    "# engine/stack.example.yaml in the detent clone as you wire more tools.",
+    'engine_version: "1"',
+    "",
+    "sockets:",
+    "  ticket:",
+    `    command: ${adapter("gh-ticket")}`,
+    '    version: "builtin"',
+    "",
+    "  knowledge:",
+    "    providers:",
+    '      - name: "repo-docs"',
+    `        command: ${adapter("repo-docs-knowledge")}`,
+    '        version: "builtin"',
+    "",
+    "  bot-comments:",
+    `    command: ${adapter("gh-bot-comments")}`,
+    '    version: "builtin"',
+    "",
+  ].join("\n");
+}
+
+function cmdSetup(flags) {
+  if (!flags.repo || flags.repo === true) {
+    return refuse("setup needs the work repo", "detent setup --repo <path-to-work-repo>");
+  }
+  const repo = resolve(flags.repo);
+  if (!existsSync(repo) || !statSync(repo).isDirectory()) {
+    return refuse(`--repo is not a directory: ${repo}`, "pass the path of the repo you will work in");
+  }
+  const g = spawnSync("git", ["-C", repo, "rev-parse", "--git-dir"], { encoding: "utf8" });
+  if (g.error || g.status !== 0) {
+    return refuse(`${repo} is not a git repo`, "run `git init` there, or pass the path of your work repo");
+  }
+  const stackPath = join(repo, "stack.yaml");
+  if (existsSync(stackPath) && flags.force !== true) {
+    return refuse(`${stackPath} already exists`, "keep it, or re-run with --force to overwrite it");
+  }
+
+  const clone = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const userPath = join(detentRoot(), "detent.user.yaml");
+  const wrote = [];
+  const leftAlone = [];
+  const unresolved = [];
+  const unresolvedReasons = {};
+
+  let text;
+  if (existsSync(userPath)) {
+    text = readFileSync(userPath, "utf8");
+  } else {
+    const example = join(clone, "detent.user.example.yaml");
+    if (!existsSync(example)) {
+      return fail(`template missing: ${example}`, "restore detent.user.example.yaml in the detent clone");
+    }
+    text = readFileSync(example, "utf8");
+    wrote.push(userPath);
+  }
+  let user;
+  try {
+    user = parseYamlSubset(text, userPath).user || {};
+  } catch (e) {
+    return refuse(`failed to parse ${userPath}: ${e.message}`, "fix or delete detent.user.yaml, then re-run detent setup");
+  }
+  const isEmpty = (v) => v === undefined || v === null || v === "" || v === "''" || v === PLACEHOLDER_EMAIL;
+  const gitCmd = process.env.DETENT_GIT_CMD || "git";
+  const ghCmd = process.env.DETENT_GH_CMD || "gh";
+  const probes = [
+    ["name", () => probeValue(gitCmd, ["config", "user.name"], repo)],
+    ["email", () => probeValue(gitCmd, ["config", "user.email"], repo)],
+    ["github_login", () => probeValue(ghCmd, ["api", "user", "--jq", ".login"], repo)],
+  ];
+  let changed = false;
+  for (const [key, probe] of probes) {
+    const dotted = `user.${key}`;
+    if (!isEmpty(user[key])) { leftAlone.push(dotted); continue; }
+    const value = probe();
+    if (value === null) { unresolved.push(dotted); continue; }
+    const edited = fillUserKey(text.split("\n"), key, value);
+    if (edited === null) {
+      unresolved.push(dotted);
+      unresolvedReasons[dotted] = `no empty ${key}: line found under the top-level user: block`;
+      continue;
+    }
+    text = edited.join("\n");
+    changed = true;
+  }
+  if (!Array.isArray(user.teams) || user.teams.length === 0) unresolved.push("user.teams");
+  if (isEmpty(user.jira_account)) unresolved.push("user.jira_account");
+  if (changed || wrote.includes(userPath)) writeFileSync(userPath, text);
+  if (!wrote.includes(userPath) && changed) wrote.push(userPath);
+
+  writeFileSync(stackPath, starterStack(clone));
+  wrote.push(stackPath);
+
+  out({
+    ok: true,
+    wrote,
+    left_alone: leftAlone,
+    unresolved,
+    ...(Object.keys(unresolvedReasons).length ? { unresolved_reasons: unresolvedReasons } : {}),
+    next_step: `detent run new --ticket <owner/repo#N> --repo ${shellQuote(repo)}` +
+      (unresolved.length ? `; fill ${unresolved.join(", ")} in ${userPath} (run \`gh auth login\` first for user.github_login)` : ""),
+  });
+}
+
 function cmdHelp() {
   out({
     ok: true,
     usage: {
+      "setup": "engine setup --repo <path> [--force] — first run: create <DETENT_ROOT>/detent.user.yaml and fill empty user.name/email/github_login from git and gh (never overwrites a set value), and write a starter stack.yaml in the work repo wired to the built-in adapters by absolute path. Refuses (exit 2) if --repo is missing or not a git repo, or if stack.yaml exists without --force. Values it cannot detect are listed in `unresolved`",
       "run new": "engine run new --ticket <ref> [--repo <path>] [--slug <slug>] [--no-worktree] — create a run under the centralized <DETENT_ROOT>/.sdlc/ with a dedicated git worktree (the default flow)",
       "stage begin": "engine stage begin <stage> [--run <id>] [--repo <path>] — enter a stage (refuses illegal transitions)",
       "stage end": "engine stage end <stage> [--run <id>] [--repo <path>] — finish a stage (checks artifact + gates). implement: [--tdd-test <name> --tdd-red <sha> --tdd-green <sha> | --tdd-exempt <reason>] records the tdd block (implement records, never judges). recheck: asserts red_sha is an ancestor of green_sha via git cat-file/merge-base, proving ORDER only, never that the test was observed failing.",
@@ -3117,6 +3292,7 @@ function main() {
   }
   const [a, b, c] = positional;
   if (a === "help" || flags.help === true) return cmdHelp();
+  if (a === "setup") return cmdSetup(flags);
   if (a === "run" && b === "new") return cmdRunNew(flags);
   if (a === "stage" && b === "begin") return cmdStageBegin(c, flags);
   if (a === "stage" && b === "end") return cmdStageEnd(c, flags);

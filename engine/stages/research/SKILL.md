@@ -54,19 +54,23 @@ cite them as inputs and go deeper, into the code.
      knowledge:
        providers:
          - name: docs-search
-           query: "kbtool search --provider docs --json {query}"
+           command: "kbtool-docs"
+           version: "1.0.0"
          - name: adr-index
-           query: "kbtool search --provider adrs --json {query}"
+           command: "kbtool-adrs"
+           version: "1.0.0"
    ```
 
-   Call EVERY declared provider with your queries. A provider erroring or returning
+   Call EVERY declared provider with your queries. `detent socket call knowledge
+   --payload-file req.json`, with `{"query": "...", "repo_path": "...", "max_results": 20}`
+   in the file, fans out to every provider and merges the results. A provider erroring or returning
    nothing is recorded in `## Method` ("adr-index: 0 hits for 'webhook retry'") —
    silently skipping a declared provider is a contract violation. Zero providers
    declared → note it and continue with (b) and (c); the repo lens alone can still
    be real research.
 
-5. **Fan-out (b): skill discovery.** Call `sockets.skill_discovery` (same pattern:
-   a query command) for org skills matching (i) the affected repo, (ii) the domain,
+5. **Fan-out (b): skill discovery.** Call `sockets.skill-discovery` (same pattern:
+   `detent socket call skill-discovery`) for org skills matching (i) the affected repo, (ii) the domain,
    (iii) each unknown. You are looking for playbooks that would change the plan —
    e.g. an org skill "how we do queue retries" makes half the plan a lookup.
 

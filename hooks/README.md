@@ -12,6 +12,7 @@ The hooks:
 
 | Script | Event / matcher | Purpose |
 |---|---|---|
+| `cold-resume-warn.mjs` | SessionStart | On a resume whose last turn is over an hour old, warn that the prompt cache has expired and the next turn re-uploads the conversation. `COLD_RESUME_WARN=off` disables it. |
 | `sentinel-autoscan.sh` | PostToolUse, matcher `Bash` | Detect a PR becoming watchable (create/ready/push), spawn a detached read-only bot-comment scanner. |
 | `sentinel-inbox-check.sh` | Stop | The reader half of the above: hold the stop open while the scanner's inbox has unacked rounds, an open blocking gate, or a live poll, so the fix→push→rescan loop runs its configured rounds instead of dying with the turn. |
 | `curator-reminder.sh` | PostToolUse, matcher `ExitPlanMode` | After a plan is approved, remind the agent to render it in curator and run the feedback loop before implementing. |
