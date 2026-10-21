@@ -41,6 +41,9 @@ function baseUrl(env) {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new RuntimeConfigError(`${BASE_URL} must be an http: or https: URL, got ${url.protocol}`, BASE_URL);
   }
+  if (url.username || url.password) {
+    throw new RuntimeConfigError(`${BASE_URL} must not carry credentials in the URL; send the key through ${KEY_ENV}`, BASE_URL);
+  }
   return { base: raw.replace(/\/+$/, ""), url };
 }
 
