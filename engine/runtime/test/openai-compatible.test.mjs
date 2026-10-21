@@ -121,6 +121,21 @@ test("a config error comes out of the port before anything spawns", () => {
   assert.equal(spawned(dir), false);
 });
 
+test("a base URL with credentials is refused without echoing them, and nothing spawns", () => {
+  const dir = scratch();
+  const env = { ...ENV, DETENT_OPENAI_BASE_URL: "http://bob:hunter2@127.0.0.1:9/v1" };
+  const rt = createRuntime(openai, { bin: makeOpenAIFake(dir, "ok").bin, env });
+  assert.throws(() => rt.run(baseRequest(dir)), (e) => {
+    assert.ok(e instanceof RuntimeConfigError);
+    assert.equal(e.code, "bad_config");
+    assert.equal(e.setting, "DETENT_OPENAI_BASE_URL");
+    for (const leak of ["bob", "hunter2", "127.0.0.1"]) assert.ok(!e.message.includes(leak), leak);
+    return true;
+  });
+  assert.equal(spawned(dir), false);
+  assert.throws(() => plan({}, { ...ENV, DETENT_OPENAI_BASE_URL: "https://:tok3n@api.example.com/v1" }), RuntimeConfigError);
+});
+
 test("getRuntime passes env to plan", () => {
   assert.equal(getRuntime({ name: "openai-compatible", env: ENV }).plan(baseRequest(CWD)).args[2], "http://127.0.0.1:11434/v1");
 });
