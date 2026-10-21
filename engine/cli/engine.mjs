@@ -460,6 +460,21 @@ function isUnresolvedJudgment(d) {
     d.answer.trim().toLowerCase() === PROCEED_DEGRADED_ANSWER;
 }
 
+// Answering a gate must also clear the stage block that gate raised, or every later status read shows the stage waiting.
+function releaseAnsweredBlocks(runDir, decisions) {
+  const status = loadStatus(runDir);
+  let changed = false;
+  for (const [stage, entry] of Object.entries(status.stages)) {
+    if (entry.status !== "blocked") continue;
+    const open = decisions.some((d) => (entry.blocked_on || []).includes(d.id) && (d.status === "pending" || isUnresolvedJudgment(d)));
+    if (open) continue;
+    const raisedAtEnd = decisions.some((d) => (entry.blocked_on || []).includes(d.id) && STAGE_END_GATES[stage]?.name === d.gate);
+    status.stages[stage] = { status: raisedAtEnd ? "in_progress" : "pending", updated_at: nowIso() };
+    changed = true;
+  }
+  if (changed) saveStatus(runDir, status);
+}
+
 function pendingBlockers(decisions, stage) {
   return decisions.filter((d) =>
     Array.isArray(d.blocks) && d.blocks.includes(stage) &&
@@ -1374,6 +1389,7 @@ function applyFeedback(runDir, items) {
   }
   if (answered.length) saveDecisions(runDir, decisions);
   syncGateAnsweredEvents(runDir, decisions);
+  releaseAnsweredBlocks(runDir, decisions);
   return { answered, unresolved, feedback, pending: decisions.filter((d) => d.status === "pending" || isUnresolvedJudgment(d)).map((d) => d.id) };
 }
 
@@ -2430,7 +2446,7 @@ function cmdStart(ticket, flags) {
     setup: hasStack ? "present" : "ran",
     worktree: created.json.worktree,
     stage: "intake",
-    next_step: "detent continue — an agent writes the brief for the intake stage. Use detent status any time to see where the run stands.",
+    next_step: "detent continue. An agent writes the brief for the intake stage. Use detent status any time to see where the run stands.",
   });
 }
 
@@ -2475,7 +2491,7 @@ async function cmdContinue(flags) {
   }
   const passthrough = ["claude-bin", "model", "budget", "profile", "stack", "child-timeout-sec"].flatMap((k) => (flags[k] && flags[k] !== true ? [`--${k}`, String(flags[k])] : []));
   const r = spawnSync(process.execPath, [ENGINE_FILE, "drive", "--run", runId, "--max-steps", "1", ...passthrough, ...(WANT_JSON ? ["--json"] : [])],
-    { stdio: "inherit", env: process.env });
+    { stdio: "inherit", env: { ...process.env, DETENT_VERB: "continue" } });
   process.exit(r.status ?? 1);
 }
 
@@ -2555,11 +2571,12 @@ function cmdAnswer(verb, id, flags) {
   saveDecisions(runDir, decisions);
   appendEvent(runDir, { event: "decision_answered", decision_id: d.id, answer: verb, answered_by: "human", answered_via: "terminal" });
   syncGateAnsweredEvents(runDir, decisions);
+  releaseAnsweredBlocks(runDir, decisions);
   out({
     ok: true, run_id: runId, ticket, decision_id: d.id, answer: verb,
     next_step: verb === "approve"
-      ? "detent continue — the run moves on to the next stage"
-      : "detent continue — the plan stage picks up your note and revises",
+      ? "detent continue. The run moves on to the next stage."
+      : "detent continue. The plan stage picks up your note and revises.",
   });
 }
 
