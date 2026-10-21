@@ -8,8 +8,8 @@
 // strictAllowlist}, sandbox.filesystem.{denyRead,allowRead,denyWrite,
 // allowWrite}, plus top-level disableAllHooks, enableAllProjectMcpServers,
 // autoMemoryEnabled.
-import { existsSync, readdirSync, realpathSync } from "node:fs";
-import { basename, dirname, isAbsolute, join } from "node:path";
+import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 const DATA_TWIN = "/System/Volumes/Data";
 const SHARED_TMP = ["/tmp/claude", "/private/tmp/claude"];
@@ -50,36 +50,83 @@ export function implementPathEntries(pathString) {
   return String(pathString ?? "").split(":").filter((p) => p.startsWith("/") && p.length > 1);
 }
 
+const strictlyUnder = (p, root) => p.startsWith(root.endsWith("/") ? root : root + "/") && p !== root;
+
+function userTmpOf(ctx) {
+  const t = ctx.userTmp ?? process.env.TMPDIR;
+  return t ? resolve(t) : null;
+}
+const uidOf = (ctx) => ctx.uid ?? process.getuid();
+const claudeUidTmp = (ctx) => [`/tmp/claude-${uidOf(ctx)}`, `/private/tmp/claude-${uidOf(ctx)}`];
+
+// Layouts of version managers whose bin/lib trees a build may need. Anything else
+// under HOME stays denied, so an arbitrary PATH entry cannot widen the read set.
+function toolchainRootsFor(rel, dir) {
+  const [a, b, c, d, e] = rel;
+  const withLib = () => [dir, join(dirname(dir), "lib")];
+  if (a === ".nvm" && b === "versions" && c === "node" && d && e === "bin" && rel.length === 5) return withLib();
+  if (a === ".cargo" && b === "bin" && rel.length === 2) return [dir];
+  if (a === ".rustup" && b === "toolchains" && c && d === "bin" && rel.length === 4) return withLib();
+  if (a === ".sdkman" && b === "candidates" && c && d && e === "bin" && rel.length === 5) return withLib();
+  if (a === "go" && b === "bin" && rel.length === 2) return [dir];
+  if (a === ".pyenv" && b === "versions" && c && d === "bin" && rel.length === 4) return withLib();
+  if (a === ".local" && b === "share" && c === "mise" && d === "installs" && rel.length >= 6 && rel.at(-1) === "bin") return withLib();
+  return null;
+}
+
 export function detectToolchainRoots(home, opts = {}) {
-  const entries = (opts.path ?? implementPathEntries(process.env.PATH)).filter(isAbsolute);
+  const realHome = real(home) ?? home;
+  const excluded = (opts.exclude ?? []).flatMap((p) => (isAbsolute(p) ? variants(p) : []));
   const roots = [];
   const add = (p) => {
-    if (!p.startsWith(home + "/") || !existsSync(p)) return;
-    roots.push(p);
     const r = real(p);
-    if (r && r !== p) roots.push(r);
+    if (!r || !strictlyUnder(r, realHome)) return;
+    if (excluded.some((x) => r === x || strictlyUnder(r, x))) return;
+    roots.push(r);
   };
-  for (const e of entries) {
-    if (!e.startsWith(home + "/")) continue;
-    const name = basename(e);
-    add(e);
-    if (name === "bin" || name === "sbin") add(join(dirname(e), "lib"));
-  }
-  // The cargo shims dispatch into the rustup toolchains, so those need reading too.
-  const cargoBin = join(home, ".cargo/bin");
-  const toolchains = join(home, ".rustup/toolchains");
-  if (roots.includes(cargoBin) && existsSync(toolchains)) {
-    for (const t of readdirSync(toolchains)) {
-      add(join(toolchains, t, "bin"));
-      add(join(toolchains, t, "lib"));
+  for (const entry of opts.path ?? implementPathEntries(process.env.PATH)) {
+    if (!isAbsolute(entry)) continue;
+    const r = real(resolve(entry));
+    if (!r || !strictlyUnder(r, realHome)) continue;
+    const found = toolchainRootsFor(r.slice(realHome.length + 1).split("/"), r);
+    if (!found) continue;
+    found.forEach(add);
+    // The cargo shims dispatch into the rustup toolchains, so those need reading too.
+    if (r === join(realHome, ".cargo/bin") && existsSync(join(realHome, ".rustup/toolchains"))) {
+      for (const t of readdirSync(join(realHome, ".rustup/toolchains"))) {
+        add(join(realHome, ".rustup/toolchains", t, "bin"));
+        add(join(realHome, ".rustup/toolchains", t, "lib"));
+      }
     }
   }
   return dedupe(roots);
 }
 
 export function implementDenyRead(ctx) {
-  const base = [ctx.home, ctx.sroot, ...SHARED_TMP, ...(ctx.extraDeny ?? [])];
+  const ut = userTmpOf(ctx);
+  const base = [ctx.home, ctx.sroot, ...SHARED_TMP, ...claudeUidTmp(ctx), ...(ut ? [ut] : []), ...(ctx.extraDeny ?? [])];
   return withTwins(dedupe(base.flatMap(variants)), ctx);
+}
+
+// Claude adds its own tmp dir as a write root and runs Bash with it, so it must be
+// private to this step and nowhere near a shared temp dir.
+function checkClaudeTmp(ctx) {
+  const c = ctx.claudeTmp;
+  if (typeof c !== "string" || !isAbsolute(c)) throw new Error("claudeTmp must be an absolute path");
+  const ut = userTmpOf(ctx);
+  const shared = ["/tmp", "/private/tmp", ...(ut ? [ut] : [])].flatMap(variants);
+  const roots = [ctx.sroot, real(ctx.sroot)].filter(Boolean);
+  const r = real(c) ?? resolve(c);
+  if (shared.includes(r) || shared.includes(resolve(c))) throw new Error(`claudeTmp ${c} is a shared temp dir`);
+  if (!roots.some((x) => strictlyUnder(resolve(c), x)) || !roots.some((x) => strictlyUnder(r, x))) {
+    throw new Error(`claudeTmp ${c} must be strictly inside the step root ${ctx.sroot}`);
+  }
+  let st;
+  try { st = lstatSync(c); } catch (e) { if (e.code === "ENOENT") return; throw e; }
+  if (st.isSymbolicLink() || !st.isDirectory()) throw new Error(`claudeTmp ${c} must be a real directory`);
+  if ((st.mode & 0o777) !== 0o700) throw new Error(`claudeTmp ${c} must be mode 0700`);
+  if (st.uid !== process.getuid()) throw new Error(`claudeTmp ${c} must be owned by the current user`);
+  if (readdirSync(c).length) throw new Error(`claudeTmp ${c} must be empty, a fresh dir`);
 }
 
 function gitDenyWrite(ctx) {
@@ -92,7 +139,10 @@ function implementDenyWrite(ctx) {
 
 function implementAllowRead(ctx) {
   const dirs = [ctx.clone, ctx.inputs, ctx.outbox, ctx.tmp].filter(Boolean).flatMap(variants);
-  const toolchains = detectToolchainRoots(ctx.home, { path: ctx.path ?? implementPathEntries(process.env.PATH) });
+  const toolchains = detectToolchainRoots(ctx.home, {
+    path: ctx.path ?? implementPathEntries(process.env.PATH),
+    exclude: [ctx.sroot, ...(ctx.extraDeny ?? [])],
+  });
   return dedupe([...toolchains, ...dirs]);
 }
 
@@ -142,6 +192,7 @@ function checkKeys(obj, where, allowed, errs) {
 
 export function validateImplementSettings(s, ctx) {
   const errs = [];
+  if (!ctx) throw new Error("implement settings: ctx is required to validate");
   if (!s || typeof s !== "object" || Array.isArray(s)) throw new Error("implement settings: not an object");
   checkKeys(s, "settings", ALLOWED.top, errs);
   const p = s.permissions ?? {};
@@ -185,16 +236,26 @@ export function validateImplementSettings(s, ctx) {
     if (SHARED_TMP.some((t) => w === t || w.startsWith(t + "/"))) errs.push(`allowWrite must not include shared tmp ${w}`);
   }
 
-  if (ctx) {
+  {
     if (!list("denyRead").includes(ctx.home)) errs.push("denyRead must include HOME");
-    if (ctx.claudeTmp) {
-      for (const k of ["allowWrite", "allowRead"]) {
-        if (list(k).includes(ctx.claudeTmp)) errs.push(`${k} must not include claude's own tmp ${ctx.claudeTmp}`);
+    try { checkClaudeTmp(ctx); } catch (e) { errs.push(e.message); }
+    const ut = userTmpOf(ctx);
+    for (const t of [...claudeUidTmp(ctx), ...(ut ? [ut] : [])]) {
+      if (!list("denyRead").includes(t)) errs.push(`denyRead must include ${t}`);
+    }
+    const protectedDirs = [ctx.home, ctx.sroot].flatMap(variants).flatMap((x) => [x, DATA_TWIN + x]);
+    for (const a of list("allowRead")) {
+      if (a === "/") errs.push("allowRead must not include /");
+      for (const x of protectedDirs) {
+        if (a === x || x.startsWith(a + "/")) errs.push(`allowRead ${a} covers HOME or the step root`);
+      }
+      for (const d of list("denyRead")) {
+        if (a === d || d.startsWith(a + "/")) errs.push(`allowRead ${a} equals or contains denyRead ${d}`);
       }
     }
     const want = [ctx.clone, ctx.outbox, ctx.tmp].sort();
     if (JSON.stringify([...list("allowWrite")].sort()) !== JSON.stringify(want)) {
-      errs.push("allowWrite must be exactly the clone, outbox and tmp");
+      errs.push(`allowWrite must be exactly the clone, outbox and tmp (got ${list("allowWrite").join(", ")})`);
     }
     for (const g of gitDenyWrite(ctx)) {
       if (!list("denyWrite").includes(g)) errs.push(`denyWrite must include ${g}`);
@@ -224,7 +285,8 @@ export function buildImplementArgs(ctx) {
     "--permission-mode", "dontAsk",
     "--settings", ctx.settingsPath,
     "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
-    "--disable-slash-commands", "--no-session-persistence",
+    "--disable-slash-commands", "--no-session-persistence", "--no-chrome",
+    "--setting-sources", "",
     "--max-budget-usd", String(ctx.maxBudgetUsd),
     "--max-turns", String(ctx.maxTurns),
     "--output-format", "stream-json", "--verbose",
@@ -239,6 +301,7 @@ export function buildImplementEnv(parentEnv, ctx) {
   if (under(ctx.claudeTmp, ctx.tmp) || under(ctx.tmp, ctx.claudeTmp)) {
     throw new Error("implement env: the child's TMPDIR and claude's CLAUDE_CODE_TMPDIR must be separate, non-nested dirs");
   }
+  checkClaudeTmp(ctx);
   const pathEntries = implementPathEntries(parentEnv.PATH);
   if (!pathEntries.length) throw new Error("implement env: parent PATH has no absolute entries");
   for (const e of pathEntries) {
@@ -248,9 +311,12 @@ export function buildImplementEnv(parentEnv, ctx) {
   }
   const env = {
     PATH: pathEntries.join(":"),
+    // Real HOME only: claude finds its login through it. Bash stays covered by the HOME denyRead.
     HOME: ctx.home,
     TERM: "dumb",
     SHELL: "/bin/sh",
+    CLAUDE_CODE_SHELL: "/bin/bash",
+    CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1",
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_TERMINAL_PROMPT: "0",
@@ -279,6 +345,11 @@ export function validateManagedSettings(managed) {
   }
   if (managed.hooks && typeof managed.hooks === "object" && Object.keys(managed.hooks).length) {
     why.push("`hooks`, which run unsandboxed and see every tool input");
+  }
+  const perm = managed.permissions;
+  if (perm && typeof perm === "object") {
+    const extra = Object.keys(perm).filter((k) => !["deny", "ask", "disableBypassPermissionsMode"].includes(k));
+    if (extra.length) why.push(`\`permissions.${extra.join(", permissions.")}\` (only deny, ask and disableBypassPermissionsMode narrow the child; an allow such as WebFetch(domain:...) opens network)`);
   }
   if (why.length) {
     throw new Error(`--implement refused: managed settings contain ${why.join("; ")}. Run on a machine without them.`);
