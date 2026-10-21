@@ -53,7 +53,7 @@ function keyEnvName(env, url) {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
     throw new RuntimeConfigError(`${KEY_ENV} must be the NAME of the environment variable that holds the key, not the key itself`, KEY_ENV);
   }
-  if (!env[name]) throw new RuntimeConfigError(`environment variable ${name}, named by ${KEY_ENV}, is empty or unset`, name);
+  if (!env[name]) throw new RuntimeConfigError(`the variable named by ${KEY_ENV} is empty or unset`, KEY_ENV);
   if (url.protocol === "http:" && !isLoopback(url.hostname)) {
     throw new RuntimeConfigError(`${BASE_URL} is plain http to a non-loopback host, which would send the key unencrypted; use https`, BASE_URL);
   }

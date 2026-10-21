@@ -80,7 +80,7 @@ Sends the prompt to any server that speaks `POST {base}/chat/completions` (OpenA
 |---|---|
 | `DETENT_OPENAI_BASE_URL` (required) | `http:` or `https:` endpoint root, such as `http://127.0.0.1:11434/v1`. A trailing `/` is trimmed. `OPENAI_BASE_URL` is not read. |
 | `DETENT_OPENAI_MODEL` | model name, used when the request has no `model`. With neither, the call is refused. |
-| `DETENT_OPENAI_API_KEY_ENV` | the NAME of the variable that holds the key, not the key. If set, that variable must be non-empty. The key goes out as `Authorization: Bearer` and never appears in argv, the request JSON or the response. With none set, no header is sent, which is what Ollama wants. |
+| `DETENT_OPENAI_API_KEY_ENV` | the NAME of the variable that holds the key, not the key. If set, that variable must be non-empty, and a refusal says only that the variable named by `DETENT_OPENAI_API_KEY_ENV` is empty or unset, never its name. The key goes out as `Authorization: Bearer` and never appears in argv, the request JSON or the response. With none set, no header is sent, which is what Ollama wants. |
 
 `request.auth: "api_key"` also requires `DETENT_OPENAI_API_KEY_ENV`. Plain `http:` to a host other than `localhost`, `127.x.x.x` or `[::1]` is refused when a key is configured. A base URL with a username or password is always refused, and the message does not repeat it. Every refusal is a `RuntimeConfigError` whose `setting` names what to set, and the verb prints `set <setting>; see engine/runtime/CONTRACT.md (openai-compatible)` and exits 2.
 
