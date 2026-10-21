@@ -22,10 +22,10 @@ your current context, hand recheck off; do not run it yourself.
 ## Protocol
 
 1. **Preconditions.** `implement` must be `done`. Set `recheck: in_progress`. Read the
-   worktree path, branch, and commit range from the `implement` entry.
+   worktree path, branch, and `base_sha` from `run.json` (written by `run new`).
 
-2. **Load the diff.** In the worktree: `git diff <base-sha>...<head-sha>` and
-   `git log --oneline <base-sha>..<head-sha>`. Read plan `## Steps`,
+2. **Load the diff.** In the worktree: `git diff <base_sha>...HEAD` and
+   `git log --oneline <base_sha>..HEAD`. Read plan `## Steps`,
    `## Files touched`, and every *answered* decision (the answers are commitments —
    the human approved a specific plan under specific answers).
 
@@ -62,19 +62,19 @@ your current context, hand recheck off; do not run it yourself.
    - *Material*: behavior differs from a step, an answered decision is not honored, a
      step silently skipped, extra behavior with no step, substantive off-list files,
      a weakened or missing planned test → each becomes a pending decision:
-     `"raised_by": "recheck"`, `"blocks": ["review"]`, question quoting the divergence
+     `"raised_by": "recheck"`, `"blocks": ["ship"]`, question quoting the divergence
      with its evidence (sha, file:line), options
      `["accept deviation", "route back to plan", "route back to implement"]`.
    The human picks the route; you never route the run yourself.
 
-6. **Write `recheck.md`** (in `.sdlc/<run-id>/`, main checkout) with exactly:
+6. **Write `recheck.md`** (in `${DETENT_ROOT}/.sdlc/<run-id>/`) with exactly:
    `## Inputs` (shas, commands run), `## Step verdicts` (the table),
    `## Decision conformance` (answered D-* vs code), `## Divergences` (each with
    class, evidence, and → D-xxx for material ones), `## Verdict` (`clean` or
    `drift: n decision(s) filed`).
 
 7. **Finish.** Set `recheck: done` (artifact `recheck.md`), done even when drift was
-   found: the stage's job is the report; the pending decisions gate `review` via the
+   found: the stage's job is the report; the pending decisions gate `ship` via the
    contract's gate rule, which is the conditional drift gate. Report the verdict and
    every filed decision verbatim. Never start ship yourself.
    *Curator via subagents (CONTRACT.md):* when drift decisions are rendered in

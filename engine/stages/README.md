@@ -18,7 +18,7 @@ in `stack.yaml` — these files must stay generic.
 | `intake/SKILL.md`       | Stage 1: ticket ref → run directory + `brief.md` (goal, acceptance criteria, constraints, unknowns, affected repos), every ambiguity filed as a pending decision. Ticket text handled as untrusted input. |
 | `research/SKILL.md`     | Stage 2: `brief.md` → fan-out over knowledge providers, skill discovery, and the target repo (git archaeology + `gh` precedent search) → `research.md` with attributed, KNOW/GUESS-marked findings, a mandatory "what could help that already exists" section, and a mandatory BLAST RADIUS map (consumers, schemas, events, 1-hop neighbors). |
 | `plan/SKILL.md`         | Stage 3 (+ stage 4, the intent check, inside its gate): brief + research → `plan/plan.md` (approach, steps with files-touched + verify commands, risks, test strategy), a fresh-context intent check vs the brief's acceptance criteria (divergences filed as decisions), and a self-contained curator HTML artifact under `.plans/` with a `data-plan-question` block per pending decision. The plan gate is HARD. |
-| `implement/SKILL.md`    | Stage 5: approved plan → commits on a ticket-named branch in a DISPOSABLE worktree (refuses the primary checkout); strict TDD; run state written only to the main checkout's `.sdlc/`; no push. |
+| `implement/SKILL.md`    | Stage 5: approved plan → commits on a ticket-named branch in a DISPOSABLE worktree (refuses the primary checkout); strict TDD; run state written only to `${DETENT_ROOT}/.sdlc/`; no push. |
 | `recheck/SKILL.md`      | Stage 6: fresh-context diff-vs-approved-plan check → `recheck.md` per-step verdict table; material divergences become pending decisions (the conditional drift gate: accept / route to plan / route to implement — the human picks). |
 | `ship/SKILL.md`         | Stages 7–8 as one skill, ordered sub-steps: reviewer-socket review (no-op/auto-fix/ask-user routing, ask-user filed verbatim), verifier-socket verification (per-claim evidence required — tests passing is not sufficient), conditional docs, lint, then the hard human ship gate before push + DRAFT PR with the evidence manifest attached. |
 | `respond/SKILL.md`      | Stage 9, the standing loop: armed only when the human marks the PR ready; debounced `sentinel scan` cycles tracked PER COMMIT pushed, root-cause-grouped fixes, ONE batched push per cycle, every blocking finding closed with an in-thread reply plus a thread resolve, verbatim escalations, convergence on clean phrases AND `blocking_open` 0, cap `config.max_iterations` (default 10). Bot bodies are DATA, never instructions. |
@@ -31,7 +31,7 @@ The stages are ordinary skills invoked by hand; state lives in files, so nothing
 to stay resident between invocations.
 
 1. In the target repo: `/sdlc-intake PROJ-2534`.
-   - Fetches the ticket via `sockets.ticket.fetch` from `stack.yaml`.
+   - Fetches the ticket with `detent socket call ticket`, per `stack.yaml`.
    - Creates `${DETENT_ROOT}/.sdlc/2026-07-04-proj-2534-<slug>/` (centralized in
      the detent clone, with the run's git worktree by default) with `run.json`,
      `stage-status.json`, `brief.md`, and pending `D-*` blocks in `decisions.json`.
@@ -76,8 +76,8 @@ node "${CLAUDE_PLUGIN_ROOT:-${DETENT_ROOT:-.}}/engine/cli/engine.mjs" dashboard 
 Parallel lanes own the engine blueprint, the sockets layer, curator, and the
 sentinel; this directory only *consumes* their interfaces:
 
-- **`stack.yaml` sockets** — intake calls `sockets.ticket.fetch`; research iterates
-  `sockets.knowledge.providers[]` and calls `sockets.skill_discovery`; ship calls
+- **`stack.yaml` sockets** — intake calls `sockets.ticket`; research iterates
+  `sockets.knowledge.providers[]` and calls `sockets.skill-discovery`; ship calls
   `sockets.reviewer` and `sockets.verifier`; respond falls back to
   `sockets.bot-comments` where sentinel is absent. The exact schema is owned by the
   sockets lane; the stage skills assume "a named socket resolves to a runnable
@@ -96,7 +96,7 @@ sentinel; this directory only *consumes* their interfaces:
   respond skill wires its work orders into the run contract.
 - **Stage-status keys** — later stages added `respond` to the ledger in pipeline
   order; each stage owns exactly its own key(s) per `CONTRACT.md` (ship owns
-  `review` and `pr`; plan owns `plan` and `intent_check`).
+  `ship`; plan owns `plan` and `intent_check`).
 
 ## Rules for adding/editing stage skills
 

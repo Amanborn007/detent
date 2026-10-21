@@ -131,8 +131,7 @@ One object; keys are stage names in pipeline order. Statuses:
     "intent_check": { "status": "pending" },
     "implement":    { "status": "pending" },
     "recheck":      { "status": "pending" },
-    "review":       { "status": "pending" },
-    "pr":           { "status": "pending" }
+    "ship":         { "status": "pending" }
   }
 }
 ```
@@ -301,8 +300,8 @@ Mechanically this reuses the existing gate rule — no new override machinery:
   what it feeds, and its `enable_action`. Options are the inline unblock controls:
   retry (now reachable), provide an offline copy at a path, or **proceed degraded**.
 - Because that decision `blocks: ["implement"]`, the standard gate rule already forbids
-  implement while it is `pending`. So even if the human answers the "Approve plan v1?"
-  decision, implement stays locked until each critical blocked source's
+  implement while it is `pending`. So even if the human answers the plan's `intent`
+  gate, implement stays locked until each critical blocked source's
   `access-degraded` decision is resolved by one of:
   1. **proceed degraded** — the human accepts the degraded confidence (recorded in
      `decisions.json`, `answered_by: "human"`); or
@@ -390,7 +389,7 @@ saved, so the failure is made loud rather than cheap.
 |---|---|---|
 | `stage end` refused on a pending gate | The next move is a human's; the wait is hours-to-days. | No — the gate refusal is the outcome; the handoff rides along. |
 | `gate open` rendered a gate | Same: the human now owns the next move. | No. |
-| A stage completed (`status: done`) | Nobody is waited on, but the next stage reads FILES, not conversation — so the finishing session holds nothing it needs. Keeps each episode's context proportional to one stage rather than the whole run. | No — advisory; `next_step` still names the next command. |
+| A stage completed (status `done`) | Nobody is waited on, but the next stage reads FILES, not conversation — so the finishing session holds nothing it needs. Keeps each episode's context proportional to one stage rather than the whole run. | No — advisory; `next_step` still names the next command. |
 
 Mid-stage checkpoints are deliberately NOT wired. Part-way through a stage there
 is no file-complete point to hand over from, so a boundary there would be
