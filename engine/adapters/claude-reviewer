@@ -114,9 +114,10 @@ ${diffText}
 -----END DIFF ${nonce}-----
 `;
 
-const shape = "make claude return only JSON of the form {\"findings\":[...]}; see engine/sockets/reviewer.md";
+let who = "claude";
+const shapeOf = (name) => `make ${name === "claude" ? "claude" : "the model"} return only JSON of the form {\"findings\":[...]}; see engine/sockets/reviewer.md`;
 function violation(reason) {
-  emit({ error: reason, next_step: shape }, 2);
+  emit({ error: reason, next_step: shapeOf(who) }, 2);
 }
 
 async function main() {
@@ -129,6 +130,8 @@ async function main() {
     if (e instanceof UnknownRuntimeError) emit({ error: e.message, next_step: "set DETENT_RUNTIME to a known runtime or unset it" }, 2);
     throw e;
   }
+  const native = runtime.name === "claude-code";
+  who = native ? "claude" : runtime.name;
   const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), "detent-claude-reviewer-"));
   let res;
   let refused;
@@ -147,20 +150,22 @@ async function main() {
   if (res.cost_usd !== null) process.stderr.write(`claude-reviewer: cost $${res.cost_usd}\n`);
   if (res.error) {
     const k = res.error.kind;
+    const check = "check DETENT_OPENAI_BASE_URL, DETENT_OPENAI_MODEL and the variable named by DETENT_OPENAI_API_KEY_ENV, then re-invoke";
+    if (k === "spawn" && !native) emit({ error: `could not run the ${who} helper: ${res.error.message}`, next_step: "check that node is installed, then re-invoke" }, 1);
     if (k === "spawn") emit({ error: `could not run '${bin}': ${res.error.message}`, next_step: "install claude or set DETENT_CLAUDE_BIN" }, 1);
     if (k === "exit") {
-      emit({ error: `claude exited ${res.raw.exit_code}: ${(res.raw.stderr || res.raw.stdout || "").trim().slice(0, 2000)}`,
-             next_step: "check that `claude` is signed in, then re-invoke" }, 1);
+      emit({ error: `${who} exited ${res.raw.exit_code}: ${(res.raw.stderr || res.raw.stdout || "").trim().slice(0, 2000)}`,
+             next_step: native ? "check that `claude` is signed in, then re-invoke" : check }, 1);
     }
     if (k === "bad_output") violation(res.error.message);
-    if (k === "runtime_error") emit({ error: "claude reported an error: " + res.error.message.slice(0, 2000), next_step: "check `claude` auth and re-invoke" }, 1);
-    emit({ error: `claude ${k}: ${res.error.message}`, next_step: "re-invoke" }, 1);
+    if (k === "runtime_error") emit({ error: `${who} reported an error: ` + res.error.message.slice(0, 2000), next_step: native ? "check `claude` auth and re-invoke" : check }, 1);
+    emit({ error: `${who} ${k}: ${res.error.message}`, next_step: "re-invoke" }, 1);
   }
-  if (res.stop !== "ok") emit({ error: `claude stopped at its ${res.stop} limit`, next_step: "re-invoke" }, 1);
+  if (res.stop !== "ok") emit({ error: `${who} stopped at its ${res.stop} limit`, next_step: "re-invoke" }, 1);
 
   const text = res.text.trim().replace(/^```[a-zA-Z]*\s*\n/, "").replace(/\n```\s*$/, "");
   let body;
-  try { body = JSON.parse(text); } catch (e) { violation("claude result is not JSON: " + e.message); }
+  try { body = JSON.parse(text); } catch (e) { violation(`${who} result is not JSON: ` + e.message); }
   if (!body || !Array.isArray(body.findings)) violation("result must be an object with a findings array");
 
   body.findings.forEach((f, i) => {
