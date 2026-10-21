@@ -9,6 +9,7 @@ import { buildReport, result, summarize, validateResult, REPORT_SCHEMA } from ".
 import { classifyPreflight, preflight } from "../drive/probes/exec.mjs";
 import { diagnoseCommand, parseDenials } from "../drive/probes/diagnose.mjs";
 import { describeRun, parseClaudeJson } from "../drive/probes/live.mjs";
+import { explainNoBash, liveCommands, parseTranscript, transcriptPrompt } from "../drive/probes/transcript.mjs";
 import { evalLive,liveCheckScript, parseKv } from "../drive/probes/live-checks.mjs";
 
 const PROBES = join(dirname(fileURLToPath(import.meta.url)), "..", "drive", "probes");
@@ -244,4 +245,39 @@ test("parseClaudeJson reads the result from an object, an array or stream-json l
   assert.deepEqual(parseClaudeJson(JSON.stringify({ subtype: "success", is_error: false, total_cost_usd: 0.012, num_turns: 3, permission_denials: [{}, {}] })), want);
   assert.equal(parseClaudeJson(JSON.stringify([{ type: "system" }])).subtype, "no_result");
   assert.equal(parseClaudeJson("not json").subtype, "no_result");
+});
+
+const jl = (...m) => m.map((x) => JSON.stringify(x)).join("\n");
+const init = { type: "system", subtype: "init", tools: ["Bash", "Read"] };
+const use = (id, name = "Bash") => ({ type: "assistant", message: { content: [{ type: "tool_use", id, name, input: { command: "SECRET-CMD" } }] } });
+const res = (id, content, is_error = false) => ({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, content, is_error }] } });
+
+test("parseTranscript counts Bash calls and keeps only known KEY=int tokens", () => {
+  const t = parseTranscript(jl(init, use("a"), res("a", "bash_ran=1\nSECRET-OUTPUT"), use("b"), res("b", [{ type: "text", text: "ssh_config_rc=1" }], true),
+    use("c", "Read"), res("c", "keychain_rc=0"), use("d"), res("d", "evil_key=9 net_ext_rc=6")));
+  assert.deepEqual(t.tokens, { bash_ran: 1, ssh_config_rc: 1, net_ext_rc: 6 });
+  assert.equal(t.bashUses, 3);
+  assert.equal(t.toolUses, 4);
+  assert.equal(t.bashResults, 3);
+  assert.equal(t.bashErrors, 1);
+  assert.deepEqual(t.tools, ["Bash", "Read"]);
+  assert.ok(!JSON.stringify(t).includes("SECRET"));
+});
+
+test("explainNoBash separates a declining model from a missing tool", () => {
+  assert.match(explainNoBash(parseTranscript(jl(init, { type: "result" }))), /bash_tool_use=0 reason=model_declined tools=Bash,Read/);
+  assert.match(explainNoBash(parseTranscript(jl({ ...init, tools: ["Read"] }))), /reason=tool_unavailable/);
+  assert.match(explainNoBash(parseTranscript("")), /reason=no_init_message/);
+  assert.match(explainNoBash(parseTranscript(jl(init, use("a"), res("a", "bash_ran=1")))), /bash_tool_use=1 results=1 errors=0 tokens=1/);
+});
+
+test("live commands are single Bash calls that each print one token, and quote their paths", () => {
+  const cmds = liveCommands({ realHome: "/Users/o'x", parentPidFile: "/t/p", canaryFile: "/t/c", writeTest: "/Users/o'x/.w", loopbackPort: 5 });
+  for (const [key, c] of cmds) assert.ok(c.includes(`${key}=`), key);
+  assert.ok(cmds.find(([k]) => k === "ssh_config_rc")[1].includes("'/Users/o'\\''x'"));
+  assert.ok(cmds.some(([k]) => k === "net_loopback_rc"));
+  assert.ok(!cmds.some(([, c]) => /printenv|\benv\s*$/.test(c)));
+  const p = transcriptPrompt(cmds);
+  assert.match(p, /own separate Bash call/);
+  assert.match(p, /^1\. echo bash_ran=1$/m);
 });

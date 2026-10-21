@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { buildProbeProfile, defaultDenyRead } from "./seatbelt-deny-default.mjs";
 import { result } from "./report.mjs";
 import { run, which } from "./exec.mjs";
+import { liveCommands, transcriptPrompt, parseTranscript, explainNoBash } from "./transcript.mjs";
 import { ALLOWED_PROXY_PATHS, LIVE_BUDGET_TOTAL_USD, LIVE_MODEL, evalLive, liveCheckScript, parseKv } from "./live-checks.mjs";
 
 const FORWARD_HEADERS = ["content-type", "accept", "anthropic-version", "anthropic-beta", "user-agent"];
@@ -183,21 +184,22 @@ export async function runLive({ T, realHome, canary, nonce, log, apiKeyFile }) {
 
   if (affordable(0.04)) {
     const dir = join(T, "live-alt");
-    const st = stage(dir, { canary, loopbackPort: 0, keychainService: "Claude Code-credentials", writeTest });
+    stage(dir, { canary, loopbackPort: 0, keychainService: "Claude Code-credentials", writeTest });
     const env = { ...process.env };
     for (const k of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "PROBE_CANARY"]) delete env[k];
     const settings = { sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false } };
-    const args = st.args.map((a) => (a === "$REAL_HOME" ? realHome : a));
-    const r = await run(claudeReal, ["-p", "--model", LIVE_MODEL, "--max-turns", "3", "--max-budget-usd", "0.04", "--output-format", "json",
+    const cmds = liveCommands({ realHome, parentPidFile: join(dir, "parent.pid"), canaryFile: join(dir, "canary.txt"), writeTest });
+    const r = await run(claudeReal, ["-p", "--model", LIVE_MODEL, "--max-turns", "20", "--max-budget-usd", "0.04", "--output-format", "stream-json", "--verbose",
       "--tools", "Bash", "--allowedTools", "Bash", "--permission-mode", "dontAsk", "--settings", JSON.stringify(settings), "--setting-sources", "project",
       "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"],
-    { env, cwd: join(dir, "work"), timeout: 180000, input: prompt(st.script, args) });
+    { env, cwd: join(dir, "work"), timeout: 240000, input: transcriptPrompt(cmds) });
     const c = parseClaudeJson(r.stdout);
     spent += c.cost;
-    const kv = existsSync(st.out) ? parseKv(readFileSync(st.out, "utf8")) : {};
-    add("live.alt_builtin.bash_ran", "Bash ran under claude's own sandbox", kv.bash_ran === 1 ? "bash_ran" : `no_bash(answered=${c.answered} subtype=${c.subtype})`, kv.bash_ran === 1 ? "pass" : "inconclusive",
-      kv.bash_ran === 1 ? undefined : describeRun(r, c).slice(0, 300));
-    if (kv.bash_ran === 1) results.push(...evalLive("live.alt_builtin", kv, controls, { expectLoopback: false }));
+    const t = parseTranscript(r.stdout);
+    const ran = t.bashUses > 0 && t.tokens.bash_ran === 1;
+    add("live.alt_builtin.bash_ran", "Bash ran under claude's own sandbox", ran ? "bash_ran" : `no_bash(${explainNoBash(t)})`, ran ? "pass" : "inconclusive",
+      ran ? explainNoBash(t) : describeRun(r, c).slice(0, 300));
+    if (ran) results.push(...evalLive("live.alt_builtin", t.tokens, controls, { expectLoopback: false }));
     clean();
   } else add("live.alt_builtin.bash_ran", "ran", "not_run", "skipped", "budget cap reached");
 
