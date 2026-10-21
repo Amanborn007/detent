@@ -130,6 +130,31 @@ test('drain: running server delivers pending feedback from every session without
   assert.ok(again.some((l) => l.status === 'idle'), `second drain should be idle, got: ${JSON.stringify(again)}`);
 });
 
+test('drain: named files scope the sweep and leave other sessions queued', async (t) => {
+  const workDir = realpathSync(mkdtempSync(join(tmpdir(), 'curator-drain-scope-')));
+  const stateDir = join(workDir, 'state');
+  const env = envFor(stateDir);
+  const a = makeArtifact(workDir, 'a.html');
+  const b = makeArtifact(workDir, 'b.html');
+
+  const openedA = JSON.parse((await runCli(['open', a], env)).stdout);
+  const port = Number(new URL(openedA.url).port);
+  const sidB = JSON.parse((await runCli(['open', b], env)).stdout).session;
+  t.after(() => {
+    const state = JSON.parse(readFileSync(join(stateDir, 'state.json'), 'utf8'));
+    if (state.pid) process.kill(state.pid);
+  });
+
+  await fetchRaw(port, '/api/send', { method: 'POST', body: { sessionId: openedA.session, items: [{ type: 'comment', text: 'fix A' }] } });
+  await fetchRaw(port, '/api/send', { method: 'POST', body: { sessionId: sidB, items: [{ type: 'comment', text: 'fix B' }] } });
+
+  const scoped = lines((await runCli(['drain', a], env)).stdout).filter((l) => l.status === 'feedback');
+  assert.deepEqual(scoped.map((f) => f.key), [a], `scoped drain must only deliver ${a}`);
+
+  const rest = lines((await runCli(['drain'], env)).stdout).filter((l) => l.status === 'feedback');
+  assert.deepEqual(rest.flatMap((f) => f.prompts.map((p) => p.text)), ['fix B'], 'b must still be queued after a scoped drain');
+});
+
 // --- 2. no server, durable pending in the state file: drain still delivers ---
 test('drain: with the server stopped, delivers durable pending from the state file', async () => {
   const workDir = realpathSync(mkdtempSync(join(tmpdir(), 'curator-drain-down-')));

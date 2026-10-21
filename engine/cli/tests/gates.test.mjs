@@ -82,6 +82,9 @@ test("gate open dispatches to curator when it is on PATH (by contract, never ven
   assert.equal(r.code, 0, r.stdout);
   assert.equal(r.json.mode, "curator");
   assert.match(r.json.next_step, /curator open/);
+  assert.match(r.json.next_step, /engine gate collect --run /);
+  assert.doesNotMatch(r.json.next_step, /curator await|--playbook|curator poll/);
+  assert.ok(existsSync(r.json.html), "gate html rendered for curator open");
 });
 
 test("gate open next_step uses only subcommands and flags the real curator CLI accepts", () => {
@@ -90,7 +93,7 @@ test("gate open next_step uses only subcommands and flags the real curator CLI a
   const real = new Set(
     cliSrc.match(/const commands = \{([^}]*)\}/)[1].split(",").map((e) => e.split(":")[0].trim()));
   const flags = new Set([...cliSrc.matchAll(/'(--[a-z-]+)':/g)].map((m) => m[1]));
-  assert.ok(real.has("open") && real.has("poll") && !real.has("await"), [...real].join());
+  assert.ok(real.has("open") && real.has("drain") && !real.has("await"), [...real].join());
 
   const ctx = mkRun();
   toPlanEnd(ctx);
@@ -104,14 +107,15 @@ test("gate open next_step uses only subcommands and flags the real curator CLI a
   assert.equal(r.json.mode, "curator");
 
   const calls = [...r.json.next_step.matchAll(/\bcurator ([a-z-]+)((?: [^\s&;]+)*)/g)];
-  assert.ok(calls.length >= 2, r.json.next_step);
+  assert.ok(calls.length >= 1, r.json.next_step);
   for (const [, sub, rest] of calls) {
     assert.ok(real.has(sub), `curator ${sub} is not a real curator command`);
     for (const tok of rest.split(" ").filter((t) => t.startsWith("-"))) {
       assert.ok(flags.has(tok), `curator ${sub} ${tok}: flag is not accepted by curator`);
     }
   }
-  assert.doesNotMatch(r.json.next_step, /--playbook|curator await/);
+  assert.match(r.json.next_step, /engine gate collect --run /);
+  assert.doesNotMatch(r.json.next_step, /--playbook|curator await|curator poll/);
   // curator open takes a self-contained .html artifact, never the gate-request .json
   const opened = r.json.next_step.match(/curator open (\S+)/)[1];
   assert.match(opened, /\.html$/);
@@ -151,6 +155,7 @@ test("stage begin refuses while a pending decision blocks that stage", () => {
   decisions.push({
     id: "D-090", raised_by: "research", blocks: ["implement"],
     question: "Reuse lib/retry.ts or write new?", options: ["reuse", "new"], status: "pending",
+    cause: "judgment",
   });
   writeJson(p, decisions);
   let r = engine(["stage", "begin", "implement", "--repo", ctx.repo, "--run", ctx.runId]);
@@ -166,6 +171,28 @@ test("stage begin refuses while a pending decision blocks that stage", () => {
     : d));
   r = engine(["stage", "begin", "implement", "--repo", ctx.repo, "--run", ctx.runId]);
   assert.equal(r.code, 0, r.stdout);
+});
+
+test("a judgment-cause decision answered 'proceed degraded' still blocks, no cause earns a bypass string", () => {
+  const ctx = mkRun();
+  toPlanEnd(ctx);
+  const p = join(ctx.runDir, "decisions.json");
+  writeJson(p, readJson(p).map((d) => d.gate === "intent"
+    ? { ...d, status: "answered", answer: "approve", answered_by: "human", answered_at: new Date().toISOString() }
+    : d));
+  assert.equal(engine(["stage", "end", "plan", "--repo", ctx.repo, "--run", ctx.runId]).code, 0);
+  const decisions = readJson(p);
+  decisions.push({
+    id: "D-095", raised_by: "research", blocks: ["implement"], cause: "judgment",
+    question: "Retry forever or cap at N?", status: "answered",
+    answer: "proceed degraded (accept degraded confidence)", answered_by: "human",
+    answered_at: new Date().toISOString(),
+  });
+  writeJson(p, decisions);
+  const r = engine(["stage", "begin", "implement", "--repo", ctx.repo, "--run", ctx.runId]);
+  assert.equal(r.code, 2, "the proceed-degraded string is not a judgment override");
+  assert.match(r.json.reason, /D-095/);
+  assert.match(r.json.next_step, /engine gate open D-095/);
 });
 
 test("full tail: implement -> recheck -> ship -> respond transitions, events recorded", () => {

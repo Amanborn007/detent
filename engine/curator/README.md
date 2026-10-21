@@ -42,8 +42,9 @@ curator open <file.html>    # -> {url, next_step}; browser opens. Runs the same 
                              #    opens unchecked and says so on the success line
 curator poll <file>         # blocks (silent, space heartbeat every 15s) until
                              #    feedback or end; -> {status, prompts, next_step}
-curator drain               # non-blocking: deliver pending feedback from EVERY
-                             #    session in one sweep; run this at the top of every turn
+curator drain [<file>...]   # non-blocking: deliver pending feedback from EVERY
+                             #    session in one sweep (or only the named pages, leaving
+                             #    other sessions queued); run this at the top of every turn
 curator reply <file> -m "<what you changed>"   # posts to the chat log, then polls again
 curator log <file> -m "<decision → action → outcome>"  # append an audit line into the artifact on disk (no server needed)
 curator end <file>          # agent-initiated end; browser shows an ended banner
