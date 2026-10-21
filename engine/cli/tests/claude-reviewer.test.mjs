@@ -42,6 +42,11 @@ if (mode === "badloc") console.log(env(JSON.stringify({ findings: [{ ...good, lo
 if (mode === "array") console.log(JSON.stringify([{ type: "system", subtype: "init" }, { type: "assistant" }, JSON.parse(env(JSON.stringify({ findings: [good] })))]));
 if (mode === "nonjson") console.log(env("looks fine to me"));
 if (mode === "noenvelope") console.log("not an envelope");
+if (mode === "iserror") console.log(JSON.stringify({ type: "result", is_error: true, result: "Invalid API key" }));
+if (mode === "maxturns") console.log(JSON.stringify({ type: "result", subtype: "error_max_turns", is_error: true, result: "ran out of turns" }));
+if (mode === "execerror") console.log(JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: false, result: JSON.stringify({ findings: [good] }) }));
+if (mode === "maxbudget") console.log(JSON.stringify({ type: "result", subtype: "error_max_budget_usd", is_error: true, result: "budget hit" }));
+if (mode === "nullout") console.log("null");
 `);
   chmodSync(bin, 0o755);
   return { bin, log };
@@ -216,4 +221,35 @@ test("DETENT_RUNTIME=nope: exit 2 naming the runtime, claude never called", () =
   assert.match(r.json.error, /nope/);
   assert.ok(r.json.next_step);
   assert.equal(r.called, false);
+});
+
+test("is_error envelope: exit 1 with claude's message", () => {
+  const r = run(req(mkRepo()), { mode: "iserror" });
+  assert.equal(r.code, 1);
+  assert.equal(r.json.error, "claude reported an error: Invalid API key");
+});
+
+test("error_max_turns: exit 1, turns limit", () => {
+  const r = run(req(mkRepo()), { mode: "maxturns" });
+  assert.equal(r.code, 1);
+  assert.equal(r.json.error, "claude stopped at its turns limit");
+});
+
+test("error_during_execution with valid findings is still exit 1", () => {
+  const r = run(req(mkRepo()), { mode: "execerror" });
+  assert.equal(r.code, 1);
+  assert.match(r.json.error, /^claude reported an error: /);
+  assert.equal(r.json.findings, undefined);
+});
+
+test("error_max_budget_usd: exit 1, budget limit", () => {
+  const r = run(req(mkRepo()), { mode: "maxbudget" });
+  assert.equal(r.code, 1);
+  assert.equal(r.json.error, "claude stopped at its budget limit");
+});
+
+test("stdout null: exit 2, not a JSON envelope", () => {
+  const r = run(req(mkRepo()), { mode: "nullout" });
+  assert.equal(r.code, 2);
+  assert.equal(r.json.error, "claude stdout is not a JSON envelope: not an object");
 });
