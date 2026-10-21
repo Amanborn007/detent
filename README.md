@@ -67,7 +67,9 @@ It reads your own diff and lists the comments, defensive try/catch blocks and `a
 
 ## Drive a ticket
 
-Check your setup first, then start from a clone of the ticket's repo:
+Check your setup first, then start from a clone of the ticket's repo. Pick the track that matches where you work.
+
+**Terminal**
 
 ```sh
 detent doctor
@@ -77,7 +79,15 @@ detent continue
 detent status
 ```
 
-`start` refuses if the clone's `origin` is a different repo, runs `detent setup` when `stack.yaml` is missing, and creates the run. `continue` runs one step. `status` shows the stages, any gate waiting on you, and the next step in words. You never type a run id, because detent picks the newest unfinished run for the repo you are in.
+**Claude Code**
+
+```
+/detent:start your-org/your-repo#123
+/detent:continue
+/detent:status
+```
+
+`start` refuses if the clone's `origin` is a different repo, runs `detent setup` when `stack.yaml` is missing, and creates the run. `continue` runs one step. In a terminal it starts a headless Claude after you confirm the budget. In Claude Code it runs the stage in your session instead. `status` shows the stages, any gate waiting on you, and the next step in words. You never type a run id, because detent picks the newest unfinished run for the repo you are in.
 
 When a gate waits for you, answer it yourself:
 
@@ -86,7 +96,7 @@ detent decide      # opens the gate in curator and waits for your answer
 detent approve     # or answer the plan gate right here in your terminal
 ```
 
-An agent cannot run `approve` or `revise`. They refuse inside Claude Code, inside a drive child, and without a terminal.
+An agent cannot run `approve` or `revise`. They refuse inside Claude Code, inside a drive child, and without a terminal. In Claude Code, `/detent:continue` opens the gate with `detent decide` and waits for you.
 
 ## It works the way you already do
 

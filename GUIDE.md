@@ -203,6 +203,16 @@ detent status                        # stages, waiting gates, next step in words
 
 You can leave out `--run` on every command that takes it. Detent finds the run in this order. An exact run id wins. Then a ticket key such as `your-org-your-repo-123` or `your-org/your-repo#123`, or a part of the run id that is not just a date. Then the newest run for the repo you are in that still has stages to do. If two runs match, detent refuses and lists them. A bare prefix of a run id never matches.
 
+In Claude Code the same flow is three slash commands. They call the verbs above.
+
+```
+/detent:start your-org/your-repo#123   # same as detent start
+/detent:continue                       # runs the current stage in this session
+/detent:status                         # same as detent status
+```
+
+`/detent:continue` reads the current stage's `SKILL.md` and does the stage in your session. When the run reaches a gate, it opens the gate with `detent decide` or curator and waits for you. It never answers a gate itself.
+
 At a terminal you get readable text. In a pipe, or with `--json`, you get the one JSON line the machine layer always printed.
 
 `detent continue` runs `detent drive` for exactly one step. It prints the budget first and asks for a yes unless you pass `--yes`. Inside a Claude Code session it starts nothing. It prints the path of the current stage's `SKILL.md` and the run id, so the session you are already in can run that stage.
