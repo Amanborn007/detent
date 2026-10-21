@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, chmodSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, chmodSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ADAPTER = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "adapters", "claude-reviewer");
@@ -29,7 +29,7 @@ function mkStub() {
   writeFileSync(bin, `#!/usr/bin/env node
 const fs = require("node:fs");
 const stdin = fs.readFileSync(0, "utf8");
-fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify({ argv: process.argv.slice(2), stdin }));
+fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify({ argv: process.argv.slice(2), stdin, cwd: fs.realpathSync(process.cwd()), entries: fs.readdirSync(".") }));
 const mode = process.env.STUB_MODE;
 const good = ${JSON.stringify(GOOD)};
 const env = (result) => JSON.stringify({ type: "result", is_error: false, result, total_cost_usd: 0.0123 });
@@ -190,4 +190,22 @@ test("a git failure on the diff is a provider failure, exit 1", () => {
   const r = run(req(mkRepo(), "no-such-ref"));
   assert.equal(r.code, 1);
   assert.equal(r.called, false);
+});
+
+test("argv is exactly the pre-port array", () => {
+  const base = ["-p", "--output-format", "json", "--tools", "", "--strict-mcp-config", "--no-session-persistence"];
+  assert.deepEqual(run(req(mkRepo())).rec.argv, [...base, "--setting-sources", ""]);
+  assert.deepEqual(run(req(mkRepo()), { args: ["--model", "sonnet"] }).rec.argv, [...base, "--setting-sources", "", "--model", "sonnet"]);
+  assert.deepEqual(run(req(mkRepo()), { args: ["--bare"] }).rec.argv, [...base, "--bare"]);
+  assert.deepEqual(run(req(mkRepo()), { args: ["--model", "sonnet", "--bare"] }).rec.argv, [...base, "--bare", "--model", "sonnet"]);
+});
+
+test("prompt is stdin-only, cwd is an empty temp dir", () => {
+  const repo = mkRepo();
+  const { rec } = run(req(repo));
+  assert.ok(!rec.argv.includes(rec.stdin));
+  assert.match(rec.stdin, /ticket T-1/);
+  assert.match(basename(rec.cwd), /^detent-claude-reviewer-/);
+  assert.notEqual(rec.cwd, realpathSync(repo));
+  assert.deepEqual(rec.entries, []);
 });
