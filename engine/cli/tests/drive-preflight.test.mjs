@@ -34,7 +34,7 @@ test("every refusal has a code, a detail and a one-line next_step", () => {
   }
 });
 
-for (const name of ["GITHUB_TOKEN", "GH_TOKEN", "ANTHROPIC_API_KEY", "NPM_TOKEN", "AWS_SECRET_ACCESS_KEY", "AWS_PROFILE", "MY_SERVICE_TOKEN", "DB_SECRET", "STRIPE_KEY", "ADMIN_PASSWORD", "PASSWORD_FILE_X"]) {
+for (const name of ["GITHUB_TOKEN", "GH_TOKEN", "ANTHROPIC_API_KEY", "NPM_TOKEN", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_ACCESS_KEY_ID","MY_SERVICE_TOKEN", "DB_SECRET", "STRIPE_KEY", "ADMIN_PASSWORD", "PASSWORD_FILE_X"]) {
   test(`secret-looking env ${name} refuses without printing the value`, () => {
     const value = "sup3r-s3cret-value";
     const r = run({ env: { [name]: value } });
@@ -47,6 +47,10 @@ for (const name of ["GITHUB_TOKEN", "GH_TOKEN", "ANTHROPIC_API_KEY", "NPM_TOKEN"
 
 test("short or empty secret-shaped values and ordinary names do not refuse", () => {
   assert.equal(run({ env: { GH_TOKEN: "", NPM_TOKEN: "short", EDITOR: "vim", KEYBOARD: "us-layout-long", TERM: "xterm-256color" } }).ok, true);
+});
+
+test("non-credential AWS variables do not refuse", () => {
+  assert.equal(run({ env: { AWS_REGION: "us-east-1", AWS_PROFILE: "default-profile", AWS_DEFAULT_REGION: "eu-west-1" } }).ok, true);
 });
 
 test("managed sandbox key refuses", () => {
