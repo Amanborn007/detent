@@ -5,7 +5,7 @@
 
 import {
   readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, lstatSync, chmodSync, rmSync, renameSync,
-  realpathSync, cpSync, unlinkSync, copyFileSync,
+  realpathSync, cpSync, unlinkSync, copyFileSync, openSync, closeSync, fstatSync, readSync, constants,
 } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -81,7 +81,8 @@ function lockedDown(p) {
 function killGroup(sig = "SIGKILL") {
   const c = ST.activeChild;
   if (!c || !c.pid) return;
-  try { process.kill(-c.pid, sig); } catch (e) { if (e.code !== "ESRCH") throw e; }
+  // macOS answers EPERM for a group whose only members are zombies, which means nothing is left to kill.
+  try { process.kill(-c.pid, sig); } catch (e) { if (e.code !== "ESRCH" && e.code !== "EPERM") throw e; }
 }
 
 function pidAlive(pid) {
@@ -334,6 +335,29 @@ function runChild(bin, args, { cwd, input, timeoutMs, env }) {
     child.stdin.on("error", () => {});
     child.stdin.end(input);
   });
+}
+
+// The child has no shell to hash with, so drive adds a missing sha256 once the child is dead.
+// Anything odd (a symlink, a missing file, bad JSON) is left alone for readOutbox to reject by name.
+function fillArtifactDigests(outbox) {
+  const manifestPath = join(outbox, "manifest.json");
+  let manifest;
+  try { manifest = JSON.parse(readFileSync(manifestPath, "utf8")); } catch { return; }
+  if (!manifest || !Array.isArray(manifest.artifacts)) return;
+  let changed = false;
+  for (const a of manifest.artifacts) {
+    if (!a || typeof a !== "object" || typeof a.path !== "string" || Object.hasOwn(a, "sha256")) continue;
+    let fd;
+    try {
+      fd = openSync(join(outbox, a.path), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      if (!fstatSync(fd).isFile()) continue;
+      const buf = Buffer.alloc(fstatSync(fd).size);
+      readSync(fd, buf, 0, buf.length, 0);
+      a.sha256 = sha256(buf);
+      changed = true;
+    } catch { continue; } finally { if (fd !== undefined) closeSync(fd); }
+  }
+  if (changed) writeFileSync(manifestPath, JSON.stringify(manifest));
 }
 
 function parseResult(stdout) {
@@ -724,7 +748,7 @@ export async function cmdDrive(flags, E) {
       permission_denials: result && Array.isArray(result.permission_denials) ? result.permission_denials : [],
       cost_usd: cost, exit_code: child.code,
     };
-    if (cost !== null) E.appendEvent(runDir, { event: "drive_child_done", step: ctx.steps, stage, total_cost_usd: cost, num_turns: turns });
+    if (cost !== null) E.appendEvent(runDir, { event: "drive_child_done", step: ctx.steps, stage, total_cost_usd: cost, num_turns: turns, permission_denials: ST.last.permission_denials.length });
 
     const quarantineAndFail = (reason, next_step, detail, extra) => {
       quarantine(runDir, ctx.steps);
@@ -750,6 +774,7 @@ export async function cmdDrive(flags, E) {
     }
     if (cost === null) return stopFail(E, ctx, "child_no_cost", "the child result lacks total_cost_usd/num_turns, so --budget cannot be enforced; check the claude version", { stage });
 
+    fillArtifactDigests(io.outbox);
     const ro = readOutbox(io.outbox, {
       runId, stage, nonce: io.nonce, allowedArtifacts: STAGE_OUTPUTS[stage], requiredHeadings: REQUIRED_HEADINGS,
     });

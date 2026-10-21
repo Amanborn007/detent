@@ -48,7 +48,7 @@ write `outbox/manifest.json` last:
   "nonce": "<nonce from step.json>",
   "status": "complete",
   "summary": "one or two sentences, at most 2000 characters",
-  "artifacts": [{ "path": "brief.md", "sha256": "<hex sha256 of the file>" }],
+  "artifacts": [{ "path": "brief.md" }],
   "decisions": [],
   "env": { "commands": { "verify": "" }, "gotchas": [] },
   "attempts": [{ "approach": "", "outcome": "failed", "evidence": "" }],
@@ -58,9 +58,14 @@ write `outbox/manifest.json` last:
 
 - `status` is `complete`, `needs_human` (at least one decision, stage not finished),
   `blocked` or `partial`. `env`, `attempts` and `steps` are optional.
-- `artifacts` lists every file you wrote, each with its sha256, and nothing else may
-  sit in the outbox. Allowed paths per stage: intake `brief.md`; research `research.md`
-  and `access-report.json`; plan `plan/plan.md`. step.json repeats them.
+- `artifacts` lists every file you wrote by `path` and nothing else may sit in the
+  outbox. You have no shell, so leave out `sha256`: drive adds the digest itself.
+- Allowed paths per stage: intake `brief.md`; research `research.md` and
+  `access-report.json`; plan `plan/plan.md`. `step.json` repeats them.
+- `access-report.json` is a top-level JSON array, one record per source, as in
+  `engine/sources/PREFLIGHT.md`: `{ "source", "binding", "needed_for", "status"
+  (reachable|blocked|partial), "criticality" (critical|important|optional), "detail",
+  "blocked_reason", "enable_action" }`. Not an object wrapping the array.
 - Required headings when `complete`: `brief.md` needs `## Goal` and
   `## Unknowns & open questions`; `research.md` needs `## Blast radius`.
 - Decisions replace the SKILL's append to `decisions.json`. Each is
