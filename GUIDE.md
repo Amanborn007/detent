@@ -52,6 +52,8 @@ If you have nothing yet, start with only the built-in adapters, and give each `c
 - `/path/to/detent/engine/adapters/gh-ticket` for the `ticket` socket (a GitHub issue).
 - `/path/to/detent/engine/adapters/repo-docs-knowledge` for the `knowledge` socket (grep over the repo's own docs).
 - `/path/to/detent/engine/adapters/gh-bot-comments` for the `bot-comments` socket.
+- `/path/to/detent/engine/adapters/claude-reviewer` for the `reviewer` socket (needs a signed-in `claude` CLI, spends tokens).
+- `/path/to/detent/engine/adapters/cmd-verifier` for the `verifier` socket (runs your `--test` and `--evidence` commands).
 
 Leave the other sockets out. Check that everything is wired:
 
