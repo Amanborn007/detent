@@ -145,3 +145,11 @@ test("L1/L3/L4: shell, chrome and CLAUDE.md loading are pinned", async () => {
   assert.equal(env.CLAUDE_CODE_DISABLE_CLAUDE_MDS, "1");
   assert.ok(buildImplementArgs(ctx).includes("--no-chrome"));
 });
+
+test("auth: the child gets the real HOME as given and loads no user, project or local settings", async () => {
+  const { buildImplementEnv, buildImplementArgs } = await load();
+  const ctx = mkCtx();
+  assert.equal(buildImplementEnv({ PATH: "/usr/bin", HOME: "/elsewhere" }, ctx).HOME, ctx.home);
+  const a = buildImplementArgs(ctx);
+  assert.equal(a[a.indexOf("--setting-sources") + 1], "");
+});
