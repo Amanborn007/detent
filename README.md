@@ -5,7 +5,7 @@
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-c8501a.svg)](https://code.claude.com/docs/en/plugins)
 [![Version](https://img.shields.io/badge/version-0.11.0-informational.svg)](.claude-plugin/plugin.json)
 
-**Hand Claude Code a ticket. Get back a draft PR you approved twice.**
+**Ticket in. Draft PR out. Nothing ships without your yes.**
 
 Left alone, an agent can spend an hour building the wrong thing and then push it. Detent stops it twice. It researches the ticket and writes a plan, then waits for you. It builds in a worktree, checks the diff against the plan you approved, then waits again before it pushes. It never merges.
 
