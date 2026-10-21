@@ -30,7 +30,7 @@ test("start refuses a repo with no origin remote", () => {
 
 test("start refuses anything that is not owner/repo#N", () => {
   const repo = mkRepo();
-  const r = engine(["start", "DUNE-35"], { cwd: repo, env: { ...HUMAN, ...probes() } });
+  const r = engine(["start", "PROJ-35"], { cwd: repo, env: { ...HUMAN, ...probes() } });
   assert.equal(r.code, 2, r.stdout);
   assert.match(r.json.reason, /owner\/repo#N/);
 });
