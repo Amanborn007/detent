@@ -150,12 +150,17 @@ function validRejectedOptions(v) {
     typeof r.why_not === "string" && r.why_not.trim());
 }
 
-/** Reasons recorded in the sidecar for one decision: option -> why. */
+/** Answer/option comparison key: case and surrounding whitespace only, never fuzzy. */
+export function optionKey(v) {
+  return typeof v === "string" ? v.trim().toLowerCase() : v;
+}
+
+/** Reasons recorded in the sidecar for one decision: option key -> why. */
 function rationaleFor(state, decisionId) {
   const out = {};
   for (const r of state.rationale || []) {
     if (r && r.decision === decisionId && typeof r.option === "string" && typeof r.why === "string") {
-      out[r.option] = r.why;
+      out[optionKey(r.option)] = r.why;
     }
   }
   return out;
@@ -171,8 +176,11 @@ export function discardsFor(state, d) {
     return d.rejected_options.map((r) => ({ option: r.option, why_not: r.why_not, source: "rejected_options" }));
   }
   const why = rationaleFor(state, d.id);
-  const opts = Array.isArray(d.options) ? d.options.filter((o) => o !== d.answer) : [];
-  return opts.map((o) => ({ option: o, why_not: why[o] ?? null, source: why[o] ? "rationale" : "derived" }));
+  const opts = Array.isArray(d.options) ? d.options.filter((o) => optionKey(o) !== optionKey(d.answer)) : [];
+  return opts.map((o) => {
+    const w = why[optionKey(o)];
+    return { option: o, why_not: w ?? null, source: w ? "rationale" : "derived" };
+  });
 }
 
 /**

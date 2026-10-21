@@ -28,7 +28,7 @@ import { runBenchmark, checkpointBenchmark, ledgerLine } from "../bench/bench.mj
 import { runEval, EvalRefusal, resolveEvalRoots } from "../eval/eval.mjs";
 import { loadRoutingConfig, tierOf, advisorConsultEvent } from "../routing/routing.mjs";
 import { readSteps, renderLiveHtml, isRunComplete, STEP_KINDS, STEP_STATUSES } from "./liveview.mjs";
-import { loadRunState, buildNote, checkSufficiency, currentStage } from "../handoff/handoff.mjs";
+import { loadRunState, buildNote, checkSufficiency, currentStage, optionKey } from "../handoff/handoff.mjs";
 import { analyzeSpend, trackingLine, compareTracking } from "../spend/spend.mjs";
 import { homedir } from "node:os";
 import { resolvePackPath, validatePackFile, PackPathError } from "../pack/pack.mjs";
@@ -2407,11 +2407,11 @@ function cmdDecideWhy(flags) {
   }
   // Recording a reason for the option that WON would be incoherent, and would
   // satisfy the sufficiency check without explaining any discard.
-  if (target.answer !== undefined && option === target.answer) {
+  if (target.answer !== undefined && optionKey(option) === optionKey(target.answer)) {
     refuse(`option ${JSON.stringify(option)} is the ANSWER to ${decision}, not a discard`,
       "record why the REJECTED options lost; the chosen one needs no rejection reason");
   }
-  if (Array.isArray(target.options) && target.options.length && !target.options.includes(option)) {
+  if (Array.isArray(target.options) && target.options.length && !target.options.some((o) => optionKey(o) === optionKey(option))) {
     refuse(`option ${JSON.stringify(option)} is not among ${decision}'s options (${target.options.map((o) => JSON.stringify(o)).join(", ")})`,
       "a reason attached to an option nobody offered would never be shown");
   }

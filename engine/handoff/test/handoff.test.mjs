@@ -339,3 +339,27 @@ test("an answered decision with NEITHER rejected_options nor options is a hard g
   assert.equal(r.sufficient, false);
   assert.match(r.missing.join(" "), /D-007.*already ruled out/);
 });
+
+test("an answer differing from its option only by case or surrounding whitespace is not a discard", () => {
+  const st = loadRunState(mkrun({
+    "run.json": RUN, "brief.md": "x", "stage-status.json": STATUS_IMPL,
+    "attempts.jsonl": "", "env.json": ENV_OK,
+    "decisions.json": [{ id: "D-001", status: "answered", answer: "Fix in this PR ",
+                         options: ["fix in this PR", "defer"] }],
+    "decision-rationale.jsonl": JSON.stringify({ decision: "D-001", option: "defer", why: "out of scope" }),
+  }));
+  const r = checkSufficiency(st);
+  assert.equal(r.sufficient, true, r.missing.join("; "));
+  assert.doesNotMatch(buildNote(st).text, /rejected: fix in this PR/);
+});
+
+test("a sidecar reason matches its option ignoring case and surrounding whitespace", () => {
+  const st = loadRunState(mkrun({
+    "run.json": RUN, "brief.md": "x", "stage-status.json": STATUS_IMPL,
+    "attempts.jsonl": "", "env.json": ENV_OK,
+    "decisions.json": [{ id: "D-001", status: "answered", answer: "reuse",
+                         options: ["reuse", "New implementation"] }],
+    "decision-rationale.jsonl": JSON.stringify({ decision: "D-001", option: " new implementation", why: "dupes callers" }),
+  }));
+  assert.equal(checkSufficiency(st).sufficient, true);
+});
