@@ -41,18 +41,29 @@ export function startMessagesProxy({ apiKey, placeholder, upstream = "https://ap
   });
 }
 
-export function parseClaudeJson(stdout) {
-  try {
-    const j = JSON.parse(stdout.trim().split("\n").pop());
-    const isError = j.is_error === true;
-    return {
-      answered: j.is_error === false, is_error: isError, subtype: String(j.subtype ?? ""), cost: Number(j.total_cost_usd) || 0, turns: Number(j.num_turns) || 0,
-      denials: Array.isArray(j.permission_denials) ? j.permission_denials.length : 0,
-      error_text: isError && typeof j.result === "string" ? j.result.slice(0, 200) : "",
-    };
-  } catch {
-    return { answered: false, is_error: null, subtype: "unparsed", cost: 0, turns: 0, denials: 0, error_text: "" };
+// 2.1.306 prints a bare result object, a JSON array of messages, or stream-json lines.
+function findResult(stdout) {
+  const text = String(stdout).trim();
+  const pick = (v) => {
+    if (Array.isArray(v)) return [...v].reverse().find((m) => m && m.type === "result") || null;
+    return v && typeof v === "object" && v.type === "result" ? v : null;
+  };
+  try { return pick(JSON.parse(text)) || (JSON.parse(text)?.is_error !== undefined ? JSON.parse(text) : null); } catch { /* try line by line */ }
+  for (const line of text.split("\n").reverse()) {
+    try { const m = pick(JSON.parse(line)); if (m) return m; } catch { /* not a json line */ }
   }
+  return null;
+}
+
+export function parseClaudeJson(stdout) {
+  const j = findResult(stdout);
+  if (!j) return { answered: false, is_error: null, subtype: "no_result", cost: 0, turns: 0, denials: 0, error_text: "" };
+  const isError = j.is_error === true;
+  return {
+    answered: j.is_error === false, is_error: isError, subtype: String(j.subtype ?? ""), cost: Number(j.total_cost_usd) || 0, turns: Number(j.num_turns) || 0,
+    denials: Array.isArray(j.permission_denials) ? j.permission_denials.length : 0,
+    error_text: isError && typeof j.result === "string" ? j.result.slice(0, 200) : "",
+  };
 }
 
 // Exit code, flags and counts only; the result text is included solely when claude marked it an error.

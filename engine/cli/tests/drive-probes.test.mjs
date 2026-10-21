@@ -234,3 +234,14 @@ test("describeRun reports exit, flags and counts, and result text only for error
   assert.match(describeRun({ code: 1, stderr: "\nboom line\nsecond", timedOut: false }, bad), /exit=1 .*is_error=true .*stderr1="boom line"/);
   assert.match(describeRun({ code: null, signal: "SIGKILL", stderr: "", timedOut: true }, parseClaudeJson("")), /timed_out=true/);
 });
+
+test("parseClaudeJson reads the result from an object, an array or stream-json lines", () => {
+  const res = { type: "result", subtype: "success", is_error: false, total_cost_usd: 0.012, num_turns: 3, permission_denials: [{}, {}], result: "DONE" };
+  const want = { answered: true, is_error: false, subtype: "success", cost: 0.012, turns: 3, denials: 2, error_text: "" };
+  assert.deepEqual(parseClaudeJson(JSON.stringify(res)), want);
+  assert.deepEqual(parseClaudeJson(JSON.stringify([{ type: "system" }, { type: "assistant" }, res])), want);
+  assert.deepEqual(parseClaudeJson([{ type: "system" }, { type: "assistant" }, res].map((m) => JSON.stringify(m)).join("\n") + "\n"), want);
+  assert.deepEqual(parseClaudeJson(JSON.stringify({ subtype: "success", is_error: false, total_cost_usd: 0.012, num_turns: 3, permission_denials: [{}, {}] })), want);
+  assert.equal(parseClaudeJson(JSON.stringify([{ type: "system" }])).subtype, "no_result");
+  assert.equal(parseClaudeJson("not json").subtype, "no_result");
+});
