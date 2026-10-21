@@ -76,3 +76,19 @@ test("approve with no pending intent gate refuses", () => {
   assert.equal(r.code, 2, r.stdout);
   assert.match(r.json.reason, /no pending/);
 });
+
+test("after approve the plan stage is no longer shown as waiting on the answered gate", () => {
+  const { ctx, gate } = setup();
+  const r = engine(["approve"], { cwd: ctx.repo, env: TTY, input: "y\n" });
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  assert.doesNotMatch(r.stdout, new RegExp(`waiting on ${gate.id}`));
+  const plan = readJson(join(ctx.runDir, "stage-status.json")).stages.plan;
+  assert.notEqual(plan.status, "blocked");
+  assert.deepEqual(plan.blocked_on || [], []);
+});
+
+test("approve text output has no en or em dash", () => {
+  const { ctx } = setup();
+  const r = engine(["approve"], { cwd: ctx.repo, env: TTY, input: "y\n" });
+  assert.doesNotMatch(r.stdout, /[–—]/);
+});

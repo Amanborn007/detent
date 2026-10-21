@@ -1,9 +1,9 @@
 ---
-name: sdlc-plan
-description: SDLC engine stage 3 (owning stage 4, the intent check, inside its gate) — consume .sdlc/<run-id>/brief.md + research.md into plan/plan.md (approach, ordered steps with files-touched and verify commands, risks, test strategy), run a fresh-context machine intent check of the plan against the brief's acceptance criteria (divergences filed as pending decisions), and render everything as a self-contained curator HTML artifact under .plans/ that LEADS with an "Access & data completeness" panel (each needed source reachable/blocked/partial from access-report.json, dependent conclusions degraded-confidence tagged, inline unblock controls) and carries a data-plan-question block for every pending D-* decision. The plan gate is HARD — implement stays locked until a human approves in curator or the terminal fallback, and a blocked CRITICAL source hard-blocks approval unless the human explicitly picks "proceed degraded". Trigger: /sdlc-plan <run-id>.
+name: plan
+description: SDLC engine stage 3 (owning stage 4, the intent check, inside its gate) — consume .sdlc/<run-id>/brief.md + research.md into plan/plan.md (approach, ordered steps with files-touched and verify commands, risks, test strategy), run a fresh-context machine intent check of the plan against the brief's acceptance criteria (divergences filed as pending decisions), and render everything as a self-contained curator HTML artifact under .plans/ that LEADS with an "Access & data completeness" panel (each needed source reachable/blocked/partial from access-report.json, dependent conclusions degraded-confidence tagged, inline unblock controls) and carries a data-plan-question block for every pending D-* decision. The plan gate is HARD — implement stays locked until a human approves in curator or the terminal fallback, and a blocked CRITICAL source hard-blocks approval unless the human explicitly picks "proceed degraded".
 ---
 
-# sdlc-plan — brief + research in, gated plan out
+# plan — brief + research in, gated plan out
 
 Contract: `engine/stages/CONTRACT.md`. Inputs: `brief.md` + `research.md` (never the
 raw ticket). Output: `plan/plan.md`, the curator artifact `.plans/<run-id>-plan.html`,
