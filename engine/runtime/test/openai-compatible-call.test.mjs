@@ -161,6 +161,32 @@ test("a key straddling the 300-char snippet cut leaks no prefix, in an http erro
   }
 });
 
+test("scrubbing leaves the protocol envelope alone, even when the key is a substring of it", async () => {
+  const ok = await rig([res(200, OK_BODY)]).go({ apiKey: "1" });
+  assert.equal(ok.protocol, "detent-openai-call-v1");
+  assert.equal(ok.ok, true);
+  assert.equal(ok.attempts, 1);
+  assert.equal(ok.http_status, 200);
+  const long = await rig([res(401, "denied")]).go({ apiKey: "detent-openai-call-v1" });
+  assert.equal(long.protocol, "detent-openai-call-v1");
+  assert.equal(long.class, "http");
+});
+
+test("a key shorter than 8 characters is not redacted anywhere", async () => {
+  const out = await rig([res(200, { ...OK_BODY, choices: [{ index: 0, message: { role: "assistant", content: "1 EMPTY" }, finish_reason: "stop" }] })]).go({ apiKey: "EMPTY" });
+  assert.equal(out.body.choices[0].message.content, "1 EMPTY");
+  const bad = await rig([res(401, "EMPTY key")]).go({ apiKey: "EMPTY" });
+  assert.equal(bad.message, "EMPTY key");
+});
+
+test("a long key echoed in a body string or an http error message is still redacted", async () => {
+  const KEY = "sk-sentinel-4f9a1c";
+  const ok = await rig([res(200, { ...OK_BODY, choices: [{ index: 0, message: { role: "assistant", content: `echo ${KEY}` }, finish_reason: "stop" }] })]).go({ apiKey: KEY });
+  assert.equal(ok.body.choices[0].message.content, "echo [redacted]");
+  const bad = await rig([res(401, `Bearer ${KEY}`)]).go({ apiKey: KEY });
+  assert.equal(bad.message, "Bearer [redacted]");
+});
+
 test("retryable and backoffMs", () => {
   for (const s of [408, 429, 500, 502, 503, 504]) assert.equal(retryable(s), true, String(s));
   for (const s of [400, 401, 403, 404, 422, 501]) assert.equal(retryable(s), false, String(s));
