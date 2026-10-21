@@ -182,23 +182,24 @@ test("a collected approval lets the gated stage end", () => {
   assert.equal(r.code, 0, r.stdout);
 });
 
+// Only macOS truncates here: Node writes pipes synchronously on Linux.
 test("engine output past the pipe buffer is not truncated when the reader is slow", async () => {
   const ctx = mkRun();
   const f = join(scratch(), "feedback.json");
-  writeJson(f, Array.from({ length: 800 }, (_, i) => ({ type: "decision", question: `D-9${i}`, answer: "approve" })));
+  writeJson(f, Array.from({ length: 2000 }, (_, i) => ({ type: "decision", question: `D-9${i}`, answer: "approve" })));
   const child = spawn(process.execPath, [ENGINE, "gate", "collect", "--run", ctx.runId, "--file", f], {
     stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, DETENT_ROOT: ctx.home },
   });
   const closed = new Promise((r) => child.on("close", r));
-  child.stdout.pause();
-  await new Promise((r) => setTimeout(r, 500));
   let out = "";
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (c) => { out += c; });
+  child.stdout.pause();
+  await new Promise((r) => setTimeout(r, 500));
   child.stdout.resume();
   await closed;
-  assert.ok(out.length > 20000, `payload should exceed the pipe buffer, got ${out.length}`);
-  assert.equal(JSON.parse(out.trim()).unresolved.length, 800, "the whole JSON line arrives");
+  assert.ok(out.length > 65536, `payload should exceed the pipe buffer, got ${out.length}`);
+  assert.equal(JSON.parse(out.trim()).unresolved.length, 2000, "the whole JSON line arrives");
 });
 
 function parkAtPlan(ctx) {
