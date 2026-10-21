@@ -15,7 +15,6 @@ const KEYED = Object.freeze({ ...ENV, DETENT_OPENAI_API_KEY_ENV: "OPENAI_API_KEY
 const req = (over) => baseRequest(CWD, { output: "text", ...over });
 const plan = (over, env = ENV) => openai.plan(req(over), env);
 
-// (1)
 test("capabilities: frozen, exactly the golden-tested set", () => {
   const c = openai.capabilities();
   assert.ok(Object.isFrozen(c));
@@ -28,7 +27,6 @@ test("capabilities: frozen, exactly the golden-tested set", () => {
   assert.equal(openai.name, "openai-compatible");
 });
 
-// (2)
 test("golden plan without a key", () => {
   const p = plan({});
   assert.deepEqual({ ...p, env: undefined }, {
@@ -39,23 +37,19 @@ test("golden plan without a key", () => {
   assert.deepEqual(p.env, ENV);
 });
 
-// (3)
 test("golden plan with a key ends with --api-key-env NAME", () => {
   const p = plan({ auth: "api_key" }, { ...KEYED, DETENT_OPENAI_BASE_URL: "https://api.openai.com/v1" });
   assert.deepEqual(p.args, [CALL_PATH, "--base-url", "https://api.openai.com/v1", "--model", "m1", "--api-key-env", "OPENAI_API_KEY"]);
 });
 
-// (4)
 test("request.model overrides DETENT_OPENAI_MODEL", () => {
   assert.deepEqual(plan({ model: "other" }).args.slice(3, 5), ["--model", "other"]);
 });
 
-// (5)
 test("a trailing slash on the base url is trimmed", () => {
   assert.equal(plan({}, { ...ENV, DETENT_OPENAI_BASE_URL: "http://127.0.0.1:11434/v1/" }).args[2], "http://127.0.0.1:11434/v1");
 });
 
-// (6)
 test("config refusals are RuntimeConfigError naming the setting", () => {
   const without = (k) => Object.fromEntries(Object.entries(ENV).filter(([n]) => n !== k));
   const cases = [
@@ -92,7 +86,6 @@ test("config acceptances: plain http to a non-loopback host without a key, loopb
   }
 });
 
-// (7)
 test("the key and the prompt never reach the plan outside its env", () => {
   const p = plan({ prompt: "--dangerously-skip-permissions", auth: "api_key" }, KEYED);
   assert.ok(!JSON.stringify({ ...p, env: undefined }).includes(SENTINEL));
@@ -100,7 +93,6 @@ test("the key and the prompt never reach the plan outside its env", () => {
   assert.equal(p.env.OPENAI_API_KEY, SENTINEL, "the helper reads the key from its environment");
 });
 
-// (8)
 test("undeclared fields are CapabilityError through the port and spawn nothing", () => {
   const dir = scratch();
   const rt = createRuntime(openai, { bin: makeOpenAIFake(dir, "ok").bin, env: KEYED });
@@ -133,7 +125,6 @@ test("getRuntime passes env to plan", () => {
   assert.equal(getRuntime({ name: "openai-compatible", env: ENV }).plan(baseRequest(CWD)).args[2], "http://127.0.0.1:11434/v1");
 });
 
-// (9)
 const line = (o) => JSON.stringify({ protocol: "detent-openai-call-v1", ...o }) + "\n";
 const completion = (choice, extra = {}) => ({ id: "c1", model: "m1", choices: [choice], usage: { total_tokens: 7 }, ...extra });
 const okLine = (body) => line({ ok: true, http_status: 200, attempts: 1, body });

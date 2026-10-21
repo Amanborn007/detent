@@ -37,7 +37,6 @@ function verb(args, { input, env } = {}) {
   return { code: r.status, json: lines.length === 1 && lines[0] ? JSON.parse(lines[0]) : null, stderr: r.stderr };
 }
 
-// (19)
 test("a flaky server: stop ok, the two retry warnings are in raw.stderr and reach the parent's stderr", async () => {
   await withServer("flaky", async ({ url }) => {
     const script = `import { getRuntime } from ${JSON.stringify(RUNTIME_URL)};
@@ -58,7 +57,6 @@ process.stdout.write(JSON.stringify(r));`;
   });
 });
 
-// (20)
 test("record: Authorization is on the wire only when a key is configured", async () => {
   const logdir = mkdtempSync(join(tmpdir(), "openai-record-"));
   await withServer("record", async ({ url }) => {
@@ -77,7 +75,6 @@ test("record: Authorization is on the wire only when a key is configured", async
   }, logdir);
 });
 
-// (21)
 test("runtime capabilities --runtime openai-compatible exits 0", () => {
   const r = verb(["capabilities", "--runtime", "openai-compatible"]);
   assert.equal(r.code, 0, r.stderr);
@@ -128,7 +125,6 @@ function withProcessEnv(vars, fn) {
   }
 }
 
-// (22)
 test("judge under DETENT_RUNTIME=openai-compatible scores through the endpoint and never checks for claude", async () => {
   await withServer("score", ({ url }) => {
     let consulted = 0;
@@ -141,7 +137,6 @@ test("judge under DETENT_RUNTIME=openai-compatible scores through the endpoint a
   });
 });
 
-// (23)
 test("judge against a 401 degrades to recorded:false, naming the runtime and the status", async () => {
   await withServer("401-echo-auth", ({ url }) => {
     const r = withProcessEnv(cfg(url, { DETENT_RUNTIME: "openai-compatible" }), () => runJudgeCase({ id: "J", prompt: "rate this" }));
@@ -160,7 +155,6 @@ test("judge with no endpoint configured degrades loudly, and an unknown runtime 
   assert.match(b.note, /nope/);
 });
 
-// (24)
 const GIT_ENV = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.invalid" };
 function mkRepo() {
   const dir = mkdtempSync(join(tmpdir(), "oai-rev-"));

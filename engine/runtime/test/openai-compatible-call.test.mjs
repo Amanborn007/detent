@@ -30,7 +30,6 @@ function rig(script) {
   return { go, calls, sleeps, warnings };
 }
 
-// (10)
 test("request golden: method, url, headers and the exact body", async () => {
   const t = rig([res(200, OK_BODY)]);
   const out = await t.go();
@@ -51,7 +50,6 @@ test("request golden: Authorization is sent only with a key", async () => {
   assert.ok(!t.calls[0].init.body.includes(SENTINEL));
 });
 
-// (11)
 test("flaky: two 503s then 200 is ok on attempt 3 with two warnings and sleeps 500 then 1000", async () => {
   const t = rig([res(503, "busy"), res(503, "busy"), res(200, OK_BODY)]);
   const out = await t.go();
@@ -64,7 +62,6 @@ test("flaky: two 503s then 200 is ok on attempt 3 with two warnings and sleeps 5
   ]);
 });
 
-// (12)
 test("Retry-After seconds are honoured and capped at 10s", async () => {
   for (const [header, want] of [["2", 2000], ["99", 10000], ["0", 0]]) {
     const t = rig([res(429, "slow down", { "Retry-After": header }), res(200, OK_BODY)]);
@@ -74,7 +71,6 @@ test("Retry-After seconds are honoured and capped at 10s", async () => {
   }
 });
 
-// (13)
 test("down: three 503s is ok:false class http with the last body in the message", async () => {
   const t = rig([res(503, "first"), res(503, "second"), res(503, "third body")]);
   const out = await t.go();
@@ -89,7 +85,6 @@ test("down: three 503s is ok:false class http with the last body in the message"
   assert.equal(t.warnings.length, 2);
 });
 
-// (14)
 test("400, 401 and 404 are not retried and do not warn", async () => {
   for (const status of [400, 401, 404]) {
     const t = rig([res(status, `nope ${status}`), res(200, OK_BODY)]);
@@ -112,7 +107,6 @@ test("408, 429, 500, 502, 504 are retried like 503", async () => {
   }
 });
 
-// (15)
 test("a rejected fetch is retried and then reported as class network", async () => {
   const t = rig([refused()]);
   const out = await t.go();
@@ -132,7 +126,6 @@ test("a network error followed by a good answer is ok", async () => {
   assert.equal(out.attempts, 2);
 });
 
-// (16)
 test("a 200 that is not JSON is bad_body and is not retried", async () => {
   const t = rig([res(200, "<html>gateway</html>"), res(200, OK_BODY)]);
   const out = await t.go();
@@ -143,7 +136,6 @@ test("a 200 that is not JSON is bad_body and is not retried", async () => {
   assert.deepEqual(t.warnings, []);
 });
 
-// (17)
 test("the key is scrubbed from every emitted message and body", async () => {
   const echoed = JSON.stringify({ error: { message: "bad key", echo: `Bearer ${SENTINEL}` } });
   const fail = await rig([res(401, echoed)]).go({ apiKey: SENTINEL });
