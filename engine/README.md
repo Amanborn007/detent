@@ -77,6 +77,8 @@ what to do with the result.
 | `adapters/gh-ticket` | ticket | GitHub issue → ticket JSON via `gh` |
 | `adapters/repo-docs-knowledge` | knowledge | greps a repo's README/docs/ for a query → knowledge JSON (one provider among many) |
 | `adapters/gh-bot-comments` | bot-comments | lists PR comments via `gh`, tags bot vs human, classifies actionable vs informational |
+| `adapters/claude-reviewer` | reviewer | sends the diff to a signed-in `claude` CLI and returns findings (spends tokens) |
+| `adapters/cmd-verifier` | verifier | runs your test command and your evidence command, passes only when every claim has evidence |
 
 Smoke tests live in `adapters/tests/` and run against a public repo
 (`cli/cli`); they need an authenticated `gh` and node.

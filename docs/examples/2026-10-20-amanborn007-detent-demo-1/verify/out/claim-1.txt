@@ -1,0 +1,2 @@
+`slugify(input, { maxLength })` returns a string of at most `maxLength` characters
+cap 5 -> length 5; cap 11 -> length 11; cap 12 -> length 11; cap 13 -> length 11

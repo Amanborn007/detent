@@ -2,6 +2,6 @@
   "id": "S1-11",
   "suite": "context-adherence",
   "check": "hooks-wiring-parity",
-  "description": "Every script referenced in hooks/hooks.json exists on disk, and every top-level shebang'd script under hooks/ is wired somewhere in hooks.json. Known-failing on main: cold-resume-warn.mjs and session-cost-statusline.mjs are unwired (the latter needs a statusLine config decision out of this case's scope).",
+  "description": "Every script referenced in hooks/hooks.json exists on disk, and every top-level shebang'd script under hooks/ is wired somewhere in hooks.json.",
   "params": {}
 }

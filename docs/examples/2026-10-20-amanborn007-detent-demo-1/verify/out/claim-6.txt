@@ -1,0 +1,2 @@
+Calls without `maxLength` return exactly what they return today
+no options -> "hello-brave-new-world"; null -> "hello-brave-new-world"

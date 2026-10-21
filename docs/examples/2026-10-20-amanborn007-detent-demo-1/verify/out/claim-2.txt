@@ -1,0 +1,2 @@
+The cut lands on a separator, so no word is split
+cap 13 -> "hello-brave"; "--" cap 7 -> "ab--cd"

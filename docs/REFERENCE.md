@@ -168,6 +168,8 @@ sockets:
     version: "builtin"
 ```
 
+There are five built-in adapters: `gh-ticket`, `gh-bot-comments`, `repo-docs-knowledge`, `claude-reviewer` and `cmd-verifier`. `claude-reviewer` fills the `reviewer` socket. It needs a signed-in `claude` CLI, it spends tokens on every call, and it runs `claude` with no tools, no MCP servers and no user or project settings because the reviewed repo is untrusted. `cmd-verifier` fills the `verifier` socket. It runs the `--test` command, then the `--evidence` command, and passes only when the tests pass and every claim has an evidence line. Both commands run in the shell inside the repo, so they must come from your own `stack.yaml`. The evidence command prints one JSON object per line with `claim`, `kind`, `note` and an optional `artifact`. Point `--out` at a git-ignored directory, because the saved test and evidence output would otherwise show up in the diff.
+
 A command provider reads one JSON request on stdin and writes one JSON response on stdout. Exit 1 is retried once, then shown to you. A `providers:` list under a socket fans out to every entry and merges the results. A provider with `kind: skill` or `kind: mcp_tool` makes the engine print an instruction for the agent, because the CLI cannot call a skill or an MCP tool itself. Use absolute paths for adapters. A relative path resolves against the directory of your `stack.yaml`, so it fails in a work repo. The `version` field records the contract you wrote against, and the engine does not check it. If the engine says `has no 'sockets:' map`, you pointed it at the pack. Socket contracts are in `engine/sockets/`.
 
 Sentinel's bot policies are in `config/sentinel/default.json`: six bots, each with a policy of `auto_address`, `ignore` or `escalate`, and `max_iterations` of 10. Copy it and change the logins for the bots your org runs.
@@ -215,11 +217,12 @@ Sentinel is a tool and a hook, not a skill. It sits in the same loop.
 
 ## Hooks
 
-The plugin registers 15 hook entries that run 13 scripts, listed in `hooks/hooks.json`. Nine of the scripts stand down inside Claude Code background jobs (`CLAUDE_JOB_DIR`), and `comment-discipline`, `deslop-check` and `eval-gate` also stand down inside owl runs (`OWL_RUN`). `sentinel-autoscan` runs in both.
+The plugin registers 16 hook entries that run 14 scripts, listed in `hooks/hooks.json`. Nine of the scripts stand down inside Claude Code background jobs (`CLAUDE_JOB_DIR`), and `comment-discipline`, `deslop-check` and `eval-gate` also stand down inside owl runs (`OWL_RUN`). `sentinel-autoscan` runs in both.
 
 | Event | Scripts | What they do |
 |---|---|---|
 | SessionStart | `morning-brief-session.sh` | On the first session of a day, offer the brief. |
+| SessionStart | `cold-resume-warn.mjs` | When a resumed session's last turn is over an hour old, say the prompt cache has expired before the first turn runs. |
 | SessionStart, and after Write or Edit | `comment-discipline.sh`, `voice-discipline.sh` | Remind the model of your code-comment rules and your writing voice. |
 | After Bash | `sentinel-autoscan.sh` | After a push, `gh pr create` or `gh pr ready` on an open PR, request a referee review and start a scanner for non-draft PRs. |
 | After Bash | `eval-gate.sh`, `deslop-check.sh` | After a push, remind the model to run the evals or `/detent:deslop`. |
@@ -230,7 +233,18 @@ The plugin registers 15 hook entries that run 13 scripts, listed in `hooks/hooks
 
 The scanner waits 330 seconds, then scans every 300 seconds for up to 8 rounds. A new head commit restarts the window, up to 12 windows. Results go to `.local/inbox/<owner>__<repo>__pr<N>/respond-inbox.jsonl`, and the log is `sentinel-autoscan.log` in the same folder. Draft PRs get a referee review but no scanner.
 
-Kill switches, each set to `off`: `PR_AUTOREVIEW`, `REFEREE_AUTOREVIEW`, `SENTINEL_AUTOSCAN`, `EVAL_GATE`, `DESLOP`, `VOICE_DISCIPLINE` and `MORNING_HERALD_SESSION`. [hooks/README.md](../hooks/README.md) has the rest of the environment variables.
+`engine/statusline/session-cost-statusline.mjs` shows this session's spend and the share run in sub-agents. A plugin cannot set a status line, so add it to `~/.claude/settings.json` yourself:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "node /path/to/detent/engine/statusline/session-cost-statusline.mjs"
+  }
+}
+```
+
+Kill switches, each set to `off`: `PR_AUTOREVIEW`, `REFEREE_AUTOREVIEW`, `SENTINEL_AUTOSCAN`, `EVAL_GATE`, `DESLOP`, `VOICE_DISCIPLINE`, `MORNING_HERALD_SESSION` and `COLD_RESUME_WARN`. [hooks/README.md](../hooks/README.md) has the rest of the environment variables.
 
 ## Safety model
 
@@ -265,7 +279,7 @@ engine/
   cli/             detent.mjs and engine.mjs
   stages/          stage prompts and CONTRACT.md
   sockets/         socket contracts
-  adapters/        gh-ticket, repo-docs-knowledge, gh-bot-comments
+  adapters/        gh-ticket, repo-docs-knowledge, gh-bot-comments, claude-reviewer, cmd-verifier
   curator/ sentinel/ owl/ herald/ courier/
   eval/ bench/ spend/ routing/ handoff/ scout/ self-feedback/ pack/ sources/
   scripts/         leak-gate script
@@ -295,10 +309,10 @@ This is early software. Here is what is and is not checked.
 - **Not in CI:** the engine CLI tests, sentinel tests, hook tests, adapter smoke tests and the owl tests. They exist in the repo and are listed in [CONTRIBUTING.md](../CONTRIBUTING.md). Run them before you push.
 - **Owl** is tested against a stub `claude` binary, not the real one.
 - **The autoscan hook** is tested with stubbed `gh` output, not against a live PR in this repo.
-- **The stages** are prompts plus a state machine. They have not been run end to end on a public project.
-- **Known gaps.** The stage prompts in `engine/stages/` are not registered as plugin skills, so you point Claude at them by path. Two hook files, `hooks/cold-resume-warn.mjs` and `hooks/session-cost-statusline.mjs`, are on disk but not wired in `hooks.json`, and eval case S1-11 fails because of it.
+- **The stages** are prompts plus a state machine. They have been run once end to end on [Amanborn007/detent-demo#1](examples/2026-10-20-amanborn007-detent-demo-1/).
+- **Known gaps.** The stage prompts in `engine/stages/` are not registered as plugin skills, so you point Claude at them by path.
 
-A worked example is planned: a full run on a small public repo, with the run directory committed.
+A worked example is committed: a full run on a small public repo, with the run directory in [docs/examples/2026-10-20-amanborn007-detent-demo-1/](examples/2026-10-20-amanborn007-detent-demo-1/) and the resulting [demo PR](https://github.com/Amanborn007/detent-demo/pull/2).
 
 ## Credits
 

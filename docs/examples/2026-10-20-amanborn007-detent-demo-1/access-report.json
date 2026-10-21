@@ -1,0 +1,6 @@
+[
+  {"source":"target repo","binding":"local git worktree","needed_for":"current slugify code, tests, precedent","status":"reachable","criticality":"critical","detail":"worktree present on sdlc/2026-10-20-amanborn007-detent-demo-1; git log returns 1 commit","blocked_reason":null,"enable_action":null,"probed_at":"2026-10-20T15:12:22Z"},
+  {"source":"ticket","binding":"gh CLI (gh-ticket adapter)","needed_for":"acceptance criteria, U1","status":"reachable","criticality":"critical","detail":"gh auth status ok; issue #1 fetched in full","blocked_reason":null,"enable_action":null,"probed_at":"2026-10-20T15:12:22Z"},
+  {"source":"repo docs","binding":"knowledge socket, repo-docs provider","needed_for":"documented behaviour of slugify","status":"reachable","criticality":"supporting","detail":"socket call returned 3 hits for 'slugify'","blocked_reason":null,"enable_action":null,"probed_at":"2026-10-20T15:12:22Z"},
+  {"source":"GitHub PRs and code search","binding":"gh CLI","needed_for":"merged precedent, other consumers","status":"reachable","criticality":"supporting","detail":"gh pr list and gh search code ran; 0 results","blocked_reason":null,"enable_action":null,"probed_at":"2026-10-20T15:12:22Z"}
+]

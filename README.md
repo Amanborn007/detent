@@ -137,7 +137,7 @@ sockets:
         version: "builtin"
 ```
 
-Three GitHub adapters ship with Detent: `gh-ticket`, `repo-docs-knowledge` and `gh-bot-comments`. With those alone you can take a GitHub issue through a run. Add your own `reviewer` and `verifier` to give the ship stage real checks. A socket you leave out is off, and the stage that needs it says so instead of guessing. The contracts are in `engine/sockets/`, and [GUIDE.md](GUIDE.md#6-writing-a-provider-and-a-pack) walks through writing a provider.
+Five adapters ship with Detent: `gh-ticket`, `repo-docs-knowledge`, `gh-bot-comments`, `claude-reviewer` and `cmd-verifier`. With the first three you can take a GitHub issue through a run. Add `claude-reviewer` (needs a signed-in `claude` CLI and spends tokens) and `cmd-verifier` (runs your own test and evidence commands) to give the ship stage real checks. A socket you leave out is off, and the stage that needs it says so instead of guessing. The contracts are in `engine/sockets/`, and [GUIDE.md](GUIDE.md#6-writing-a-provider-and-a-pack) walks through writing a provider.
 
 ## What it needs
 
@@ -167,7 +167,7 @@ Type them as `/detent:<skill>`.
 
 ## Status
 
-Early, v0.11.0. Most of it waits for you, but a few hooks run on their own, for example a review prompt after `git push`. [What runs without asking](docs/REFERENCE.md#what-runs-without-asking-you) lists every one and its kill switch. The stages have not yet run end to end on a public project, and a worked example is coming.
+Early, v0.11.0. Most of it waits for you, but a few hooks run on their own, for example a review prompt after `git push`. [What runs without asking](docs/REFERENCE.md#what-runs-without-asking-you) lists every one and its kill switch. One run of all seven stages is committed as a [worked example](docs/examples/2026-10-20-amanborn007-detent-demo-1/), and it produced [this demo PR](https://github.com/Amanborn007/detent-demo/pull/2).
 
 ## Read more
 

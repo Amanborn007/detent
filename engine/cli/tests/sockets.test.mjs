@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { writeFileSync, mkdtempSync } from "node:fs";
+import { writeFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { engine, FIXTURES } from "./helpers.mjs";
@@ -173,4 +173,42 @@ test("socket call parses the shipped stack.example.yaml structure (yaml subset p
   assert.match(r.json.reason, /nonesuch/);
   assert.ok(r.json.known_sockets.includes("deploy-harness"), "parsed socket names: " + r.json.known_sockets);
   assert.ok(r.json.known_sockets.includes("knowledge"));
+});
+
+function countingStack(fixture) {
+  return `engine_version: "1"
+sockets:
+  flaky:
+    command: "${NODE}"
+    args: ["${join(FIXTURES, fixture)}"]
+    version: "builtin"
+    timeout: "10s"
+`;
+}
+
+test("exec exit 1 with a JSON body is not retried and surfaces the body as response", () => {
+  const repo = mkStackRepo(countingStack("exit1-json.mjs"));
+  const counter = join(repo, "count.txt");
+  const r = engine(["socket", "call", "flaky", "--repo", repo], { env: { EXIT1_COUNT_FILE: counter } });
+  assert.equal(r.code, 1, r.stdout + r.stderr);
+  assert.equal(r.json.ok, false);
+  assert.deepEqual(r.json.response, { error: "rate limited", code: 429 });
+  assert.equal(readFileSync(counter, "utf8").trim().split("\n").length, 1);
+});
+
+test("exec exit 1 with non-JSON stdout is still retried once", () => {
+  const repo = mkStackRepo(countingStack("exit1-text.mjs"));
+  const counter = join(repo, "count.txt");
+  const r = engine(["socket", "call", "flaky", "--repo", repo], { env: { EXIT1_COUNT_FILE: counter } });
+  assert.equal(r.code, 1, r.stdout + r.stderr);
+  assert.equal(r.json.response, undefined);
+  assert.equal(readFileSync(counter, "utf8").trim().split("\n").length, 2);
+});
+
+test("exec exit 2 with a JSON body keeps the body, so the refusal says why", () => {
+  const repo = mkStackRepo(countingStack("exit2-json.mjs"));
+  const r = engine(["socket", "call", "flaky", "--repo", repo]);
+  assert.equal(r.code, 2, r.stdout + r.stderr);
+  assert.deepEqual(r.json.response, { error: "envelope has no string .result" });
+  assert.match(r.json.reason, /envelope has no string \.result/);
 });
