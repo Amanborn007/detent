@@ -404,6 +404,7 @@ function cmdRunNew(flags) {
   const wantWorktree = !flags["no-worktree"];
   let worktree = null;
   let branch = null;
+  let baseSha = null;
   if (wantWorktree) {
     const head = spawnSync("git", ["-C", repo, "rev-parse", "--verify", "-q", "HEAD"], { encoding: "utf8" });
     if (head.status !== 0) {
@@ -412,6 +413,7 @@ function cmdRunNew(flags) {
         "commit something first, or pass --no-worktree to run without a dedicated worktree",
       );
     }
+    baseSha = head.stdout.trim();
     branch = `sdlc/${runId}`;
     worktree = join(runDir, "worktree");
     mkdirSync(runDir, { recursive: true });
@@ -431,6 +433,7 @@ function cmdRunNew(flags) {
     repo,
     worktree,
     branch,
+    base_sha: baseSha,
     created_at: nowIso(),
   });
   const stages = {};
@@ -728,6 +731,13 @@ function cmdStageEnd(stage, flags) {
   if (entry.status !== "in_progress" && entry.status !== "blocked") {
     refuse(`cannot end '${stage}': it is '${entry.status}', not in_progress (was it ever begun?)`,
       `engine stage begin ${stage} --run ${runId} --repo ${repo}`);
+  }
+  const endBlockers = pendingBlockers(loadDecisions(runDir), stage);
+  if (endBlockers.length > 0) {
+    const ids = endBlockers.map((d) => d.id);
+    refuse(`cannot end '${stage}': pending decision(s) block it: ${ids.join(", ")}`,
+      `engine gate open ${endBlockers[0].gate || ids[0]} --run ${runId} --repo ${repo}`,
+      { blocked_on: ids });
   }
   // Required artifacts per CONTRACT.md. Every missing one is named, so a single
   // re-run fixes them all rather than one refusal per file.
@@ -1181,7 +1191,9 @@ function runExec(entry, payload, stackPath, providerName) {
     timeout,
   });
   let r = attempt();
-  if (r.status === 1) {
+  // A JSON body on exit 1 is a deliberate provider answer, so retrying cannot change it.
+  const jsonBody = (x) => { try { return JSON.parse(x.stdout); } catch { return undefined; } };
+  if (r.status === 1 && jsonBody(r) === undefined) {
     process.stderr.write(`warning: provider '${providerName}' exited 1, retrying once\n`);
     r = attempt();
   }
@@ -1189,7 +1201,13 @@ function runExec(entry, payload, stackPath, providerName) {
     return { ok: false, code: 1, stderr: `spawn failed: ${r.error.message}` };
   }
   if (r.status !== 0) {
-    return { ok: false, code: r.status === 2 ? 2 : 1, stderr: (r.stderr || "").trim() };
+    const body = r.status === 1 ? jsonBody(r) : undefined;
+    return {
+      ok: false,
+      code: r.status === 2 ? 2 : 1,
+      stderr: (r.stderr || "").trim(),
+      ...(body !== undefined ? { response: body } : {}),
+    };
   }
   try {
     return { ok: true, code: 0, response: JSON.parse(r.stdout) };
@@ -1248,7 +1266,8 @@ function cmdSocketCall(name, flags) {
     if (!r.ok) {
       const msg = `socket '${name}' exec provider failed (exit ${r.code}): ${r.stderr}`;
       if (r.code === 2) refuse(msg, "the provider rejected the request as a contract violation — fix the payload or the provider");
-      fail(msg, "check the provider command in stack.yaml, then re-invoke");
+      fail(msg, "check the provider command in stack.yaml, then re-invoke",
+        r.response !== undefined ? { response: r.response } : {});
     }
     out({
       ok: true,
