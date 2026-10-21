@@ -27,17 +27,17 @@ in `stack.yaml` — these files must stay generic.
 
 ## How a run flows today (manual)
 
-The stages are ordinary skills invoked by hand; state lives in files, so nothing has
+Each stage is a SKILL.md that `/detent:continue` hands to your session; state lives in files, so nothing has
 to stay resident between invocations.
 
-1. In the target repo: `/sdlc-intake PROJ-2534`.
+1. In the target repo: `detent start your-org/notify-service#2534`, then `/detent:continue` for intake.
    - Fetches the ticket with `detent socket call ticket`, per `stack.yaml`.
    - Creates `${DETENT_ROOT}/.sdlc/2026-07-04-proj-2534-<slug>/` (centralized in
      the detent clone, with the run's git worktree by default) with `run.json`,
      `stage-status.json`, `brief.md`, and pending `D-*` blocks in `decisions.json`.
 2. Inspect the brief yourself: `cat .sdlc/<run-id>/brief.md`. The open questions are
    listed both there (U1..Un) and in `decisions.json` (D-001..).
-3. `/sdlc-research <run-id>`.
+3. Run the research stage (`/detent:continue`, which reads `engine/stages/research/SKILL.md`).
    - Refuses to run unless `intake` is `done`.
    - Fans out (knowledge providers, skill discovery, repo archaeology), writes
      `research.md`, may append more pending decisions.
@@ -47,18 +47,18 @@ to stay resident between invocations.
    `decisions.json` to set `status: "answered"` with your answer — a human
    hand-editing the file is the fallback gate mechanism; agents still never invent
    answers.
-5. `/sdlc-plan <run-id>` — writes `plan/plan.md`, runs the fresh-context intent
+5. Run the plan stage (`/detent:continue`, which reads `engine/stages/plan/SKILL.md`) — writes `plan/plan.md`, runs the fresh-context intent
    check, renders the curator artifact, and parks at the hard plan gate. No decision
    with `implement` in its `blocks` may be pending when implementation starts — that
    is the contract's gate rule, and it holds whether the run is driven manually or by
    the engine.
-6. `/sdlc-implement <run-id>` — refuses to run in the primary checkout; TDD commits
+6. Run the implement stage (`/detent:continue`, which reads `engine/stages/implement/SKILL.md`) — refuses to run in the primary checkout; TDD commits
    in a disposable worktree; no push.
-7. `/sdlc-recheck <run-id>` — fresh-context drift check; material drift gates ship
+7. Run the recheck stage (`/detent:continue`, which reads `engine/stages/recheck/SKILL.md`) — fresh-context drift check; material drift gates ship
    via pending decisions.
-8. `/sdlc-ship <run-id>` — review/verify/docs/lint, then asks the human before push +
+8. Run the ship stage (`/detent:continue`, which reads `engine/stages/ship/SKILL.md`) — review/verify/docs/lint, then asks the human before push +
    draft PR. You mark the PR ready when you want the standing loop armed.
-9. `/sdlc-respond <run-id>` — the standing bot-comment loop, until every blocking
+9. Run the respond stage (`/detent:continue`, which reads `engine/stages/respond/SKILL.md`) — the standing bot-comment loop, until every blocking
    finding is closed and the bots are clean, or the `config.max_iterations` cap
    (default 10) parks it for a human. Merging stays a human click.
 

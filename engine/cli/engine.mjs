@@ -28,6 +28,7 @@ import { runBenchmark, checkpointBenchmark, ledgerLine } from "../bench/bench.mj
 import { runEval, EvalRefusal, resolveEvalRoots } from "../eval/eval.mjs";
 import { loadRoutingConfig, tierOf, advisorConsultEvent } from "../routing/routing.mjs";
 import { renderText } from "./render.mjs";
+import { detectTagger } from "../index/lib/tagger-ts.mjs";
 import { readSteps, renderLiveHtml, isRunComplete, STEP_KINDS, STEP_STATUSES } from "./liveview.mjs";
 import { loadRunState, buildNote, checkSufficiency, currentStage, optionKey } from "../handoff/handoff.mjs";
 import { analyzeSpend, trackingLine, compareTracking } from "../spend/spend.mjs";
@@ -81,7 +82,7 @@ const STAGE_END_GATES = {
 
 // There is no `engine` binary on PATH; under the detent wrapper, name the one that exists.
 function forCaller(text) {
-  return process.env.DETENT_CLI === "1" ? text.replace(/\bengine (?=(?:setup|run|stage|gate|drive|socket|next|dashboard|live|bench|eval|pack|respond|step|advisor|handoff|attempt|env|decide-why|spend|start|status|continue|decide|approve|revise|doctor|help)\b)/g, "detent ") : text;
+  return process.env.DETENT_CLI === "1" ? text.replace(/\bengine (?=(?:setup|run|stage|gate|drive|runtime|socket|next|dashboard|live|bench|eval|pack|respond|step|advisor|handoff|attempt|env|decide-why|spend|start|status|continue|decide|approve|revise|doctor|help)\b)/g, "detent ") : text;
 }
 
 // process.exit() drops a buffered stream write, and a pipe truncates past ~8KB.
@@ -458,6 +459,21 @@ function nextDecisionId(decisions) {
 function isUnresolvedJudgment(d) {
   return d.cause === "judgment" && typeof d.answer === "string" &&
     d.answer.trim().toLowerCase() === PROCEED_DEGRADED_ANSWER;
+}
+
+// Answering a gate must also clear the stage block that gate raised, or every later status read shows the stage waiting.
+function releaseAnsweredBlocks(runDir, decisions) {
+  const status = loadStatus(runDir);
+  let changed = false;
+  for (const [stage, entry] of Object.entries(status.stages)) {
+    if (entry.status !== "blocked") continue;
+    const open = decisions.some((d) => (entry.blocked_on || []).includes(d.id) && (d.status === "pending" || isUnresolvedJudgment(d)));
+    if (open) continue;
+    const raisedAtEnd = decisions.some((d) => (entry.blocked_on || []).includes(d.id) && STAGE_END_GATES[stage]?.name === d.gate);
+    status.stages[stage] = { status: raisedAtEnd ? "in_progress" : "pending", updated_at: nowIso() };
+    changed = true;
+  }
+  if (changed) saveStatus(runDir, status);
 }
 
 function pendingBlockers(decisions, stage) {
@@ -1369,6 +1385,7 @@ function applyFeedback(runDir, items) {
   }
   if (answered.length) saveDecisions(runDir, decisions);
   syncGateAnsweredEvents(runDir, decisions);
+  releaseAnsweredBlocks(runDir, decisions);
   return { answered, unresolved, feedback, pending: decisions.filter((d) => d.status === "pending" || isUnresolvedJudgment(d)).map((d) => d.id) };
 }
 
@@ -1428,6 +1445,11 @@ function driveInjection() {
 async function cmdDriveEntry(flags) {
   const { cmdDrive } = await import("./drive/drive.mjs");
   return cmdDrive(flags, driveInjection());
+}
+
+async function cmdRuntimeEntry(sub, flags) {
+  const { cmdRuntime } = await import("../runtime/cli.mjs");
+  return cmdRuntime(sub, flags, { out, refuse, fail });
 }
 
 // ---------------------------------------------------------------------------
@@ -2371,12 +2393,33 @@ function originOf(repo) {
   return m ? { owner: m[1], repo: m[2] } : { raw: r.stdout.trim() };
 }
 
-/** Hook for the indexing lane: runs after setup and before the run is created. */
-function prepareContextIndex(_repo, _ticket) {}
+/** Runs after setup and before the run is created, so run new can read suggested.verify from the index. */
+function prepareContextIndex(repo) {
+  const INDEX = join(ENGINE_ROOT, "index", "index.mjs");
+  const ix = (...args) => spawnSync(process.execPath, [INDEX, ...args, "--repo", repo], { encoding: "utf8", env: process.env });
+  const stop = (what, r) => {
+    const detail = (r.stderr || r.stdout || r.error?.message || "").trim().slice(-400);
+    process.stderr.write(`index: ${what} failed: ${detail}\n`);
+    refuse(`indexing ${repo} failed (${what}): ${detail}`, "fix the error above, or re-run with --no-index to start without an index");
+  };
+  const st = ix("status");
+  if (st.status !== 0) stop("status", st);
+  let state;
+  try { state = JSON.parse(st.stdout.trim().split("\n").pop()).state; } catch { stop("status printed no JSON", st); }
+  const verb = state === "missing" ? "build" : state === "stale" ? "refresh" : null;
+  if (verb) {
+    const b = ix(verb);
+    if (b.status !== 0) stop(verb, b);
+  }
+  const dir = join(repo, ".detent", "index");
+  const m = readJson(join(dir, "manifest.json"));
+  const symbols = readFileSync(join(dir, "symbols.jsonl"), "utf8").split("\n").filter(Boolean).length;
+  process.stderr.write(`index: ${verb || "fresh"}: ${Object.keys(m.files).length} files, ${symbols} symbols, tagger ${m.tagger}\n`);
+}
 
 function cmdStart(ticket, flags) {
   const parsed = parseTicketRef(ticket);
-  if (!parsed) refuse(`start needs a ticket as owner/repo#N, got '${ticket ?? ""}'`, "detent start <owner/repo#N> [--repo .] [--slug s]");
+  if (!parsed) refuse(`start needs a ticket as owner/repo#N, got '${ticket ?? ""}'`, "detent start <owner/repo#N> [--repo .] [--slug s] [--no-index]");
   const repo = repoOf(flags);
   const origin = originOf(repo);
   if (!origin) refuse(`${repo} has no origin remote, so it cannot be matched to ${ticket}`, "git remote add origin <url>, then re-run");
@@ -2390,7 +2433,7 @@ function cmdStart(ticket, flags) {
     const s = selfJson(["setup", "--repo", repo]);
     if (!s.json.ok) relay(s);
   }
-  prepareContextIndex(repo, ticket);
+  if (flags["no-index"] !== true) prepareContextIndex(repo);
   const created = selfJson(["run", "new", "--ticket", ticket, "--repo", repo, ...(flags.slug && flags.slug !== true ? ["--slug", String(flags.slug)] : [])]);
   if (!created.json.ok) relay(created);
   out({
@@ -2400,7 +2443,7 @@ function cmdStart(ticket, flags) {
     setup: hasStack ? "present" : "ran",
     worktree: created.json.worktree,
     stage: "intake",
-    next_step: "detent continue — an agent writes the brief for the intake stage. Use detent status any time to see where the run stands.",
+    next_step: "detent continue. An agent writes the brief for the intake stage. Use detent status any time to see where the run stands.",
   });
 }
 
@@ -2445,7 +2488,7 @@ async function cmdContinue(flags) {
   }
   const passthrough = ["claude-bin", "model", "budget", "profile", "stack", "child-timeout-sec"].flatMap((k) => (flags[k] && flags[k] !== true ? [`--${k}`, String(flags[k])] : []));
   const r = spawnSync(process.execPath, [ENGINE_FILE, "drive", "--run", runId, "--max-steps", "1", ...passthrough, ...(WANT_JSON ? ["--json"] : [])],
-    { stdio: "inherit", env: process.env });
+    { stdio: "inherit", env: { ...process.env, DETENT_VERB: "continue" } });
   process.exit(r.status ?? 1);
 }
 
@@ -2525,11 +2568,12 @@ function cmdAnswer(verb, id, flags) {
   saveDecisions(runDir, decisions);
   appendEvent(runDir, { event: "decision_answered", decision_id: d.id, answer: verb, answered_by: "human", answered_via: "terminal" });
   syncGateAnsweredEvents(runDir, decisions);
+  releaseAnsweredBlocks(runDir, decisions);
   out({
     ok: true, run_id: runId, ticket, decision_id: d.id, answer: verb,
     next_step: verb === "approve"
-      ? "detent continue — the run moves on to the next stage"
-      : "detent continue — the plan stage picks up your note and revises",
+      ? "detent continue. The run moves on to the next stage."
+      : "detent continue. The plan stage picks up your note and revises.",
   });
 }
 
@@ -2583,6 +2627,9 @@ function cmdDoctor(flags) {
   }
   if (process.env.DETENT_ROOT) add("DETENT_ROOT", true, process.env.DETENT_ROOT);
   else add("DETENT_ROOT", false, `not set; falling back to the detent clone this CLI lives in: ${detentRoot()}`, true);
+  const tagger = detectTagger(process.env);
+  if (tagger.tagger === "tree-sitter") add("index tagger", true, "tree-sitter");
+  else add("index tagger", !!tagger.forced, `regex (${tagger.reason})`, true);
   const failed = checks.filter((c) => c.status === "FAIL");
   out({
     ok: failed.length === 0, checks,
@@ -2590,7 +2637,7 @@ function cmdDoctor(flags) {
   }, failed.length ? 1 : 0);
 }
 
-const USAGE = "engine <start|status|continue|decide|approve|revise|doctor|setup|run new|stage begin|stage end|gate open|gate collect|drive|socket call|next|dashboard|live|bench|eval|pack validate|respond|step|advisor consult|handoff|attempt|env|decide-why|spend|help> — see engine/cli/README.md";
+const USAGE = "engine <start|status|continue|decide|approve|revise|doctor|setup|run new|stage begin|stage end|gate open|gate collect|drive|runtime run|runtime capabilities|socket call|next|dashboard|live|bench|eval|pack validate|respond|step|advisor consult|handoff|attempt|env|decide-why|spend|help> — see engine/cli/README.md";
 
 /**
  * cmdEval — wraps engine/eval/eval.mjs's runEval() for `engine eval`. An
@@ -3190,7 +3237,7 @@ function cmdHelp() {
   out({
     ok: true,
     usage: {
-      "start": "engine start <owner/repo#N> [--repo .] [--slug s] — the friendly way in: refuses unless the repo's origin is that owner/repo, runs setup when stack.yaml is missing, then run new. Machine layer: setup, run new",
+      "start": "engine start <owner/repo#N> [--repo .] [--slug s] — the friendly way in: refuses unless the repo's origin is that owner/repo, runs setup when stack.yaml is missing, builds or refreshes the repo index (skip with --no-index), then run new. Machine layer: setup, index, run new",
       "status": "engine status [--run <ref>] — readable view of the run (stages, pending gates, next step). With --json it is `next` plus a `stages` map",
       "continue": "engine continue [--yes] [--run <ref>] — run exactly one drive step (--max-steps 1) after printing the budget. Inside Claude Code it spawns nothing and names the stage SKILL.md for this session to run. Machine layer: drive",
       "decide": "engine decide [--run <ref>] — answer the waiting gate: gate open, curator open, block on curator poll, gate collect. Without curator it prints the terminal fallback. Machine layer: gate open, gate collect",
@@ -3204,6 +3251,8 @@ function cmdHelp() {
       "gate open": "engine gate open <gate-name-or-decision-id> [--run <id>] [--repo <path>] — render a pending human gate; with the bundled curator CLI present it writes <DETENT_ROOT>/.plans/<run>-<gate>.html (one data-plan-question block per pending decision, stage artifacts embedded) and prints `curator open` then `engine gate collect`",
       "gate collect": "engine gate collect --run <id> [--file <feedback.json>] — non-blocking: map curator answers into decisions.json (only an exact decision option resolves one; null/other answers stay pending and are listed under `unresolved`); selection/prompt feedback is appended to <run>/review-feedback.jsonl. Without --file it runs `curator drain` for the run's gate pages only.",
       "drive": "engine drive --run <id> [--stack <path>] [--budget 5] [--model claude-sonnet-5-5] [--max-steps 12] [--child-timeout-sec 3600] [--profile <file>] [--claude-bin <b>] — experimental (macOS/Linux, spends Claude credit): runs intake, research and plan with one contained `claude -p --restricted` child per stage (file tools only, no Bash, allowlisted env, read-only repo export, outbox validated by drive), then always stops: at the plan gate or a decision (stopped:needs_human), at before_implement, at --max-steps, at --budget, or on a failure (state_tampered, outbox_rejected, secret_detected, child_*). Child text goes to <run>/drive-last.json, never stdout. --allow-ship is refused; implement and ship stay interactive.",
+      "runtime run": "engine runtime run [--runtime <name>] [--bin <path>] — run one prompt through a model runtime (default claude-code; --runtime beats DETENT_RUNTIME). Request JSON on stdin (prompt, cwd, output, tools, mcp, settings are required; schema in engine/runtime/CONTRACT.md). Prints one JSON line {ok:true, ...response} and exits 0 for stop ok|budget|turns, exits 1 {ok:false, reason, next_step, response} for stop error|timeout, and exits 2 for bad JSON, an unknown field, an unknown runtime, or a field the runtime does not declare",
+      "runtime capabilities": "engine runtime capabilities [--runtime <name>] — print what the runtime declares it can do; a request field outside that is refused, never dropped",
       "socket call": "engine socket call <name> [--payload-file <json>] [--stack <path>] — dispatch a socket per stack.yaml",
       "next": "engine next [--run <id>] [--repo <path>] — print the exact next command for the current run",
       "dashboard": "engine dashboard — render ALL runs under <DETENT_ROOT>/.sdlc/ into one curator artifact (stage, status, pending gates, age)",
@@ -3244,6 +3293,7 @@ function main() {
   if (a === "gate" && b === "open") return cmdGateOpen(c, flags);
   if (a === "gate" && b === "collect") return cmdGateCollect(flags);
   if (a === "drive") return cmdDriveEntry(flags);
+  if (a === "runtime") return cmdRuntimeEntry(b, flags);
   if (a === "socket" && b === "call") return cmdSocketCall(c, flags);
   if (a === "next") return cmdNext(flags);
   if (a === "dashboard") return cmdDashboard();

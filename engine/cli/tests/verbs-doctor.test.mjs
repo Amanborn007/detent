@@ -1,7 +1,7 @@
 // verbs-doctor.test.mjs — `doctor` is one line per check and exits 1 if any fail.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, mkdirSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { engine, mkCuratorClone, mkRepo, detentHome } from "./helpers.mjs";
@@ -88,4 +88,44 @@ test("doctor with DETENT_ROOT unset warns with the fallback path and still exits
   assert.equal(c.status, "WARN", r.stdout);
   assert.match(c.detail, /detent/);
   assert.ok(c.detail.includes(resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..")), c.detail);
+});
+
+function indexDir({ installed }) {
+  const dir = scratch();
+  writeFileSync(join(dir, "package.json"), "{}");
+  if (installed) {
+    for (const pkg of ["web-tree-sitter", "tree-sitter-wasms"]) {
+      mkdirSync(join(dir, "node_modules", pkg), { recursive: true });
+      writeFileSync(join(dir, "node_modules", pkg, "package.json"), JSON.stringify({ name: pkg, main: "index.js" }));
+      writeFileSync(join(dir, "node_modules", pkg, "index.js"), "");
+    }
+  }
+  return dir;
+}
+
+test("doctor reports the tree-sitter tagger as PASS when the deps resolve", () => {
+  const { repo, env } = healthy();
+  const r = engine(["doctor"], { cwd: repo, env: { ...env, DETENT_INDEX_DIR: indexDir({ installed: true }) } });
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  const c = byName(r, "index tagger");
+  assert.equal(c.status, "PASS", r.stdout);
+  assert.equal(c.detail, "tree-sitter");
+});
+
+test("doctor warns with the install command when tree-sitter is missing, and still exits 0", () => {
+  const { repo, env } = healthy();
+  const dir = indexDir({ installed: false });
+  const r = engine(["doctor"], { cwd: repo, env: { ...env, DETENT_INDEX_DIR: dir } });
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  const c = byName(r, "index tagger");
+  assert.equal(c.status, "WARN", r.stdout);
+  assert.equal(c.detail, `regex (tree-sitter not installed; for better symbols run: npm i --prefix ${dir} --registry=https://registry.npmjs.org/)`);
+});
+
+test("doctor honours DETENT_INDEX_TAGGER=regex with a PASS line", () => {
+  const { repo, env } = healthy();
+  const r = engine(["doctor"], { cwd: repo, env: { ...env, DETENT_INDEX_DIR: indexDir({ installed: false }), DETENT_INDEX_TAGGER: "regex" } });
+  const c = byName(r, "index tagger");
+  assert.equal(c.status, "PASS", r.stdout);
+  assert.equal(c.detail, "regex (forced by DETENT_INDEX_TAGGER=regex)");
 });

@@ -206,7 +206,7 @@ Start with the friendly verbs. The rows after them are the machine layer, which 
 | Command | What it does |
 |---|---|
 | `detent doctor` | One line per check: node 20 or newer, git, `gh` login and push access to the origin repo, curator, `stack.yaml` and its socket commands, `DETENT_ROOT`. Exit 1 if any fail. |
-| `detent start <owner/repo#N> [--repo .] [--slug s]` | Refuse unless `origin` matches the ticket's repo, run `setup` if `stack.yaml` is missing, then create the run. |
+| `detent start <owner/repo#N> [--repo .] [--slug s] [--no-index]` | Refuse unless `origin` matches the ticket's repo, run `setup` if `stack.yaml` is missing, build or refresh the repo index (one line with file and symbol counts; an index error refuses unless `--no-index`), then create the run. |
 | `detent status` | The run's stages, waiting gates and next step. With `--json` it is `next` plus a `stages` map. |
 | `detent continue [--yes]` | Run one drive step after printing the budget. Inside Claude Code it prints the stage `SKILL.md` path and the run id instead. |
 | `detent decide` | Answer the waiting gate in curator, or print the terminal fallback when curator is missing. |
@@ -260,7 +260,7 @@ Machine layer:
 
 **What reads it.** The research stage runs `detent index status` first and reads `profile.md` before anything else. Plan and recheck use `cochange` to catch a file edited without its usual partner. The `repo-index-knowledge` adapter serves the index to the knowledge socket, and `detent setup` adds it to the starter `stack.yaml`. When a profile exists, `detent run new` writes `suggested.verify` (`source: "index"` and the command) into the run's `env.json`. It does not write `commands.verify`, because `detent drive` turns that into a Bash permission.
 
-**Tree-sitter, optionally.** The core is plain Node 20 with no installs and tags definitions with regular expressions for JavaScript, TypeScript, Python, Go, Java and Rust. For exact tags, run `npm i --prefix engine/index` to add `web-tree-sitter` and `tree-sitter-wasms`, which are optional dependencies. When they load, `manifest.json` records `tree-sitter` as the tagger; when they do not, the index falls back to regex and notes why. Set `DETENT_INDEX_TAGGER=regex` to force the regex tagger.
+**Tree-sitter, optionally.** The core is plain Node 20 with no installs and tags definitions with regular expressions for JavaScript, TypeScript, Python, Go, Java and Rust. For exact tags, run `npm i --prefix engine/index --registry=https://registry.npmjs.org/` to add `web-tree-sitter` and `tree-sitter-wasms`, which are optional dependencies. npm skips optional packages that fail to install without an error, so a private or mirrored registry that lacks them leaves you on the regex tagger; `detent doctor` shows which tagger is active. When they load, `manifest.json` records `tree-sitter` as the tagger; when they do not, the index falls back to regex and notes why. Set `DETENT_INDEX_TAGGER=regex` to force the regex tagger.
 
 ## Hooks
 

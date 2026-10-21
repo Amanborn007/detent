@@ -1,9 +1,9 @@
 ---
-name: sdlc-implement
-description: SDLC engine stage 5 — execute the approved plan in a DISPOSABLE git worktree (the skill refuses to touch code in the primary checkout), strict TDD for every behavior change, small ticket-prefixed commits, and run state written ONLY to ${DETENT_ROOT}/.sdlc/ — the worktree must be deletable at any moment with zero engine-state loss. No push; pushing belongs to ship. Trigger: /sdlc-implement <run-id>.
+name: implement
+description: SDLC engine stage 5 — execute the approved plan in a DISPOSABLE git worktree (the skill refuses to touch code in the primary checkout), strict TDD for every behavior change, small ticket-prefixed commits, and run state written ONLY to ${DETENT_ROOT}/.sdlc/ — the worktree must be deletable at any moment with zero engine-state loss. No push; pushing belongs to ship.
 ---
 
-# sdlc-implement — approved plan in, committed worktree out
+# implement — approved plan in, committed worktree out
 
 Contract: `engine/stages/CONTRACT.md`. Input: `plan/plan.md` + answered decisions.
 Output: commits on a ticket-named branch in a disposable worktree. This stage owns the

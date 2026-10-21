@@ -50,6 +50,21 @@ function specKey(path) {
   return langOf(path);
 }
 
+const INSTALL = "--registry=https://registry.npmjs.org/";
+
+// Resolution only, no wasm init, so doctor can stay synchronous. `dir` is injectable for tests.
+export function detectTagger(env = process.env, dir = env.DETENT_INDEX_DIR || join(HERE, "..")) {
+  if (env.DETENT_INDEX_TAGGER === "regex") return { tagger: "regex", reason: "forced by DETENT_INDEX_TAGGER=regex", forced: true };
+  const req = createRequire(join(dir, "package.json"));
+  try {
+    req.resolve("web-tree-sitter");
+    req.resolve("tree-sitter-wasms/package.json");
+  } catch (e) {
+    return { tagger: "regex", reason: `tree-sitter not installed; for better symbols run: npm i --prefix ${dir} ${INSTALL}`, code: e.code };
+  }
+  return { tagger: "tree-sitter", reason: "" };
+}
+
 export async function loadTreeSitter() {
   let mod, wasmDir;
   try {

@@ -510,7 +510,9 @@ function stopForHuman(E, ctx, stage, blockers, collectError) {
   const ids = blockers.map((d) => d.id);
   return stopOk(E, ctx, "needs_human", {
     stage, decisions: ids, html, ...(url ? { url } : {}), ...(collectError ? { collect_error: true } : {}),
-    next_step: `answer in curator${url ? ` (${url})` : ` (open ${html})`}, then run: detent drive --run ${runId}`,
+    next_step: process.env.DETENT_VERB
+      ? "answer the gate with detent decide (or detent approve / detent revise at your own terminal), then detent continue"
+      : `answer in curator${url ? ` (${url})` : ` (open ${html})`}, then run: detent drive --run ${runId}`,
   });
 }
 
@@ -755,12 +757,12 @@ export async function cmdDrive(flags, E) {
 
     // action === "spawn"
     if (ctx.steps >= maxSteps) {
-      return stopOk(E, ctx, "max_steps", { stage, next_step: `detent drive --run ${runId} to continue` });
+      return stopOk(E, ctx, "max_steps", { stage, next_step: process.env.DETENT_VERB ? "detent continue" : `detent drive --run ${runId} to continue` });
     }
     const remaining = budget - ctx.spent;
     if (remaining < BUDGET_FLOOR_USD) {
       return stopOk(E, ctx, "budget", {
-        stage, next_step: `spent ${round(ctx.spent)} of ${budget} USD; raise it and continue: detent drive --run ${runId} --budget <usd>`,
+        stage, next_step: `spent ${round(ctx.spent)} of ${budget} USD; raise it and continue: ${process.env.DETENT_VERB ? "detent continue" : `detent drive --run ${runId}`} --budget <usd>`,
       });
     }
     if (["pending", "blocked"].includes(status.stages[stage].status)) {
@@ -838,7 +840,7 @@ export async function cmdDrive(flags, E) {
     if (result.subtype === "error_max_budget_usd") {
       if (cost === null) return stopFail(E, ctx, "child_no_cost", "the result lacks total_cost_usd, so the budget cannot be enforced", { stage });
       return stopOk(E, ctx, "budget", {
-        stage, next_step: `spent ${round(ctx.spent)} of ${budget} USD; raise it and continue: detent drive --run ${runId} --budget <usd>`,
+        stage, next_step: `spent ${round(ctx.spent)} of ${budget} USD; raise it and continue: ${process.env.DETENT_VERB ? "detent continue" : `detent drive --run ${runId}`} --budget <usd>`,
       });
     }
     if (result.subtype === "error_max_turns") return stopFail(E, ctx, "child_max_turns", "the stage ran out of turns; inspect drive-last.json", { stage });

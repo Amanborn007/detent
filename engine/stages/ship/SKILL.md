@@ -1,9 +1,9 @@
 ---
-name: sdlc-ship
-description: SDLC engine stages 7–8 as ONE skill with ordered sub-steps — review (own generic pass + the reviewer socket; findings routed no-op/auto-fix/ask-user, ask-user filed VERBATIM as pending decisions), verify (verifier socket; end-to-end evidence artifacts required — unit tests passing is not sufficient; ungatherable evidence triggers the evidence-unblock protocol: flag the gap, propose concrete unblock pathways, wait — never a silent pass/fail), docs (conditional on public behavior change), lint, then the hard human ship gate: the skill presents the evidence manifest and asks BEFORE any push or gh pr create. Output is a pushed branch + DRAFT PR with evidence attached; the human, not the skill, marks it ready. Owns the ship key. Trigger: /sdlc-ship <run-id>.
+name: ship
+description: SDLC engine stages 7–8 as ONE skill with ordered sub-steps — review (own generic pass + the reviewer socket; findings routed no-op/auto-fix/ask-user, ask-user filed VERBATIM as pending decisions), verify (verifier socket; end-to-end evidence artifacts required — unit tests passing is not sufficient; ungatherable evidence triggers the evidence-unblock protocol: flag the gap, propose concrete unblock pathways, wait — never a silent pass/fail), docs (conditional on public behavior change), lint, then the hard human ship gate: the skill presents the evidence manifest and asks BEFORE any push or gh pr create. Output is a pushed branch + DRAFT PR with evidence attached; the human, not the skill, marks it ready. Owns the ship key.
 ---
 
-# sdlc-ship — review → verify → docs → lint → gated push + draft PR
+# ship — review → verify → docs → lint → gated push + draft PR
 
 Contract: `engine/stages/CONTRACT.md`. Sockets consumed: `reviewer`
 (`sockets/reviewer.md`) and `verifier` (`sockets/verifier.md`), both invoked per

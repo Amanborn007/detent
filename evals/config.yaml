@@ -27,6 +27,7 @@ suites:
       - "hooks/**"
       - "engine/curator/**"
       - "engine/cli/**"
+      - "engine/runtime/**"
       - "engine/stages/**"
       - "engine/eval/**"
       - "engine/routing/**"

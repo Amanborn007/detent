@@ -14,7 +14,7 @@ The ticket, as the tracker returns it:
 
 ---
 
-## Stage 1 — `/sdlc-intake PROJ-2534`
+## Stage 1 — intake (`detent start your-org/notify-service#2534`)
 
 Intake calls `sockets.ticket` (stack.yaml), creates the run dir in the **notify-service
 repo root**, and distills the ticket. The `fix_env.sh` request trips the
@@ -45,7 +45,7 @@ and a `## Suspicious content` section quoting the `fix_env.sh` ask verbatim.
 
 `stage-status.json`: `intake: done`, everything else `pending`.
 
-## Stage 2 — `/sdlc-research 2026-07-04-proj-2534-retry-webhooks`
+## Stage 2 — `research` (`/detent:continue`)
 
 Research fans out over every knowledge provider in stack.yaml, skill discovery, and
 the repo itself; each finding is attributed and KNOW/GUESS-tagged.
@@ -67,7 +67,7 @@ D-003 ("normal priority"), D-004 ("reuse lib/retry.ts") — via curator when the
 artifact renders them, or by hand-editing `decisions.json`. D-002 stays pending: the
 human wants to see the plan first.
 
-## Stage 3 (+4) — `/sdlc-plan 2026-07-04-proj-2534-retry-webhooks`
+## Stage 3 (+4) — `plan` (`/detent:continue`)
 
 Preconditions hold (`research: done`, nothing blocks `plan`). Plan writes
 `plan/plan.md`:
@@ -137,7 +137,7 @@ The human clicks: D-002 → "5xx + timeouts", D-006 → "drop the dashboard", D-
 (`answered_by: "human"`). `plan: done`. Nothing pending blocks implement anymore —
 the gate opens *because the file state says so*, not because anyone remembers approving.
 
-## Stage 5 — `/sdlc-implement 2026-07-04-proj-2534-retry-webhooks`
+## Stage 5 — `implement` (`/detent:continue`)
 
 Gate check passes (no pending decision blocks implement). Worktree assertion:
 
@@ -162,7 +162,7 @@ ledger records `{"implement": {"status": "done", "worktree_path": "…", "branch
 "PROJ-2534-retry-webhooks", "commits": "9f8e7d6..b0c1d2e"}}`. No push. Deleting the
 worktree now would lose nothing the branch and `.sdlc/` don't hold.
 
-## Stage 6 — `/sdlc-recheck 2026-07-04-proj-2534-retry-webhooks`
+## Stage 6 — `recheck` (`/detent:continue`)
 
 A fresh-context agent (no implement conversation) reads plan + decisions + the diff.
 `recheck.md` verdict table: steps 1, 2, 4 `as-planned` (shas cited); step 3
@@ -182,7 +182,7 @@ Material divergences → the conditional drift gate:
 **Gate moment #2 (conditional — only exists because drift exists).** The human
 answers: D-007 "accept deviation", D-008 "accept, keep the counter".
 
-## Stages 7–8 — `/sdlc-ship 2026-07-04-proj-2534-retry-webhooks`
+## Stages 7–8 — `ship` (`/detent:continue`)
 
 Ordered sub-steps, in the worktree:
 
@@ -207,7 +207,7 @@ Ordered sub-steps, in the worktree:
    plan summary, the evidence manifest, and D-009 with its human answer.
    `ship: done` (PR URL recorded). Still a draft.
 
-## Stage 9 — `/sdlc-respond 2026-07-04-proj-2534-retry-webhooks`
+## Stage 9 — `respond` (`/detent:continue`)
 
 Dormant while #517 is a draft. The human reviews the draft, **marks it ready** — the
 loop arms.

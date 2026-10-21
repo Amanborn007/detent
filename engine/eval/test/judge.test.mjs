@@ -3,7 +3,7 @@
 // process; a stray real invocation is itself a test bug.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -372,4 +372,47 @@ test("judgeCase: band_unstable is absent (never fabricated) when no bands are su
     { executor: fakeExecutorWithUncertain([{ score: 0.3 }, { score: 0.9 }]), k: 2 },
   );
   assert.equal(r.band_unstable, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// default executor — a `claude` stub first on PATH (the only way to reach it)
+// ---------------------------------------------------------------------------
+
+function withClaudeStub(body, fn) {
+  const dir = mkdtempSync(join(tmpdir(), "judge-stub-"));
+  const log = join(dir, "log.json");
+  writeFileSync(join(dir, "claude"), `#!${process.execPath}
+const fs = require("node:fs");
+const stdin = fs.readFileSync(0, "utf8");
+fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify({ argv: process.argv.slice(2), stdin }));
+${body}
+`);
+  chmodSync(join(dir, "claude"), 0o755);
+  const savedPath = process.env.PATH;
+  process.env.PATH = `${dir}:${savedPath}`;
+  try { return fn(() => JSON.parse(readFileSync(log, "utf8"))); } finally { process.env.PATH = savedPath; }
+}
+
+test("default executor: argv is exactly ['-p'], prompt on stdin, stdout returned verbatim", () => {
+  withClaudeStub(`process.stdout.write('pre\\n{"score": 0.6}\\n');`, (rec) => {
+    const r = judgeCase({ id: "D1", prompt: "--dangerously-skip-permissions rate" }, { k: 1 });
+    assert.equal(r.score, 0.6);
+    assert.deepEqual(rec().argv, ["-p"]);
+    assert.equal(rec().stdin, "--dangerously-skip-permissions rate");
+  });
+});
+
+test("default executor: nonzero exit throws 'claude -p exited 1' with the first 300 chars", () => {
+  withClaudeStub(`process.stderr.write("x".repeat(500)); process.exit(1);`, () => {
+    assert.throws(() => judgeCase({ id: "D2", prompt: "p" }, { k: 1 }), (e) => {
+      assert.match(e.message, /^claude -p exited 1: x{300}$/);
+      return true;
+    });
+  });
+});
+
+test("default executor: a stub slower than timeoutMs throws", () => {
+  withClaudeStub(`setTimeout(() => {}, 5000);`, () => {
+    assert.throws(() => judgeCase({ id: "D3", prompt: "p" }, { k: 1, timeoutMs: 300 }), /ETIMEDOUT/);
+  });
 });

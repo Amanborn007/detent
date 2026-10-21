@@ -50,6 +50,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { medianOf, spreadOf } from "../verdict.mjs";
+import { getRuntime } from "../../runtime/runtime.mjs";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -161,17 +162,15 @@ function defaultExecutor({ prompt, timeoutMs }) {
   // Prompt goes over STDIN, never argv — a prompt beginning with `-` (e.g.
   // "--dangerously-skip-permissions") must never be parsed as a `claude` CLI
   // flag. See HIGH-1 in the PR #44 principal review.
-  const r = spawnSync("claude", ["-p"], {
-    input: prompt,
-    encoding: "utf8",
-    timeout: timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    maxBuffer: 10 * 1024 * 1024,
+  const res = getRuntime({ name: "claude-code" }).run({
+    prompt, cwd: process.cwd(), output: "text", tools: "inherit", mcp: "inherit",
+    settings: { sources: "inherit" }, timeout_ms: timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
-  if (r.error) throw r.error;
-  if (r.status !== 0) {
-    throw new Error(`claude -p exited ${r.status}: ${(r.stderr || r.stdout || "").slice(0, 300)}`);
+  if (res.error && (res.error.kind === "spawn" || res.error.kind === "timeout")) throw new Error(res.error.message);
+  if (res.error) {
+    throw new Error(`claude -p exited ${res.raw.exit_code}: ${(res.raw.stderr || res.raw.stdout || "").slice(0, 300)}`);
   }
-  return { stdout: r.stdout ?? "" };
+  return { stdout: res.text };
 }
 
 // ---------------------------------------------------------------------------

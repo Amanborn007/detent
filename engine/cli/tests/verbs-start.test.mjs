@@ -58,3 +58,11 @@ test("start leaves an existing stack.yaml alone", () => {
   assert.equal(second.code, 0, second.stdout + second.stderr);
   assert.equal(second.json.setup, "present");
 });
+
+test("start text output has no en or em dash", () => {
+  const repo = mkRepo();
+  setOrigin(repo, "https://github.com/octo/repo");
+  const r = engine(["start", "octo/repo#1"], { cwd: repo, env: { ...HUMAN, ...probes(), DETENT_FORCE_TTY: "1" } });
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  assert.doesNotMatch(r.stdout, /[\u2013\u2014]/);
+});

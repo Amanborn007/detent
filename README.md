@@ -13,7 +13,24 @@ From `detent setup` to the plan gate in 20 seconds, on the real engine. A stub s
   <img alt="A terminal runs detent setup, then detent run new for a ticket, then the stages one line each, and stops at the plan gate with 'waiting on you: plan approval' and the path of the gate page." src="docs/demo/demo.gif" width="720">
 </p>
 
-<!-- DRIVE-CLIP: add the in-Claude-Code recording here once `detent drive` ships. Script: docs/demo/RECORDING.md -->
+This is a real run of `detent drive` with Claude Haiku 5.5 on a toy repo, with a $1 budget cap. Drive ran intake and research, then stopped because a human has to answer a question before it plans. The JSON is reformatted for reading and paths are shortened.
+
+```
+$ detent drive --run 2026-10-21-acme-widgets-1 --repo ~/demo-repo --budget 1 --model claude-haiku-5-5
+{
+  "ok": true,
+  "run_id": "2026-10-21-acme-widgets-1",
+  "stopped": "needs_human",
+  "steps": 2,
+  "total_cost_usd": 0.019042,
+  "total_turns": 28,
+  "budget_usd": 1,
+  "stage": "plan",
+  "decisions": ["D-004"],
+  "html": "~/detent-home/.plans/2026-10-21-acme-widgets-1-D-004.html",
+  "next_step": "answer in curator (open ~/detent-home/.plans/2026-10-21-acme-widgets-1-D-004.html), then run: detent drive --run 2026-10-21-acme-widgets-1"
+}
+```
 
 The plan gate opens as a local page. You click approve or revise.
 
@@ -65,9 +82,16 @@ Open a new shell, go to any branch with changes, and run this in Claude Code. It
 
 It reads your own diff and lists the comments, defensive try/catch blocks and `any` casts it would remove. It changes nothing until you say yes.
 
+Two recorded walkthroughs show a ticket moving through detent, both offline or replayable:
+
+- **Terminal:** `detent doctor`, `start`, `status`, `continue`, `decide` and `approve` against a throwaway repo. The script is [docs/demo/terminal.tape](docs/demo/terminal.tape); see it as [docs/demo/terminal.gif](docs/demo/terminal.gif), re-render it with `vhs docs/demo/terminal.tape`, or run the same commands without vhs with `bash docs/demo/terminal-smoke.sh`.
+- **Claude Code:** a real `/detent:status` and `/detent:continue` session, captured with `claude -p --output-format stream-json`. Open [docs/demo/claude-code.html](docs/demo/claude-code.html) in a browser, or read the raw captures in [docs/demo/transcripts/](docs/demo/transcripts/).
+
 ## Drive a ticket
 
-Check your setup first, then start from a clone of the ticket's repo:
+Check your setup first, then start from a clone of the ticket's repo. Pick the track that matches where you work.
+
+**Terminal**
 
 ```sh
 detent doctor
@@ -77,7 +101,15 @@ detent continue
 detent status
 ```
 
-`start` refuses if the clone's `origin` is a different repo, runs `detent setup` when `stack.yaml` is missing, and creates the run. `continue` runs one step. `status` shows the stages, any gate waiting on you, and the next step in words. You never type a run id, because detent picks the newest unfinished run for the repo you are in.
+**Claude Code**
+
+```
+/detent:start your-org/your-repo#123
+/detent:continue
+/detent:status
+```
+
+`start` refuses if the clone's `origin` is a different repo, runs `detent setup` when `stack.yaml` is missing, and creates the run. `continue` runs one step. In a terminal it starts a headless Claude after you confirm the budget. In Claude Code it runs the stage in your session instead. `status` shows the stages, any gate waiting on you, and the next step in words. You never type a run id, because detent picks the newest unfinished run for the repo you are in.
 
 When a gate waits for you, answer it yourself:
 
@@ -86,7 +118,7 @@ detent decide      # opens the gate in curator and waits for your answer
 detent approve     # or answer the plan gate right here in your terminal
 ```
 
-An agent cannot run `approve` or `revise`. They refuse inside Claude Code, inside a drive child, and without a terminal.
+An agent cannot run `approve` or `revise`. They refuse inside Claude Code, inside a drive child, and without a terminal. In Claude Code, `/detent:continue` opens the gate with `detent decide` and waits for you.
 
 ## It works the way you already do
 
