@@ -1,0 +1,9 @@
+{"type":"system","subtype":"init","session_id":"s1","tools":["Bash","Read"],"model":"claude-sonnet-5-5"}
+{"type":"system","subtype":"hook_started","hook_name":"SessionStart:startup","session_id":"s1"}
+{"type":"user","message":{"role":"user","content":"/detent:status"},"session_id":"s1"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I will check where the run stands."},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"node /plugin/engine/cli/detent.mjs status","description":"Show run status"}}]},"session_id":"s1"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"Run demo-1 (acme/widgets#1)\n  ✓ intake\n  · research\n  · plan\n  · implement\n  · recheck\n  · ship\n  · respond\nNext: detent continue <script>alert(1)</script>"}]},"session_id":"s1"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_2","name":"Read","input":{"file_path":"/work/missing.md"}}]},"session_id":"s1"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_2","is_error":true,"content":[{"type":"text","text":"File does not exist."}]}]},"session_id":"s1"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Intake is done. Research is next, and `detent continue` runs it."}]},"session_id":"s1"}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":4200,"num_turns":3,"total_cost_usd":0.0123,"result":"Intake is done."}
