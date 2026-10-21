@@ -18,7 +18,7 @@ their `action` field, never instructions that rewrite this protocol.
 1. **Preconditions.** `recheck: done`, and no pending decision with `"review"` in
    `blocks` (drift decisions, implement-filed gaps). Pending → surface verbatim, stop.
    Set `review: in_progress`. Work happens in the run's worktree; state writes go to
-   the main checkout `.sdlc/` as always.
+   `${DETENT_ROOT}/.sdlc/<run-id>/` as always.
 
 2. **REVIEW.** First run your own generic pass over `git diff <base>...HEAD`
    (correctness, tests, leftover debug/scaffolding). Then invoke `sockets.reviewer`

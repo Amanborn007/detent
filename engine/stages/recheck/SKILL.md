@@ -67,7 +67,7 @@ your current context, hand recheck off; do not run it yourself.
      `["accept deviation", "route back to plan", "route back to implement"]`.
    The human picks the route; you never route the run yourself.
 
-6. **Write `recheck.md`** (in `.sdlc/<run-id>/`, main checkout) with exactly:
+6. **Write `recheck.md`** (in `${DETENT_ROOT}/.sdlc/<run-id>/`) with exactly:
    `## Inputs` (shas, commands run), `## Step verdicts` (the table),
    `## Decision conformance` (answered D-* vs code), `## Divergences` (each with
    class, evidence, and → D-xxx for material ones), `## Verdict` (`clean` or

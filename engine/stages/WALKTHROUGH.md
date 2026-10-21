@@ -157,7 +157,7 @@ c7d8e9f PROJ-2534: move retry scheduling off the delivery hot path
 b0c1d2e PROJ-2534: classify 5xx + timeouts as retryable [D-002]         (matrix test first)
 ```
 
-All `.sdlc/` writes go to the **main checkout** (resolved via `--git-common-dir`); the
+All run-state writes go to `${DETENT_ROOT}/.sdlc/<run-id>/`, outside the worktree; the
 ledger records `{"implement": {"status": "done", "worktree_path": "…", "branch":
 "PROJ-2534-retry-webhooks", "commits": "9f8e7d6..b0c1d2e"}}`. No push. Deleting the
 worktree now would lose nothing the branch and `.sdlc/` don't hold.
