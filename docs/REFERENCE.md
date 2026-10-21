@@ -203,6 +203,7 @@ Sentinel is a tool and a hook, not a skill. It sits in the same loop.
 | `detent stage begin <stage>`, `detent stage end <stage>` | Move a stage, with the checks above. |
 | `detent gate open <id>` | Render a pending gate as a curator page. |
 | `detent gate collect --run <id>` | Write your curator answers into `decisions.json`. |
+| `detent drive --run <id>` | Experimental, macOS and Linux, spends credit. Runs intake, research and plan with contained `claude -p --restricted` children (no Bash), then stops for you. `--budget` (default 5 USD). It never implements or ships. |
 | `detent socket call <name>` | Call one socket by hand. |
 | `detent dashboard`, `detent live <run-id>` | One curator page of all runs, or a live view of one run. |
 | `detent respond --pr <url>` | Arm the respond stage on an open PR with no ticket. |
@@ -239,6 +240,7 @@ Kill switches, each set to `off`: `PR_AUTOREVIEW`, `REFEREE_AUTOREVIEW`, `SENTIN
 - **Never:** merging. Sentinel only reads. Scribe only drafts.
 - **Untrusted text:** ticket, thread and PR text is data. A skill reads it and does not follow instructions found in it.
 - **Owl:** runs under `--permission-mode dontAsk` with a settings profile and refuses a profile that sets `bypassPermissions`. The agent is denied `git commit` and `git push`. Owl commits for itself and never pushes. The default profile allows `node *` and `npm run*`, so read it before an unattended run. It stops at 8 iterations or 300 minutes, or after 3 failures in a row, unless you set other caps.
+- **Drive (experimental):** the child is `claude -p --restricted` with file tools only, an allowlisted environment, a read-only copy of the repo and a write-only outbox that drive validates. It stops before implement and never ships. The trust model and the residual risks are in [SECURITY.md](../SECURITY.md).
 - **Curator:** binds `127.0.0.1` and answers 403 to any other `Host` header.
 - **Network:** `gh` calls to GitHub, plus `claude -p` from owl and the optional eval judge. Your own provider commands do what you wrote them to do. Connectors come from your Claude Code session, and detent stores no tokens.
 

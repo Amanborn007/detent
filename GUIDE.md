@@ -273,6 +273,7 @@ A **provider pack** in the sense of `packs/example/stack.yaml` is a different fi
 | Command | Does |
 |---|---|
 | `detent run new --ticket <key>`, `detent next`, `detent stage ...`, `detent gate open <id>`, `detent gate collect --run <id>`, `detent socket call <name>`, `detent dashboard`, `detent bench <run-id>` | The engine runner. |
+| `detent drive --run <id>` | Experimental. Runs intake, research and plan with contained headless children, then stops for you. Spends Claude credit. |
 | `detent curator ...` | Curator: `open`, `poll`, `reply`, `end`, `status`. |
 | `detent sentinel ...` | Sentinel: `scan`, `config-check`. |
 | `detent owl ...` | The owl orchestrator. |
@@ -280,6 +281,8 @@ A **provider pack** in the sense of `packs/example/stack.yaml` is a different fi
 | `detent courier ...` | Connector-read broker: `request`, `await`, `list`, `get`, `fulfill`, `fail`. |
 | `detent feedback ...` | A journal where the agent logs gaps it noticed in its own coverage. |
 | `detent eval ...` | The eval harness. |
+
+**Drive (experimental).** `detent drive --run <id>` runs intake, research and plan for you with one headless `claude -p --restricted` child per stage, then stops at the plan gate, at any decision, or at `before_implement`. It never implements or ships: you run those stages yourself, interactively. Each child gets file tools only (no Bash, no MCP, no web) on a read-only copy of your repo, with a scrubbed environment, and hands its work back through an outbox that drive validates before it writes any run state. The budget is `--budget` USD per invocation (default 5), enforced per child with `--max-budget-usd`; claude can overshoot by one turn. macOS and Linux, Claude Code 2.1.306 or newer. What it contains and what it does not are in `engine/cli/README.md` and [SECURITY.md](SECURITY.md).
 
 **Curator.** Serves self-contained HTML pages on `127.0.0.1` and records annotations and decisions. State is in `~/.curator`. A page may not load external scripts, fonts or images. The curator skill writes the page and runs the feedback loop in a subagent so poll output stays out of the main conversation.
 

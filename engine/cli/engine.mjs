@@ -329,9 +329,14 @@ function runRepoOf(runDir) {
   }
 }
 
+const RUN_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
+
 function findRun(repo, flags) {
   const sdlc = sdlcHome();
   if (flags.run) {
+    if (flags.run === true || !RUN_ID_RE.test(flags.run)) {
+      refuse(`invalid run id ${JSON.stringify(flags.run)}: a run id matches ${RUN_ID_RE}`, "pass the run id exactly as `engine dashboard` lists it");
+    }
     // --run resolves regardless of --repo: multi-repo tasks share the one home.
     const runDir = join(sdlc, flags.run);
     if (!existsSync(join(runDir, "run.json"))) {
@@ -639,14 +644,13 @@ function requireKnownStage(stage) {
   }
 }
 
-function cmdStageBegin(stage, flags) {
-  requireKnownStage(stage);
-  const repo = repoOf(flags);
-  const { runId, runDir } = findRun(repo, flags);
+/** Pure stage begin: returns {ok:true, payload} or {ok:false, refusal}; never prints or exits. */
+function beginStage(stage, repo, runId, runDir) {
+  const no = (reason, next_step, extra = {}) => ({ ok: false, refusal: { reason, next_step, extra } });
   const status = loadStatus(runDir);
   const entry = status.stages[stage];
   if (entry.status === "done") {
-    refuse(`stage '${stage}' is already done — re-running a stage is a NEW run (run-ids are immutable)`,
+    return no(`stage '${stage}' is already done — re-running a stage is a NEW run (run-ids are immutable)`,
       "engine run new --ticket <ref> to start a fresh run");
   }
   // D2: begin refuses when any prior stage is not done. A "skipped" stage
@@ -655,7 +659,7 @@ function cmdStageBegin(stage, flags) {
   const priors = STAGES.slice(0, STAGES.indexOf(stage));
   const notDone = priors.filter((s) => !["done", "skipped"].includes(status.stages[s].status));
   if (notDone.length > 0) {
-    refuse(
+    return no(
       `illegal transition: cannot begin '${stage}' — prior stage(s) not done: ${notDone.join(", ")}`,
       `engine next --run ${runId} to see the current stage`,
       { blocking_stages: notDone },
@@ -670,7 +674,7 @@ function cmdStageBegin(stage, flags) {
     status.stages[stage] = { status: "blocked", blocked_on: ids, updated_at: nowIso() };
     saveStatus(runDir, status);
     appendEvent(runDir, { event: "stage_blocked", stage, blocked_on: ids });
-    refuse(
+    return no(
       `gate rule: pending decision(s) block '${stage}': ${ids.join(", ")} — the engine never skips a pending gate`,
       `engine gate open ${blockers[0].gate || ids[0]} --run ${runId} --repo ${repo}`,
       { blocked_on: ids },
@@ -680,15 +684,27 @@ function cmdStageBegin(stage, flags) {
   saveStatus(runDir, status);
   appendEvent(runDir, { event: "stage_begin", stage });
   const artifacts = STAGE_ARTIFACTS[stage];
-  out({
+  return {
     ok: true,
-    run_id: runId,
-    stage,
-    status: "in_progress",
-    next_step: artifacts
-      ? `produce ${artifacts.join(" and ")} in ${runDir}, then: engine stage end ${stage} --run ${runId} --repo ${repo}`
-      : `do the ${stage} work, then: engine stage end ${stage} --run ${runId} --repo ${repo}`,
-  });
+    payload: {
+      ok: true,
+      run_id: runId,
+      stage,
+      status: "in_progress",
+      next_step: artifacts
+        ? `produce ${artifacts.join(" and ")} in ${runDir}, then: engine stage end ${stage} --run ${runId} --repo ${repo}`
+        : `do the ${stage} work, then: engine stage end ${stage} --run ${runId} --repo ${repo}`,
+    },
+  };
+}
+
+function cmdStageBegin(stage, flags) {
+  requireKnownStage(stage);
+  const repo = repoOf(flags);
+  const { runId, runDir } = findRun(repo, flags);
+  const r = beginStage(stage, repo, runId, runDir);
+  if (!r.ok) refuse(r.refusal.reason, r.refusal.next_step, r.refusal.extra);
+  out(r.payload);
 }
 
 /**
@@ -741,53 +757,62 @@ function checkTddOrdering(repo, status) {
   return { ok: true };
 }
 
-function cmdStageEnd(stage, flags) {
-  requireKnownStage(stage);
-  const repo = repoOf(flags);
-  const { runId, runDir } = findRun(repo, flags);
+/** Raise the stage's end gate if it is not raised yet; returns the gate decision. */
+function raiseEndGate(runDir, stage, gateDef) {
+  const decisions = loadDecisions(runDir);
+  syncGateAnsweredEvents(runDir, decisions);
+  let gate = decisions.find((d) => d.gate === gateDef.name);
+  if (!gate) {
+    gate = {
+      id: nextDecisionId(decisions),
+      gate: gateDef.name,
+      raised_by: "engine",
+      blocks: gateDef.blocks,
+      question: gateDef.question,
+      options: gateDef.options,
+      context: gateDef.context,
+      status: "pending",
+    };
+    decisions.push(gate);
+    saveDecisions(runDir, decisions);
+    appendEvent(runDir, { event: "gate_raised", stage, gate: gateDef.name, decision_id: gate.id });
+  }
+  return gate;
+}
+
+/** Block the stage on its pending gate, checkpoint the benchmark and write the handoff. */
+function parkStageOnGate(runDir, status, stage, gateDef, gate) {
+  status.stages[stage] = { status: "blocked", blocked_on: [gate.id], updated_at: nowIso() };
+  saveStatus(runDir, status);
+  // A human answer can take days: record the benchmark so far before the wait,
+  // and write the handoff so this session can end instead of idling.
+  checkpointOnPark(runDir, `gate-pending:${gateDef.name}`, gate.id);
+  return handoffOnPark(runDir, stage);
+}
+
+/** Pure stage end: returns {ok:true, payload} or {ok:false, refusal}; never prints or exits. */
+function endStage(stage, repo, runId, runDir, tddRecord) {
+  const no = (reason, next_step, extra = {}) => ({ ok: false, refusal: { reason, next_step, extra } });
   const status = loadStatus(runDir);
   const entry = status.stages[stage];
   if (entry.status !== "in_progress" && entry.status !== "blocked") {
-    refuse(`cannot end '${stage}': it is '${entry.status}', not in_progress (was it ever begun?)`,
+    return no(`cannot end '${stage}': it is '${entry.status}', not in_progress (was it ever begun?)`,
       `engine stage begin ${stage} --run ${runId} --repo ${repo}`);
   }
   // Required artifacts per CONTRACT.md. Every missing one is named, so a single
   // re-run fixes them all rather than one refusal per file.
   const missing = (STAGE_ARTIFACTS[stage] || []).filter((a) => !existsSync(join(runDir, a)));
   if (missing.length > 0) {
-    refuse(`cannot end '${stage}': required artifact missing: ${missing.join(", ")} (expected in ${runDir})`,
+    return no(`cannot end '${stage}': required artifact missing: ${missing.join(", ")} (expected in ${runDir})`,
       `write ${missing.join(" and ")}, then re-run: engine stage end ${stage} --run ${runId} --repo ${repo}`,
       { missing_artifact: missing });
-  }
-  // implement RECORDS its tdd block here (test_name, red_sha, green_sha, or
-  // an exempt reason); it never judges its own ordering. Optional at the CLI
-  // level, omitting it just means recheck will refuse until it is recorded.
-  let tddRecord = null;
-  if (stage === "implement") {
-    const exempt = flags["tdd-exempt"] && flags["tdd-exempt"] !== true ? String(flags["tdd-exempt"]) : null;
-    const testName = flags["tdd-test"] && flags["tdd-test"] !== true ? String(flags["tdd-test"]) : null;
-    const redSha = flags["tdd-red"] && flags["tdd-red"] !== true ? String(flags["tdd-red"]) : null;
-    const greenSha = flags["tdd-green"] && flags["tdd-green"] !== true ? String(flags["tdd-green"]) : null;
-    if (exempt && (testName || redSha || greenSha)) {
-      refuse("--tdd-exempt cannot be combined with --tdd-test/--tdd-red/--tdd-green",
-        "record either a real tdd block or an exemption, never both");
-    }
-    if (exempt) {
-      tddRecord = { exempt };
-    } else if (testName || redSha || greenSha) {
-      if (!(testName && redSha && greenSha)) {
-        refuse("recording a tdd block requires --tdd-test, --tdd-red, and --tdd-green together",
-          'engine stage end implement --tdd-test "<name>" --tdd-red <sha> --tdd-green <sha>  (or --tdd-exempt "<reason>" for a CONDITIONAL-skip run)');
-      }
-      tddRecord = { test_name: testName, red_sha: redSha, green_sha: greenSha };
-    }
   }
   // recheck ASSERTS the ordering implement recorded, from git objects, never
   // from prose. Structural, so it refuses loudly rather than filing a gate.
   if (stage === "recheck") {
     const tddCheck = checkTddOrdering(repo, status);
     if (!tddCheck.ok) {
-      refuse(`cannot end 'recheck': TDD ordering check failed, ${tddCheck.reason}`,
+      return no(`cannot end 'recheck': TDD ordering check failed, ${tddCheck.reason}`,
         "fix the tdd block implement recorded in stage-status.json (or record a genuine --tdd-exempt at implement), then re-run: engine stage end recheck",
         { tdd_check: tddCheck });
     }
@@ -796,41 +821,17 @@ function cmdStageEnd(stage, flags) {
   // by a human (curator or hand-edit) — the CLI never writes an answer.
   const gateDef = STAGE_END_GATES[stage];
   if (gateDef) {
-    let decisions = loadDecisions(runDir);
-    syncGateAnsweredEvents(runDir, decisions);
-    let gate = decisions.find((d) => d.gate === gateDef.name);
-    if (!gate) {
-      gate = {
-        id: nextDecisionId(decisions),
-        gate: gateDef.name,
-        raised_by: "engine",
-        blocks: gateDef.blocks,
-        question: gateDef.question,
-        options: gateDef.options,
-        context: gateDef.context,
-        status: "pending",
-      };
-      decisions.push(gate);
-      saveDecisions(runDir, decisions);
-      appendEvent(runDir, { event: "gate_raised", stage, gate: gateDef.name, decision_id: gate.id });
-    }
+    const gate = raiseEndGate(runDir, stage, gateDef);
     if (gate.status === "pending") {
-      status.stages[stage] = { status: "blocked", blocked_on: [gate.id], updated_at: nowIso() };
-      saveStatus(runDir, status);
-      // The run is about to block on a human answer — checkpoint the benchmark
-      // of the work done up to here before that (possibly long) wait begins.
-      checkpointOnPark(runDir, `gate-pending:${gateDef.name}`, gate.id);
-      // ...and write the handoff, so this session can END rather than idle
-      // across the wait and come back to a cold cache. See handoffOnPark().
-      const ho = handoffOnPark(runDir, stage);
-      refuse(
+      const ho = parkStageOnGate(runDir, status, stage, gateDef, gate);
+      return no(
         `cannot end '${stage}': the ${gateDef.name} gate (${gate.id}) is pending — a human must answer it`,
         `engine gate open ${gateDef.name} --run ${runId} --repo ${repo}`,
         { gate: gateDef.name, decision_id: gate.id, ...ho },
       );
     }
     if (gate.status === "answered" && gate.answer === "revise") {
-      refuse(
+      return no(
         `the ${gateDef.name} gate verdict is 'revise' — loop back, update ${primaryArtifact(stage) || "the stage artifact"}, and re-raise the gate (new decision block)`,
         `revise per the gate annotations, then engine stage end ${stage} again after a fresh gate approval`,
         { gate: gateDef.name, decision_id: gate.id, verdict: "revise" },
@@ -854,7 +855,7 @@ function cmdStageEnd(stage, flags) {
   // next command, and an insufficient handoff downgrades the advice rather
   // than withholding it.
   const ho = handoffOnPark(runDir, stage);
-  out({
+  return { ok: true, payload: {
     ok: true,
     run_id: runId,
     stage,
@@ -868,7 +869,40 @@ function cmdStageEnd(stage, flags) {
     next_step: next
       ? `engine stage begin ${next} --run ${runId} --repo ${repo}`
       : "run complete — all stages done",
-  });
+  } };
+}
+
+
+function cmdStageEnd(stage, flags) {
+  requireKnownStage(stage);
+  const repo = repoOf(flags);
+  const { runId, runDir } = findRun(repo, flags);
+  // implement RECORDS its tdd block here (test_name, red_sha, green_sha, or
+  // an exempt reason); it never judges its own ordering. Optional at the CLI
+  // level, omitting it just means recheck will refuse until it is recorded.
+  let tddRecord = null;
+  if (stage === "implement") {
+    const exempt = flags["tdd-exempt"] && flags["tdd-exempt"] !== true ? String(flags["tdd-exempt"]) : null;
+    const testName = flags["tdd-test"] && flags["tdd-test"] !== true ? String(flags["tdd-test"]) : null;
+    const redSha = flags["tdd-red"] && flags["tdd-red"] !== true ? String(flags["tdd-red"]) : null;
+    const greenSha = flags["tdd-green"] && flags["tdd-green"] !== true ? String(flags["tdd-green"]) : null;
+    if (exempt && (testName || redSha || greenSha)) {
+      refuse("--tdd-exempt cannot be combined with --tdd-test/--tdd-red/--tdd-green",
+        "record either a real tdd block or an exemption, never both");
+    }
+    if (exempt) {
+      tddRecord = { exempt };
+    } else if (testName || redSha || greenSha) {
+      if (!(testName && redSha && greenSha)) {
+        refuse("recording a tdd block requires --tdd-test, --tdd-red, and --tdd-green together",
+          'engine stage end implement --tdd-test "<name>" --tdd-red <sha> --tdd-green <sha>  (or --tdd-exempt "<reason>" for a CONDITIONAL-skip run)');
+      }
+      tddRecord = { test_name: testName, red_sha: redSha, green_sha: greenSha };
+    }
+  }
+  const r = endStage(stage, repo, runId, runDir, tddRecord);
+  if (!r.ok) refuse(r.refusal.reason, r.refusal.next_step, r.refusal.extra);
+  out(r.payload);
 }
 
 // ---------------------------------------------------------------------------
@@ -1133,6 +1167,7 @@ ${options}
 <main>
 <p class="eyebrow">${escapeHtml(runId)} · gate ${escapeHtml(gate.name)}${gate.stage ? ` · stage ${escapeHtml(gate.stage)}` : ""}</p>
 <h1>Needs your decision</h1>
+${gate.noteHtml || ""}
 ${blocks}
 <h2>What you are deciding on</h2>
 ${docHtml || `<p class="sub">No stage artifact has been written yet.</p>`}
@@ -1274,6 +1309,22 @@ function cmdGateCollect(flags) {
   }
   const res = collectResult(runId, runDir, items, extra);
   out({ next_step: `waiting on a human: engine gate collect --run ${runId} again after they answer in curator`, ...res });
+}
+
+// ---------------------------------------------------------------------------
+// engine drive — contained intake -> research -> plan (see engine/cli/drive/drive.mjs).
+// The orchestration lives in its own module; it gets the engine's internals by injection.
+// ---------------------------------------------------------------------------
+
+async function cmdDriveEntry(flags) {
+  const { cmdDrive } = await import("./drive/drive.mjs");
+  const E = {
+    STAGES, STAGE_ARTIFACTS, STAGE_END_GATES, out, refuse, fail, nowIso, readJson, appendEvent, detentRoot, repoOf, findRun,
+    loadStatus, loadDecisions, saveDecisions, nextDecisionId, pendingBlockers, syncGateAnsweredEvents, beginStage, endStage,
+    raiseEndGate, renderGateArtifact, drainCuratorFor, collectResult, curatorOnPath, escapeHtml, parseYamlSubset, runExec,
+    engineFile: fileURLToPath(import.meta.url),
+  };
+  return cmdDrive(flags, E);
 }
 
 // ---------------------------------------------------------------------------
@@ -2151,7 +2202,7 @@ function cmdAdvisorConsult(flags) {
 // Dispatch.
 // ---------------------------------------------------------------------------
 
-const USAGE = "engine <setup|run new|stage begin|stage end|gate open|gate collect|socket call|next|dashboard|live|bench|eval|pack validate|respond|step|advisor consult|handoff|attempt|env|decide-why|spend|help> — see engine/cli/README.md";
+const USAGE = "engine <setup|run new|stage begin|stage end|gate open|gate collect|drive|socket call|next|dashboard|live|bench|eval|pack validate|respond|step|advisor consult|handoff|attempt|env|decide-why|spend|help> — see engine/cli/README.md";
 
 /**
  * cmdEval — wraps engine/eval/eval.mjs's runEval() for `engine eval`. An
@@ -2774,6 +2825,7 @@ function cmdHelp() {
       "stage end": "engine stage end <stage> [--run <id>] [--repo <path>] — finish a stage (checks artifact + gates). implement: [--tdd-test <name> --tdd-red <sha> --tdd-green <sha> | --tdd-exempt <reason>] records the tdd block (implement records, never judges). recheck: asserts red_sha is an ancestor of green_sha via git cat-file/merge-base, proving ORDER only, never that the test was observed failing.",
       "gate open": "engine gate open <gate-name-or-decision-id> [--run <id>] [--repo <path>] — render a pending human gate; with curator on PATH it writes <DETENT_ROOT>/.plans/<run>-<gate>.html (one data-plan-question block per pending decision, stage artifacts embedded) and prints `curator open` then `engine gate collect`",
       "gate collect": "engine gate collect --run <id> [--file <feedback.json>] — non-blocking: map curator answers into decisions.json (only an exact decision option resolves one; null/other answers stay pending and are listed under `unresolved`); selection/prompt feedback is appended to <run>/review-feedback.jsonl. Without --file it runs `curator drain` for the run's gate pages only.",
+      "drive": "engine drive --run <id> [--stack <path>] [--budget 5] [--model claude-sonnet-5-5] [--max-steps 12] [--child-timeout-sec 3600] [--profile <file>] [--claude-bin <b>] — experimental (macOS/Linux, spends Claude credit): runs intake, research and plan with one contained `claude -p --restricted` child per stage (file tools only, no Bash, allowlisted env, read-only repo export, outbox validated by drive), then always stops: at the plan gate or a decision (stopped:needs_human), at before_implement, at --max-steps, at --budget, or on a failure (state_tampered, outbox_rejected, secret_detected, child_*). Child text goes to <run>/drive-last.json, never stdout. --allow-ship is refused; implement and ship stay interactive.",
       "socket call": "engine socket call <name> [--payload-file <json>] [--stack <path>] — dispatch a socket per stack.yaml",
       "next": "engine next [--run <id>] [--repo <path>] — print the exact next command for the current run",
       "dashboard": "engine dashboard — render ALL runs under <DETENT_ROOT>/.sdlc/ into one curator artifact (stage, status, pending gates, age)",
@@ -2813,6 +2865,7 @@ function main() {
   if (a === "stage" && b === "end") return cmdStageEnd(c, flags);
   if (a === "gate" && b === "open") return cmdGateOpen(c, flags);
   if (a === "gate" && b === "collect") return cmdGateCollect(flags);
+  if (a === "drive") return cmdDriveEntry(flags);
   if (a === "socket" && b === "call") return cmdSocketCall(c, flags);
   if (a === "next") return cmdNext(flags);
   if (a === "dashboard") return cmdDashboard();
