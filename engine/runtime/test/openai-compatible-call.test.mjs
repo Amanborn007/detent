@@ -150,6 +150,17 @@ test("the key is scrubbed from every emitted message and body", async () => {
   assert.ok(!t.warnings.join("\n").includes(SENTINEL));
 });
 
+test("a key straddling the 300-char snippet cut leaks no prefix, in an http error or a bad_body", async () => {
+  const KEY = "sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
+  const text = "x".repeat(290) + "Bearer " + KEY;
+  for (const r of [res(401, text), res(200, text)]) {
+    const out = await rig([r]).go({ apiKey: KEY });
+    assert.equal(out.ok, false);
+    const line = JSON.stringify(out);
+    for (let n = 3; n <= KEY.length; n++) assert.ok(!line.includes(KEY.slice(0, n)), `prefix of length ${n} leaked`);
+  }
+});
+
 test("retryable and backoffMs", () => {
   for (const s of [408, 429, 500, 502, 503, 504]) assert.equal(retryable(s), true, String(s));
   for (const s of [400, 401, 403, 404, 422, 501]) assert.equal(retryable(s), false, String(s));
