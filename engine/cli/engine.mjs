@@ -79,7 +79,7 @@ const STAGE_END_GATES = {
 
 // There is no `engine` binary on PATH; under the detent wrapper, name the one that exists.
 function forCaller(text) {
-  return process.env.DETENT_CLI === "1" ? text.replace(/\bengine (?=(?:setup|run|stage|gate|drive|socket|next|dashboard|live|bench|eval|pack|respond|step|advisor|handoff|attempt|env|decide-why|spend|help)\b)/g, "detent ") : text;
+  return process.env.DETENT_CLI === "1" ? text.replace(/\bengine (?=(?:setup|run|stage|gate|drive|runtime|socket|next|dashboard|live|bench|eval|pack|respond|step|advisor|handoff|attempt|env|decide-why|spend|help)\b)/g, "detent ") : text;
 }
 
 // process.exit() drops a buffered stream write, and a pipe truncates past ~8KB.
@@ -1343,6 +1343,11 @@ async function cmdDriveEntry(flags) {
   return cmdDrive(flags, E);
 }
 
+async function cmdRuntimeEntry(sub, flags) {
+  const { cmdRuntime } = await import("../runtime/cli.mjs");
+  return cmdRuntime(sub, flags, { out, refuse, fail });
+}
+
 // ---------------------------------------------------------------------------
 // stack.yaml — minimal YAML-subset parser (zero-dep, covers the shapes used by
 // engine/stack.example.yaml: nested maps by indentation, lists of maps, inline
@@ -2228,7 +2233,7 @@ function cmdAdvisorConsult(flags) {
 // Dispatch.
 // ---------------------------------------------------------------------------
 
-const USAGE = "engine <setup|run new|stage begin|stage end|gate open|gate collect|drive|socket call|next|dashboard|live|bench|eval|pack validate|respond|step|advisor consult|handoff|attempt|env|decide-why|spend|help> — see engine/cli/README.md";
+const USAGE = "engine <setup|run new|stage begin|stage end|gate open|gate collect|drive|runtime run|runtime capabilities|socket call|next|dashboard|live|bench|eval|pack validate|respond|step|advisor consult|handoff|attempt|env|decide-why|spend|help> — see engine/cli/README.md";
 
 /**
  * cmdEval — wraps engine/eval/eval.mjs's runEval() for `engine eval`. An
@@ -2852,6 +2857,8 @@ function cmdHelp() {
       "gate open": "engine gate open <gate-name-or-decision-id> [--run <id>] [--repo <path>] — render a pending human gate; with curator on PATH it writes <DETENT_ROOT>/.plans/<run>-<gate>.html (one data-plan-question block per pending decision, stage artifacts embedded) and prints `curator open` then `engine gate collect`",
       "gate collect": "engine gate collect --run <id> [--file <feedback.json>] — non-blocking: map curator answers into decisions.json (only an exact decision option resolves one; null/other answers stay pending and are listed under `unresolved`); selection/prompt feedback is appended to <run>/review-feedback.jsonl. Without --file it runs `curator drain` for the run's gate pages only.",
       "drive": "engine drive --run <id> [--stack <path>] [--budget 5] [--model claude-sonnet-5-5] [--max-steps 12] [--child-timeout-sec 3600] [--profile <file>] [--claude-bin <b>] — experimental (macOS/Linux, spends Claude credit): runs intake, research and plan with one contained `claude -p --restricted` child per stage (file tools only, no Bash, allowlisted env, read-only repo export, outbox validated by drive), then always stops: at the plan gate or a decision (stopped:needs_human), at before_implement, at --max-steps, at --budget, or on a failure (state_tampered, outbox_rejected, secret_detected, child_*). Child text goes to <run>/drive-last.json, never stdout. --allow-ship is refused; implement and ship stay interactive.",
+      "runtime run": "engine runtime run [--runtime <name>] [--bin <path>] — run one prompt through a model runtime (default claude-code; --runtime beats DETENT_RUNTIME). Request JSON on stdin (prompt, cwd, output, tools, mcp, settings are required; schema in engine/runtime/CONTRACT.md). Prints one JSON line {ok:true, ...response} and exits 0 for stop ok|budget|turns, exits 1 {ok:false, reason, next_step, response} for stop error|timeout, and exits 2 for bad JSON, an unknown field, an unknown runtime, or a field the runtime does not declare",
+      "runtime capabilities": "engine runtime capabilities [--runtime <name>] — print what the runtime declares it can do; a request field outside that is refused, never dropped",
       "socket call": "engine socket call <name> [--payload-file <json>] [--stack <path>] — dispatch a socket per stack.yaml",
       "next": "engine next [--run <id>] [--repo <path>] — print the exact next command for the current run",
       "dashboard": "engine dashboard — render ALL runs under <DETENT_ROOT>/.sdlc/ into one curator artifact (stage, status, pending gates, age)",
@@ -2892,6 +2899,7 @@ function main() {
   if (a === "gate" && b === "open") return cmdGateOpen(c, flags);
   if (a === "gate" && b === "collect") return cmdGateCollect(flags);
   if (a === "drive") return cmdDriveEntry(flags);
+  if (a === "runtime") return cmdRuntimeEntry(b, flags);
   if (a === "socket" && b === "call") return cmdSocketCall(c, flags);
   if (a === "next") return cmdNext(flags);
   if (a === "dashboard") return cmdDashboard();
