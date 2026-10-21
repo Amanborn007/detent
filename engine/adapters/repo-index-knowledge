@@ -1,0 +1,94 @@
+#!/usr/bin/env node
+/**
+ * repo-index-knowledge — knowledge-socket provider backed by `detent index`
+ * (engine/index). Ranks the files of the work repo against the query with
+ * personalised PageRank and returns each file with its main definitions.
+ *
+ * stdin:  {"query":"...", "repo_path":"/abs/path", "max_results":20}
+ * stdout: {"provider":"repo-index","query","results":[{source,excerpt,confidence}],"next_step","warning"?}
+ * exit:   0 ok (a stale index still answers, with a warning and lower confidence)
+ *         1 provider failure (no index, bad repo_path) | 2 contract violation
+ */
+"use strict";
+const fs = require("node:fs");
+const path = require("node:path");
+
+const MAX = 25;
+
+function emit(obj, code) {
+  process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
+  process.exit(code);
+}
+
+function readStdin() {
+  const chunks = [];
+  const buf = Buffer.alloc(65536);
+  while (true) {
+    let n;
+    try { n = fs.readSync(0, buf, 0, buf.length); } catch (e) {
+      if (e.code === "EAGAIN") continue;
+      throw e;
+    }
+    if (n === 0) break;
+    chunks.push(Buffer.from(buf.slice(0, n)));
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function main() {
+  let req;
+  try { req = JSON.parse(readStdin()); } catch (e) {
+    emit({ error: "stdin is not valid JSON: " + e.message,
+           next_step: 'send {"query":"...","repo_path":"/abs/path"} on stdin' }, 2);
+  }
+  if (!req || !req.query || typeof req.query !== "string" || !req.repo_path) {
+    emit({ error: "need string query and repo_path",
+           next_step: 'send {"query":"...","repo_path":"/abs/path"} on stdin' }, 2);
+  }
+  if (!fs.existsSync(req.repo_path) || !fs.statSync(req.repo_path).isDirectory()) {
+    emit({ error: "repo_path is not a directory: " + req.repo_path,
+           next_step: "pass the absolute path of a checked-out repo" }, 1);
+  }
+  const limit = Math.min(Number.isInteger(req.max_results) && req.max_results > 0 ? req.max_results : 20, MAX);
+  const repo = path.resolve(req.repo_path);
+
+  const { loadIndex, runQuery } = await import("../index/index.mjs");
+  const { status } = await import("../index/lib/store.mjs");
+  const st = status(repo);
+  if (st.state === "missing") {
+    emit({ error: "no repo index for " + repo, next_step: "run `detent index build` in the repo, then retry" }, 1);
+  }
+
+  const words = req.query.split(/\s+/).filter(Boolean);
+  const ranked = runQuery(repo, words, limit);
+  const { byFile } = loadIndex(repo);
+  const top = Math.max(...ranked.map((r) => r.score), 1e-9);
+  const stale = st.state === "stale";
+  const results = [];
+  if (ranked.some((r) => r.matches.length || words.some((w) => r.path.toLowerCase().includes(w.toLowerCase())))) {
+    for (const r of ranked) {
+      const defs = byFile.get(r.path) || [];
+      const names = [...new Set([...r.matches, ...defs.map((d) => d.name)])].slice(0, 8);
+      const hit = r.matches.length > 0 || words.some((w) => r.path.toLowerCase().includes(w.toLowerCase()));
+      let confidence = (hit ? 0.4 : 0.15) + 0.5 * (r.score / top);
+      if (stale) confidence *= 0.6;
+      results.push({
+        source: "repo-index:" + r.path,
+        excerpt: ("defines: " + names.join(", ")).slice(0, 240),
+        confidence: Math.round(Math.min(confidence, 0.95) * 100) / 100,
+      });
+    }
+  }
+  const out = {
+    provider: "repo-index",
+    query: req.query,
+    results,
+    next_step: results.length
+      ? "read the top files before relying on the definition lists; the index is a map, not the code"
+      : "no definitions or paths matched; try other identifiers or the repo-docs provider",
+  };
+  if (stale) out.warning = "index is stale (" + st.reason + "); run `detent index refresh` for current results";
+  emit(out, 0);
+}
+
+main().catch((e) => emit({ error: "repo-index failed: " + e.message, next_step: "run `detent index build` and retry" }, 1));
