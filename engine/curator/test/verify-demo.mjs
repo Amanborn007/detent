@@ -4,6 +4,7 @@
 // Run: node test/verify-demo.mjs   (uses a throwaway state dir)
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -53,7 +54,9 @@ assert.equal(sdk.code, 200);
 assert.match(sdk.body, /queuePrompt/);
 console.log(`sdk GET /sdk.js -> ${sdk.code} (${sdk.body.length} bytes)`);
 
-const served = await get(port, `/artifact/${sid}`);
+const secret = readFileSync(path.join(stateDir, 'secret'), 'utf8').trim();
+const rKey = crypto.createHmac('sha256', secret).update(`curator-artifact:${sid}`).digest('hex');
+const served = await get(port, `/artifact/${sid}?k=${rKey}`);
 assert.equal(served.code, 200);
 const tag = `<script src="/sdk.js?s=${sid}"></script>`;
 assert.ok(served.body.startsWith(`<!DOCTYPE html>\n${tag}\n`), 'doctype first, tag injected right after');

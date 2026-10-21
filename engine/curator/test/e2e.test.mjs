@@ -8,6 +8,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import http from 'node:http';
+import crypto from 'node:crypto';
 
 const CURATOR_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLI = join(CURATOR_DIR, 'cli.mjs');
@@ -72,6 +73,10 @@ function fetchRaw(port, path, { method = 'GET', body, headers = {} } = {}) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const secret = () => readFileSync(join(stateDir, 'secret'), 'utf8').trim();
+const keyFor = (label, id) => crypto.createHmac('sha256', secret()).update(`${label}:${id}`).digest('hex');
+const browser = () => ({ 'X-Curator-Cap': keyFor('curator-session', sessionId), Origin: `http://127.0.0.1:${port}` });
+
 let port;
 let sessionId;
 
@@ -88,7 +93,7 @@ test('open: starts a server, prints url + next_step, serves chrome page and inje
   const { code, stdout } = await runCli(['open', artifact]);
   assert.equal(code, 0, `open failed: ${stdout}`);
   const opened = JSON.parse(stdout);
-  assert.match(opened.url, /^http:\/\/127\.0\.0\.1:\d+\/s\/[0-9a-f]+$/);
+  assert.match(opened.url, /^http:\/\/127\.0\.0\.1:\d+\/s\/[0-9a-f]+#c=[0-9a-f]{64}&r=[0-9a-f]{64}$/);
   assert.match(opened.next_step, /curator poll/);
   assert.match(opened.next_step, /do not kill it/);
   port = Number(new URL(opened.url).port);
@@ -100,7 +105,7 @@ test('open: starts a server, prints url + next_step, serves chrome page and inje
   assert.match(chrome.body.toString(), /Send to Agent/);
   assert.match(chrome.body.toString(), /End session/);
 
-  const served = await fetchRaw(port, `/artifact/${sessionId}`);
+  const served = await fetchRaw(port, `/artifact/${sessionId}?k=${keyFor('curator-artifact', sessionId)}`);
   assert.equal(served.code, 200);
   const tag = `<script src="/sdk.js?s=${sessionId}"></script>`;
   const text = served.body.toString();
@@ -126,7 +131,7 @@ test('poll resolves with queued annotations + decision answer and a next_step', 
     { type: 'annotation', selector: '#title', elementText: 'Rollout plan', comment: 'rename to Q3 rollout' },
     { type: 'decision', question: 'q-rollout', answer: 'Phased' },
   ];
-  const send = await fetchRaw(port, '/api/send', { method: 'POST', body: { sessionId, items } });
+  const send = await fetchRaw(port, `/api/send?s=${sessionId}`, { method: 'POST', body: { sessionId, items }, headers: browser() });
   assert.equal(send.code, 200);
   assert.equal(JSON.parse(send.body).delivered, true, 'a live poll consumed the send');
 
@@ -141,7 +146,7 @@ test('poll resolves with queued annotations + decision answer and a next_step', 
 
 test('feedback sent while nobody polls is durable and served to the next poll', async () => {
   const items = [{ type: 'comment', text: 'also consider a feature flag' }];
-  const send = await fetchRaw(port, '/api/send', { method: 'POST', body: { sessionId, items } });
+  const send = await fetchRaw(port, `/api/send?s=${sessionId}`, { method: 'POST', body: { sessionId, items }, headers: browser() });
   assert.equal(JSON.parse(send.body).delivered, false, 'queued, not delivered');
 
   const { code, stdout } = await runCli(['poll', artifact]);
@@ -155,14 +160,14 @@ test('reply lands in the chat log and blocks until end; ended response is correc
   const reply = startCli(['reply', artifact, '-m', 'Switched the plan to a phased rollout.']);
   await sleep(500);
 
-  const updates = await fetchRaw(port, `/api/updates?s=${sessionId}`);
+  const updates = await fetchRaw(port, `/api/updates?s=${sessionId}`, { headers: browser() });
   const chat = JSON.parse(updates.body).chat;
   assert.ok(
     chat.some((m) => m.from === 'agent' && m.text.includes('phased rollout')),
     'agent reply visible to the browser chat log'
   );
 
-  const end = await fetchRaw(port, '/api/end', { method: 'POST', body: { sessionId, by: 'user' } });
+  const end = await fetchRaw(port, `/api/end?s=${sessionId}`, { method: 'POST', body: { sessionId, by: 'user' }, headers: browser() });
   assert.equal(end.code, 200);
 
   const { code, stdout } = await reply.done;
@@ -180,7 +185,7 @@ test('non-local Host header is refused (dns-rebinding guard)', async () => {
   assert.equal(evil.code, 403);
   assert.match(JSON.parse(evil.body).error, /Host/);
 
-  const local = await fetchRaw(port, '/api/status', { headers: { Host: `localhost:${port}` } });
+  const local = await fetchRaw(port, '/api/status', { headers: { Host: `localhost:${port}`, Authorization: `Bearer ${secret()}` } });
   assert.equal(local.code, 200);
 });
 

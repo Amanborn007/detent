@@ -4,17 +4,17 @@
 // Commands: open | poll | reply | end | status | log
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { resolveStateDir, checkStateDir, readSecret, secretPath, healthProof, safeEqual, browserUrl, AuthSetupError } from './auth.mjs';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_PATH = path.join(MODULE_DIR, 'server.mjs');
 const CHECK_PATH = path.join(MODULE_DIR, 'scripts', 'artifact-check.py');
 
-const STATE_DIR = process.env.CURATOR_STATE_DIR || path.join(os.homedir(), '.curator');
+const STATE_DIR = resolveStateDir();
 const STATE_FILE = path.join(STATE_DIR, 'state.json');
 const POLL_FAILURES_FILE = path.join(STATE_DIR, 'poll-failures.json');
 
@@ -52,6 +52,7 @@ function parseArgs(argv, allowedFlags) {
 
 // --- state / server helpers -------------------------------------------------
 function readState() {
+  checkStateDir(STATE_DIR);
   try {
     return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
   } catch {
@@ -60,13 +61,14 @@ function readState() {
 }
 
 function writeState(state) {
-  fs.mkdirSync(STATE_DIR, { recursive: true });
+  fs.mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
   const tmp = `${STATE_FILE}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+  fs.writeFileSync(tmp, JSON.stringify(state, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, STATE_FILE);
 }
 
-function httpJson({ method, port, path: reqPath, body, timeoutMs }) {
+// `secret` is passed only for a server that has already proved it holds it (see resolveServer).
+function httpJson({ method, port, path: reqPath, body, timeoutMs, secret }) {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? undefined : JSON.stringify(body);
     const req = http.request(
@@ -75,7 +77,10 @@ function httpJson({ method, port, path: reqPath, body, timeoutMs }) {
         port,
         method,
         path: reqPath,
-        headers: payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {},
+        headers: {
+          ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {}),
+          ...(secret ? { Authorization: `Bearer ${secret}` } : {}),
+        },
       },
       (res) => {
         let data = '';
@@ -116,15 +121,14 @@ function pidAlive(pid) {
   }
 }
 
-// Classify the server: 'running' (healthz ok, pid matches), 'unreachable'
-// (server process alive but this shell cannot complete the HTTP round-trip —
-// e.g. a sandboxed shell blocking loopback), or 'down' (nothing usable).
+// The secret is only ever sent to a server classified 'running' (valid healthz proof).
 async function resolveServer() {
   const state = readState();
   if (!state || !state.port || !state.pid) return { status: 'down', state };
+  const nonce = crypto.randomBytes(16).toString('hex');
+  let json;
   try {
-    const { json } = await httpJson({ method: 'GET', port: state.port, path: '/healthz', timeoutMs: 1500 });
-    return json.ok && json.pid === state.pid ? { status: 'running', port: state.port, state } : { status: 'down', state };
+    ({ json } = await httpJson({ method: 'GET', port: state.port, path: `/healthz?nonce=${nonce}`, timeoutMs: 1500 }));
   } catch (cause) {
     // ECONNREFUSED means nothing is listening; if state.pid is alive anyway,
     // that pid was reused by the OS for an unrelated process — still 'down'.
@@ -132,6 +136,34 @@ async function resolveServer() {
     if (pidAlive(state.pid)) return { status: 'unreachable', state, cause };
     return { status: 'down', state };
   }
+  if (!json.ok || json.pid !== state.pid) return { status: 'down', state };
+  if (typeof json.proof !== 'string') return { status: 'untrusted', why: 'legacy', state };
+  const secret = readSecret(STATE_DIR);
+  if (!secret) {
+    throw new AuthSetupError(`curator server (pid ${state.pid}, port ${state.port}) is running but its secret ${secretPath(STATE_DIR)} is missing`,
+      `Stop the server, then run: curator open <file.html>. Its pid is ${state.pid} (kill ${state.pid}). curator never creates a new secret under a running server.`);
+  }
+  if (!safeEqual(json.proof, healthProof(secret, nonce))) return { status: 'untrusted', why: 'bad-proof', state };
+  return { status: 'running', port: state.port, state, secret };
+}
+
+function failUntrusted({ state, why }, nextCmd) {
+  const what = why === 'legacy' ? 'sends no proof of the secret (a server from before authentication)' : 'did not prove it holds this state directory\'s secret';
+  fail(`the curator server on port ${state.port} (pid ${state.pid}) ${what}, so nothing was sent to it`,
+    `Run: ${nextCmd}. curator open replaces a legacy server and refuses to stop a process that is not a curator daemon.`);
+}
+
+// Only a process whose command line is the curator daemon is ever signalled.
+async function stopUntrustedServer({ state }) {
+  const { pid, port } = state;
+  const ps = spawnSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' });
+  if (ps.error || ps.status !== 0 || !ps.stdout.includes('server.mjs --daemon')) {
+    fail(`port ${port} is held by pid ${pid}, which is not a curator daemon, so it was not stopped`,
+      `Stop whatever listens on port ${port} yourself or choose another CURATOR_STATE_DIR, then run: curator open <file.html>`);
+  }
+  process.kill(pid, 'SIGTERM');
+  for (let i = 0; i < 100 && pidAlive(pid); i++) await new Promise((r) => setTimeout(r, 50));
+  if (pidAlive(pid)) fail(`the old curator server (pid ${pid}) did not stop after SIGTERM`, `Run: kill -9 ${pid}, then run: curator open <file.html>`);
 }
 
 // --- consecutive-failure counter (poll-failures.json) ------------------------
@@ -145,9 +177,9 @@ function readPollFailures() {
 }
 
 function writePollFailures(failures) {
-  fs.mkdirSync(STATE_DIR, { recursive: true });
+  fs.mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
   const tmp = `${POLL_FAILURES_FILE}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(failures, null, 2));
+  fs.writeFileSync(tmp, JSON.stringify(failures, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, POLL_FAILURES_FILE);
 }
 
@@ -319,16 +351,27 @@ async function cmdOpen(args) {
   const file = canonicalFile(positionals[0], { mustExist: true });
   if (!fs.statSync(file).isFile()) fail(`not a file: ${file}`, 'Point curator open at a self-contained .html artifact.');
   const checked = enforceArtifactCheck(file);
-  const resolved = await resolveServer();
+  let resolved = await resolveServer();
   if (resolved.status === 'unreachable') {
     // NEVER spawn here: the server is alive, we just can't see it — spawning
     // a duplicate was the observed sandbox failure mode.
     failUnreachable({ state: resolved.state, cause: resolved.cause, command: `curator open ${file}` });
   }
-  const port = resolved.status === 'running' ? resolved.port : await spawnServer();
-  const { code, json } = await httpJson({ method: 'POST', port, path: '/api/open', body: { file }, timeoutMs: 5000 });
+  if (resolved.status === 'untrusted') {
+    await stopUntrustedServer(resolved);
+    resolved = { status: 'down' };
+  }
+  if (resolved.status !== 'running') {
+    await spawnServer();
+    resolved = await resolveServer();
+    if (resolved.status !== 'running') {
+      fail('the curator server that was just started did not prove it holds this state directory\'s secret', 'Check CURATOR_STATE_DIR and run: curator open <file.html>');
+    }
+  }
+  const { port, secret } = resolved;
+  const { code, json } = await httpJson({ method: 'POST', port, path: '/api/open', body: { file }, timeoutMs: 5000, secret });
   if (code !== 200) fail(json.error || `server error ${code}`, json.next_step);
-  const url = `http://127.0.0.1:${port}/s/${json.sessionId}`;
+  const url = browserUrl(port, json.sessionId, secret);
   if (!process.env.CURATOR_NO_BROWSER && process.platform === 'darwin') {
     spawn('open', [url], { detached: true, stdio: 'ignore' }).unref();
   }
@@ -382,8 +425,13 @@ async function pollOnce(file, { drainTimeoutMs, isDrain = false } = {}) {
     out(isDrain ? { key: file, ...merged } : merged);
   };
   const resolved = await resolveServer();
+  if (resolved.status === 'untrusted') {
+    bail(`the curator server on port ${resolved.state.port} did not prove it holds this state directory's secret, so nothing was sent to it`,
+      `Run: curator open ${file}`);
+    return;
+  }
   if (resolved.status === 'running') {
-    const { code, json } = await httpJson({ method: 'GET', port: resolved.port, path: `/api/poll?key=${encodeURIComponent(file)}`, timeoutMs: drainTimeoutMs });
+    const { code, json } = await httpJson({ method: 'GET', port: resolved.port, path: `/api/poll?key=${encodeURIComponent(file)}`, timeoutMs: drainTimeoutMs, secret: resolved.secret });
     if (code !== 200) bail(json.error || `server error ${code}`, json.next_step || `Run: curator open ${file}`);
     resetPollFailures(file); // a reachable server clears the consecutive-failure streak
     emit(json);
@@ -470,11 +518,12 @@ async function cmdDrain(args) {
   // Scoping to named files leaves every other session's queue untouched.
   const only = positionals.length ? new Set(positionals.map((f) => canonicalFile(f, { mustExist: false }))) : null;
   const resolved = await resolveServer();
+  if (resolved.status === 'untrusted') failUntrusted(resolved, 'curator open <file.html>');
 
   // Discover sessions + pending counts without ever registering a waiter.
   let sessions;
   if (resolved.status === 'running') {
-    const { code, json } = await httpJson({ method: 'GET', port: resolved.port, path: '/api/status', timeoutMs: 5000 });
+    const { code, json } = await httpJson({ method: 'GET', port: resolved.port, path: '/api/status', timeoutMs: 5000, secret: resolved.secret });
     if (code !== 200) fail(json.error || `server error ${code}`, 'Run: curator status');
     sessions = (json.sessions || []).map((s) => ({ key: s.key, pending: s.pending_feedback_items || 0 }));
   } else {
@@ -531,6 +580,7 @@ async function cmdReply(args) {
   if (resolved.status === 'unreachable') {
     failUnreachable({ state: resolved.state, cause: resolved.cause, command: `curator reply ${file} -m "${flags.message}"` });
   }
+  if (resolved.status === 'untrusted') failUntrusted(resolved, `curator open ${file}`);
   if (resolved.status !== 'running') {
     fail(`no curator server running for ${file}`, `Run: curator open ${file} to restart it, then reply again.`);
   }
@@ -540,6 +590,7 @@ async function cmdReply(args) {
     path: '/api/reply',
     body: { key: file, message: flags.message },
     timeoutMs: 5000,
+    secret: resolved.secret,
   });
   if (code !== 200) fail(json.error || `server error ${code}`, json.next_step || `Run: curator open ${file}`);
   await pollOnce(file);
@@ -777,6 +828,7 @@ async function cmdEnd(args) {
   if (resolved.status === 'unreachable') {
     failUnreachable({ state: resolved.state, cause: resolved.cause, command: `curator end ${file}` });
   }
+  if (resolved.status === 'untrusted') failUntrusted(resolved, `curator open ${file}`);
   if (resolved.status !== 'running') fail(`no curator server running for ${file}`, 'Nothing to end. Run curator status to see sessions.');
   const { code, json } = await httpJson({
     method: 'POST',
@@ -784,6 +836,7 @@ async function cmdEnd(args) {
     path: '/api/end',
     body: { key: file, by: 'agent' },
     timeoutMs: 5000,
+    secret: resolved.secret,
   });
   if (code !== 200) fail(json.error || `server error ${code}`, json.next_step || 'Run curator status to see sessions.');
   out({ status: 'ended', ended_by: 'agent', key: file, next_step: 'Session closed. Deliver any remaining updates in chat.' });
@@ -795,15 +848,16 @@ async function cmdStatus(args) {
   if (resolved.status === 'unreachable') {
     failUnreachable({ state: resolved.state, cause: resolved.cause, command: 'curator status' });
   }
+  if (resolved.status === 'untrusted') failUntrusted(resolved, 'curator open <file.html>');
   if (resolved.status === 'running') {
     const port = resolved.port;
-    const { json } = await httpJson({ method: 'GET', port, path: '/api/status', timeoutMs: 5000 });
+    const { json } = await httpJson({ method: 'GET', port, path: '/api/status', timeoutMs: 5000, secret: resolved.secret });
     const sessions = json.sessions || [];
     if (sessions.length === 0) {
       out({ sessions: 0, server: 'running', port, next_step: 'Run: curator open <file.html> to start a session.' });
       return;
     }
-    for (const s of sessions) out({ ...s, server: 'running', url: `http://127.0.0.1:${port}/s/${s.session}` });
+    for (const s of sessions) out({ ...s, server: 'running', url: browserUrl(port, s.session, resolved.secret) });
     return;
   }
   const state = resolved.state;
@@ -833,5 +887,5 @@ if (!cmd || !commands[cmd]) {
 }
 
 commands[cmd](rest).catch((err) => {
-  fail(String((err && err.message) || err), USAGE);
+  fail(String((err && err.message) || err), (err && err.next_step) || USAGE);
 });

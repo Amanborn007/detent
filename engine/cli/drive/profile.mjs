@@ -80,7 +80,7 @@ const shellQuote = (p) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(p) ? p : `'${p.replac
 const ab = (p) => `//${p.replace(/^\/+/, "")}`;
 
 // The settings file one child gets. base comes from profiles/drive.json, or --profile.
-export function buildChildSettings(base, { inputs, outbox, apiKeyFile }) {
+export function buildChildSettings(base, { inputs, outbox, apiKeyFile, curatorStateDir }) {
   const { drive: _drive, $comment: _c, ...rest } = JSON.parse(JSON.stringify(base));
   const settings = {
     ...rest,
@@ -93,6 +93,7 @@ export function buildChildSettings(base, { inputs, outbox, apiKeyFile }) {
         ...STATIC_DENY,
         `Write(${ab(inputs)}/**)`, `Edit(${ab(inputs)}/**)`,
         `Write(${ab(outbox)}/.git/**)`, `Edit(${ab(outbox)}/.git/**)`,
+        ...(curatorStateDir ? ["Read", "Edit", "Write"].map((t) => `${t}(${ab(curatorStateDir)}/**)`) : []),
       ])],
     },
     disableAllHooks: true,

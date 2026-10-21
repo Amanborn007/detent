@@ -189,7 +189,7 @@ Ten skills ship in the plugin. Four are slash-only and Claude never loads them b
 | scribe | `/detent:scribe` or ask for a reply | Reads a thread and the recent history of its channel, then drafts a reply for that surface. | A draft in Slack or Gmail, or text to paste. Never sends. | Draft only. |
 | herald | `/detent:herald [-N]` | Builds the morning brief from owl results, open PRs, engine runs, and tracker, mail and chat if connected. | `.plans/morning-brief-<date>.html` and `.local/brief-state.json`. | Items you mark Act start work. |
 | owl | `/detent:owl <objective>` | Runs an unattended loop in a separate process, one small verified step per iteration. | Commits on `owl/<slug>` and state in `<repo>/.owl/`. Never pushes. | You confirm the caps first. |
-| curator | automatic for long output | Renders a plan or report as a self-contained page and returns your clicks as JSON. | Pages in `.plans/`. State in `~/.curator`. | It is the gate surface. |
+| curator | automatic for long output | Renders a plan or report as a self-contained page and returns your clicks as JSON. | Pages in `.plans/`. State and the server secret in `.local/curator/` (mode 0700). | It is the gate surface. |
 | courier | automatic, or "fulfill reads" | Lets a headless step ask for data that only an interactive session can reach. Your session reads it and hands it back. | Requests in `.local/reads/`. | No. Detent stores no credentials. |
 | examiner | `/detent:examiner <subject>` | Asks every open question about a plan in one curator round, each with a recommended answer and what breaks if it is wrong. | Answers, in `decisions.json` when inside a run. | You answer each question. |
 

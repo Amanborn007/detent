@@ -81,7 +81,7 @@ This is what stops the page going stale behind the conversation — "reported it
 in chat" is not the same as the user seeing it on the page.
 
 Feedback sent while no poll is waiting is queued durably (in memory and
-flushed to `~/.curator/state.json`); re-polling always retrieves it, even
+flushed to `state.json` in the state directory); re-polling always retrieves it, even
 across a server restart. A killed `poll` loses nothing — just re-run it.
 
 ## Feedback item shapes
@@ -141,8 +141,35 @@ about to be sent.
   `<script src="/sdk.js?s=...">` tag, placed right after the doctype so the
   browser stays in standards mode (prepended if there is no doctype). The file
   on disk is never modified, and the server refuses to read anything resolving
-  outside the artifact's registered directory. Requests with a non-loopback
-  `Host` header are refused (DNS-rebinding guard).
+  outside the artifact's registered directory.
+- `auth.mjs` — the state directory checks, the secret, and the keys derived from
+  it. Shared by the server and the CLI.
+
+## Access control
+
+State lives in `CURATOR_STATE_DIR`, or `.local/curator` in the detent clone
+(under `DETENT_ROOT` when that is set). The directory must be yours and not
+writable by others; it is created 0700 and `state.json`, `poll-failures.json`
+and `secret` are 0600.
+
+- The server creates `secret` on first start and reuses it afterwards. To rotate
+  it, stop the server, delete the file and run `curator open`.
+- The CLI sends `GET /healthz?nonce=...` first and only trusts a server whose
+  answer is `HMAC(secret, "curator-healthz:" + nonce)`. Only then does it send
+  `Authorization: Bearer <secret>`. A server without a proof (older curator, or
+  another program) gets nothing and `curator open` replaces it if its pid is a
+  curator daemon.
+- `curator open` prints a `url` ending `#c=<key>&r=<key>`. The page reads both
+  from the fragment; `c` authorises its `send`, `end` and `updates` calls and
+  `r` loads the artifact in the iframe. The fragment never reaches the server.
+  Treat the url like a password and do not paste it into tickets or PRs.
+- Every request needs `Host` exactly `127.0.0.1:<port>` (or `localhost`,
+  `[::1]`), and an `Origin` if sent must be the server itself. POST bodies must
+  be `application/json`. There is no CORS: `OPTIONS` is 405.
+- `/api/open` accepts `.html` files only.
+
+A process that runs as you without a sandbox can read `secret`, so this keeps
+out web pages and other users, not your own shell. See `SECURITY.md`.
 
 ## Tests
 
