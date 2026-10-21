@@ -1,0 +1,133 @@
+[
+  {
+    "id": "D-001",
+    "raised_by": "intake",
+    "blocks": [
+      "implement"
+    ],
+    "question": "What should slugify do with maxLength: null? (undefined means the option was not given.)",
+    "options": [
+      "treat null like undefined (no cap)",
+      "throw RangeError on null",
+      "other (specify)"
+    ],
+    "context": "brief.md#unknowns U1",
+    "status": "answered",
+    "answer": "treat null like undefined (no cap)",
+    "answered_by": "human",
+    "answered_at": "2026-10-21T06:33:54Z"
+  },
+  {
+    "id": "D-002",
+    "raised_by": "plan",
+    "blocks": [
+      "implement"
+    ],
+    "question": "The plan adds step 4, which the brief never asked for: \"Document the option in the JSDoc @param and the README example\". Keep or drop it?",
+    "options": [
+      "keep step 4",
+      "drop step 4"
+    ],
+    "context": "plan/plan.md#intent-check",
+    "status": "answered",
+    "answer": "keep step 4",
+    "answered_by": "human",
+    "answered_at": "2026-10-21T06:33:54Z"
+  },
+  {
+    "id": "D-003",
+    "gate": "intent",
+    "raised_by": "engine",
+    "blocks": [
+      "implement"
+    ],
+    "question": "Intent gate: does plan/plan.md faithfully implement brief.md (goal, acceptance criteria, constraints)? Approve to unlock implement; revise to loop back to plan.",
+    "options": [
+      "approve",
+      "revise"
+    ],
+    "context": "plan/plan.md",
+    "status": "answered",
+    "answer": "approve",
+    "answered_by": "human",
+    "answered_at": "2026-10-21T06:33:54Z"
+  },
+  {
+    "id": "D-004",
+    "raised_by": "ship",
+    "blocks": [
+      "pr"
+    ],
+    "question": "No reviewer socket is declared in stack.yaml (socket call exits 2: \"socket 'reviewer' is not declared\"). The only review was the agent's own pass over git diff main...HEAD, which found no blocking issue. How to proceed?",
+    "options": [
+      "accept the agent's own review for this PR",
+      "wire a reviewer socket first",
+      "other (specify)"
+    ],
+    "context": "ship SKILL step 2",
+    "status": "answered",
+    "answer": "wire a reviewer socket first",
+    "answered_by": "human",
+    "answered_at": "2026-10-21T06:48:09Z"
+  },
+  {
+    "id": "D-005",
+    "raised_by": "ship",
+    "blocks": [
+      "pr"
+    ],
+    "question": "No verifier socket is declared. Evidence for all 7 acceptance criteria was gathered by running slugify directly (verify/claims-run.txt) and npm test (verify/npm-test.txt, 12 pass). Accept that as the evidence for this PR?",
+    "options": [
+      "accept the hand-gathered evidence",
+      "wire a verifier socket first",
+      "other (specify)"
+    ],
+    "context": "ship SKILL step 3, evidence-unblock protocol",
+    "status": "answered",
+    "answer": "wire a verifier socket first",
+    "answered_by": "human",
+    "answered_at": "2026-10-21T06:48:09Z"
+  },
+  {
+    "id": "D-006",
+    "raised_by": "ship",
+    "blocks": [
+      "pr"
+    ],
+    "question": "Ship gate: push branch sdlc/2026-10-20-amanborn007-detent-demo-1 to Amanborn007/detent-demo and open a DRAFT PR titled \"Add a maxLength option to slugify\" with the body shown?",
+    "options": [
+      "approve this push and draft PR",
+      "do not push"
+    ],
+    "context": "ship SKILL step 6",
+    "status": "answered",
+    "answer": "approve this push and draft PR",
+    "answered_by": "human",
+    "answered_at": "2026-10-21T06:48:09Z"
+  },
+  {
+    "id": "D-007",
+    "raised_by": "ship",
+    "blocks": [
+      "ship"
+    ],
+    "question": "Reviewer finding (ask-user): With an empty or alphanumeric separator, the maxLength cut can split words, which contradicts the documented guarantee that no word is split.",
+    "finding": {
+      "summary": "With an empty or alphanumeric separator, the maxLength cut can split words, which contradicts the documented guarantee that no word is split.",
+      "location": "src/index.js:25",
+      "action": "ask-user",
+      "risk_level": "low",
+      "detail": "`slug.lastIndexOf(separator, maxLength)` assumes the separator only appears at word boundaries. With `separator: \"\"`, lastIndexOf returns `maxLength`, so `slugify(\"Hello brave\", { separator: \"\", maxLength: 7 })` gives \"hellobr\". With a separator such as \"a\", lastIndexOf can match an 'a' inside a word: `slugify(\"banana split\", { separator: \"a\", maxLength: 4 })` gives \"b\". Before this change, these separators only produced odd output. Now they also break the JSDoc promise that no word is split. Either reject separators that are empty or contain [a-z0-9] when maxLength is set, or document the limitation. No test covers these cases."
+    },
+    "options": [
+      "accept, note in PR",
+      "fix in this PR",
+      "don't ship yet"
+    ],
+    "context": "verify/reviewer-response.json",
+    "status": "answered",
+    "answer": "Fix in this PR",
+    "answered_by": "human",
+    "answered_at": "2026-10-21T07:16:26Z"
+  }
+]

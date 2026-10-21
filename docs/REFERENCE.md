@@ -168,6 +168,8 @@ sockets:
     version: "builtin"
 ```
 
+There are five built-in adapters: `gh-ticket`, `gh-bot-comments`, `repo-docs-knowledge`, `claude-reviewer` and `cmd-verifier`. `claude-reviewer` fills the `reviewer` socket. It needs a signed-in `claude` CLI, it spends tokens on every call, and it runs `claude` with no tools, no MCP servers and no user or project settings because the reviewed repo is untrusted. `cmd-verifier` fills the `verifier` socket. It runs the `--test` command, then the `--evidence` command, and passes only when the tests pass and every claim has an evidence line. Both commands run in the shell inside the repo, so they must come from your own `stack.yaml`. The evidence command prints one JSON object per line with `claim`, `kind`, `note` and an optional `artifact`. Point `--out` at a git-ignored directory, because the saved test and evidence output would otherwise show up in the diff.
+
 A command provider reads one JSON request on stdin and writes one JSON response on stdout. Exit 1 is retried once, then shown to you. A `providers:` list under a socket fans out to every entry and merges the results. A provider with `kind: skill` or `kind: mcp_tool` makes the engine print an instruction for the agent, because the CLI cannot call a skill or an MCP tool itself. Use absolute paths for adapters. A relative path resolves against the directory of your `stack.yaml`, so it fails in a work repo. The `version` field records the contract you wrote against, and the engine does not check it. If the engine says `has no 'sockets:' map`, you pointed it at the pack. Socket contracts are in `engine/sockets/`.
 
 Sentinel's bot policies are in `config/sentinel/default.json`: six bots, each with a policy of `auto_address`, `ignore` or `escalate`, and `max_iterations` of 10. Copy it and change the logins for the bots your org runs.
@@ -277,7 +279,7 @@ engine/
   cli/             detent.mjs and engine.mjs
   stages/          stage prompts and CONTRACT.md
   sockets/         socket contracts
-  adapters/        gh-ticket, repo-docs-knowledge, gh-bot-comments
+  adapters/        gh-ticket, repo-docs-knowledge, gh-bot-comments, claude-reviewer, cmd-verifier
   curator/ sentinel/ owl/ herald/ courier/
   eval/ bench/ spend/ routing/ handoff/ scout/ self-feedback/ pack/ sources/
   scripts/         leak-gate script
@@ -307,10 +309,10 @@ This is early software. Here is what is and is not checked.
 - **Not in CI:** the engine CLI tests, sentinel tests, hook tests, adapter smoke tests and the owl tests. They exist in the repo and are listed in [CONTRIBUTING.md](../CONTRIBUTING.md). Run them before you push.
 - **Owl** is tested against a stub `claude` binary, not the real one.
 - **The autoscan hook** is tested with stubbed `gh` output, not against a live PR in this repo.
-- **The stages** are prompts plus a state machine. They have not been run end to end on a public project.
+- **The stages** are prompts plus a state machine. They have been run once end to end on [Amanborn007/detent-demo#1](examples/2026-10-20-amanborn007-detent-demo-1/).
 - **Known gaps.** The stage prompts in `engine/stages/` are not registered as plugin skills, so you point Claude at them by path.
 
-A worked example is planned: a full run on a small public repo, with the run directory committed.
+A worked example is committed: a full run on a small public repo, with the run directory in [docs/examples/2026-10-20-amanborn007-detent-demo-1/](examples/2026-10-20-amanborn007-detent-demo-1/) and the resulting [demo PR](https://github.com/Amanborn007/detent-demo/pull/2).
 
 ## Credits
 

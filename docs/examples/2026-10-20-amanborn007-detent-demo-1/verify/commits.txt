@@ -1,0 +1,9 @@
+07cd059 #1: document maxLength
+00568f4 #1: treat maxLength null like undefined
+cfafc0b #1: failing test, maxLength null means no cap
+c595989 #1: back up to a separator that starts inside the cap
+9529cdc #1: failing test, multi-character separator at the cut
+9c8a38a #1: cut long slugs at the last whole separator
+15a742d #1: failing tests, cut at a separator
+709f017 #1: validate maxLength
+6f0ed4b #1: failing test, maxLength validation

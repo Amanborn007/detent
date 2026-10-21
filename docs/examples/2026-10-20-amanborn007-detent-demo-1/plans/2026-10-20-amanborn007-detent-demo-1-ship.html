@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ship gate: slugify maxLength</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --ink: #1b1e23; --paper: #fbfbfa; --muted: #5b6470; --line: #d9dde3;
+    --accent: #2563c9; --good: #1d7a3d; --warn: #9a6200; --bad: #b3362b;
+    --chip: #eef1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink: #e8eaed; --paper: #191b1f; --muted: #9aa3ae; --line: #33383f; --chip: #23262b; }
+  }
+  * { box-sizing: border-box; min-width: 0; }
+  body {
+    margin: 0; padding: 32px 20px 80px; background: var(--paper); color: var(--ink);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+  h1 { font-size: 26px; margin: 0; letter-spacing: -.01em; }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 0 0 10px; }
+  p { margin: 0 0 10px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  section { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+  .phases { display: flex; flex-direction: column; gap: 10px; }
+  .phase { display: flex; gap: 12px; align-items: baseline; }
+  .phase b { flex: none; width: 72px; font-variant-numeric: tabular-nums; }
+  .risk { border-left: 4px solid var(--bad); background: var(--chip); border-radius: 6px; padding: 10px 12px; margin: 8px 0; }
+  .risk.medium { border-left-color: var(--warn); }
+  .risk .sev { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--bad); }
+  .risk.medium .sev { color: var(--warn); }
+  .options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 620px) { .options { grid-template-columns: 1fr; } }
+  .option { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .option h3 { margin: 0 0 6px; font-size: 15px; }
+  .option ul { margin: 6px 0 0; padding-left: 18px; }
+  .option li { margin: 3px 0; }
+  .pro { color: var(--good); } .con { color: var(--bad); }
+  .q-label { font-weight: 600; margin-bottom: 10px; }
+  .hint { font-size: 12.5px; color: var(--muted); font-style: italic; }
+  button.custom {
+    border: 1px solid var(--accent); color: var(--accent); background: none;
+    border-radius: 8px; padding: 8px 14px; font: 600 13px inherit; cursor: pointer;
+  }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  td, th { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+  ol li { margin: 6px 0; } code { background: var(--chip); padding: 1px 4px; border-radius: 4px; }
+  pre { background: var(--chip); padding: 10px 12px; border-radius: 8px; overflow-x: auto; font-size: 13px; white-space: pre-wrap; }
+</style></head><body><main>
+<header><h1>Ship gate: push and open a draft PR</h1>
+<p class="meta">Amanborn007/detent-demo#1 · run 2026-10-20-amanborn007-detent-demo-1 · nothing is pushed until you approve D-006</p></header>
+<section><h2>What would be published</h2>
+<p>Branch <code>sdlc/2026-10-20-amanborn007-detent-demo-1</code> pushed to Amanborn007/detent-demo, and a draft PR titled "Add a maxLength option to slugify". Recheck found no drift from the approved plan.</p>
+<pre> README.md            |  1 +
+ src/index.js         | 14 ++++++++++++--
+ test/slugify.test.js | 33 +++++++++++++++++++++++++++++++++
+ 3 files changed, 46 insertions(+), 2 deletions(-)
+</pre><pre>07cd059 #1: document maxLength
+00568f4 #1: treat maxLength null like undefined
+cfafc0b #1: failing test, maxLength null means no cap
+c595989 #1: back up to a separator that starts inside the cap
+9529cdc #1: failing test, multi-character separator at the cut
+9c8a38a #1: cut long slugs at the last whole separator
+15a742d #1: failing tests, cut at a separator
+709f017 #1: validate maxLength
+6f0ed4b #1: failing test, maxLength validation
+</pre></section>
+<section><h2>Evidence manifest</h2><table><tr><th>Acceptance criterion</th><th>Evidence in verify/claims-run.txt</th></tr><tr><td>At most <code>maxLength</code> characters</td><td>C1: caps 5, 11, 12, 13 give lengths 5, 11, 11, 11</td></tr><tr><td>Cut lands on a separator</td><td>C2: <code>hello-brave</code>, and <code>ab--cd</code> with <code>--</code></td></tr><tr><td>First word longer than the cap is cut</td><td>C3: <code>super</code></td></tr><tr><td>Never ends in the separator</td><td>C4: <code>hello-brave</code> at 12, <code>ab</code> with <code>--</code> at 3</td></tr><tr><td><code>RangeError</code> below 1 or not an integer</td><td>C5: 0, -1, 2.5, "10", NaN all throw</td></tr><tr><td>Unchanged without <code>maxLength</code></td><td>C6, plus the 5 tests that existed before</td></tr><tr><td>Tests cover each criterion</td><td><code>npm test</code>: 12 pass, 0 fail</td></tr></table>
+<details><summary>Raw evidence run</summary><pre>C1 result is at most maxLength characters
+  maxLength 5
+  =&gt; &quot;hello (length 5)&quot;
+  maxLength 11
+  =&gt; &quot;hello-brave (length 11)&quot;
+  maxLength 12
+  =&gt; &quot;hello-brave (length 11)&quot;
+  maxLength 13
+  =&gt; &quot;hello-brave (length 11)&quot;
+C2 cut lands on a separator
+  maxLength 13
+  =&gt; &quot;hello-brave&quot;
+  separator &quot;--&quot;, maxLength 7, &quot;ab cd ef&quot;
+  =&gt; &quot;ab--cd&quot;
+C3 first word longer than maxLength is cut
+  maxLength 5, &quot;Supercalifragilistic expialidocious&quot;
+  =&gt; &quot;super&quot;
+C4 never ends in the separator
+  maxLength 12
+  =&gt; &quot;hello-brave&quot;
+  separator &quot;--&quot;, maxLength 3, &quot;ab cd&quot;
+  =&gt; &quot;ab&quot;
+C5 RangeError below 1 or not an integer
+  maxLength 0
+  =&gt; RangeError: maxLength must be an integer of at least 1
+  maxLength -1
+  =&gt; RangeError: maxLength must be an integer of at least 1
+  maxLength 2.5
+  =&gt; RangeError: maxLength must be an integer of at least 1
+  maxLength &quot;10&quot;
+  =&gt; RangeError: maxLength must be an integer of at least 1
+  maxLength NaN
+  =&gt; RangeError: maxLength must be an integer of at least 1
+C6 unchanged without maxLength, and with null per D-001
+  no options
+  =&gt; &quot;hello-brave-new-world&quot;
+  maxLength null
+  =&gt; &quot;hello-brave-new-world&quot;
+</pre></details></section>
+<section><h2>Review</h2><p>My own pass found nothing blocking. One existing quirk is out of scope and noted in the PR body: the trim regex built from a <code>--</code> separator matches any run of two or more dashes. No reviewer or verifier socket is wired, so D-004 and D-005 ask whether that is acceptable for this PR.</p></section>
+<section><h2>Draft PR body</h2><pre>Closes #1. Callers can cap a slug&#x27;s length with `maxLength`, and the cut never splits a word or leaves a dangling separator.
+
+Run `2026-10-20-amanborn007-detent-demo-1`, made with [Detent](https://github.com/Amanborn007/detent). The plan and the run record are in Detent&#x27;s `docs/examples/`.
+
+## What changed
+- `slugify(input, { maxLength })` validates `maxLength` (an integer of at least 1, else `RangeError`). `null` or omitted means no cap.
+- A long slug is cut at the last separator that starts within the cap. With no separator in range, the first word is cut at `maxLength`.
+- JSDoc and README document the option.
+
+## Evidence
+| Acceptance criterion | Evidence |
+|---|---|
+| At most `maxLength` characters | `verify/claims-run.txt` C1: lengths 5, 11, 11, 11 for caps 5, 11, 12, 13 |
+| Cut lands on a separator | C2: `hello-brave`, and `ab--cd` with a `--` separator |
+| First word longer than the cap is cut | C3: `super` |
+| Never ends in the separator | C4: `hello-brave` at cap 12, `ab` with `--` at cap 3 |
+| `RangeError` below 1 or not an integer | C5: 0, -1, 2.5, &quot;10&quot;, NaN all throw |
+| Unchanged without `maxLength` | C6, plus the 5 tests that existed before |
+| Tests cover each criterion | `npm test`: 12 pass, 0 fail |
+
+## Decisions
+- D-001 `maxLength: null`: treat null like undefined (no cap).
+- D-002 docs step: keep step 4.
+
+## Reviewer notes
+- No reviewer or verifier socket is wired for this repo. The review was the agent&#x27;s own pass, and the evidence above was gathered by running the function directly.
+- Not changed: the existing trim regex is built from the separator, so with `--` it reads `^--+`. That matches any run of two or more dashes, which is out of scope here.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+</pre></section>
+<section><h2>Decision D-004: no reviewer socket</h2><div data-plan-question="D-004" data-curator-answered="wire a reviewer socket first" data-curator-answered-at="2026-10-21T06:47:32.472Z">
+<p class="q-label">No reviewer socket is declared. The only review was my own pass over the diff. How to proceed?</p>
+<div class="options"><div class="option" data-plan-option="accept the agent's own review for this PR"><h3>Accept my review</h3><ul><li class="pro">Matches the built-in-adapters-only setup for this example</li><li class="con">No independent reviewer saw the diff</li></ul></div>
+<div class="option" data-plan-option="wire a reviewer socket first" data-curator-answered-option><h3>Wire a reviewer</h3><ul><li class="pro">An independent pass</li><li class="con">Detent ships no built-in reviewer adapter</li></ul></div></div></div></section>
+<section><h2>Decision D-005: no verifier socket</h2><div data-plan-question="D-005" data-curator-answered="wire a verifier socket first" data-curator-answered-at="2026-10-21T06:47:32.474Z">
+<p class="q-label">Evidence for all 7 criteria came from running slugify directly and from npm test. Accept it as this PR's evidence?</p>
+<div class="options"><div class="option" data-plan-option="accept the hand-gathered evidence"><h3>Accept</h3><ul><li class="pro">A pure function's real behaviour is its return value</li><li class="con">Gathered by the same agent that wrote the code</li></ul></div>
+<div class="option" data-plan-option="wire a verifier socket first" data-curator-answered-option><h3>Wire a verifier</h3><ul><li class="pro">Evidence from an independent tool</li><li class="con">No built-in verifier adapter exists</li></ul></div></div></div></section>
+<section><h2>Decision D-006: ship gate</h2><div data-plan-question="D-006" data-curator-answered="approve this push and draft PR" data-curator-answered-at="2026-10-21T06:47:32.474Z">
+<p class="q-label">Push the branch and open the draft PR shown above?</p>
+<div class="options"><div class="option" data-plan-option="approve this push and draft PR" data-curator-answered-option><h3>Approve</h3><ul><li class="pro">The PR opens as a draft; marking it ready stays your call</li></ul></div>
+<div class="option" data-plan-option="do not push"><h3>Do not push</h3><ul><li class="pro">Nothing is published</li></ul></div></div></div></section>
+</main></body></html>

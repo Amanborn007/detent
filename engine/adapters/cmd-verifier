@@ -1,0 +1,151 @@
+#!/usr/bin/env node
+/**
+ * cmd-verifier — built-in adapter for the `verifier` socket (see engine/sockets/verifier.md).
+ *
+ * Runs your test command, then your evidence command, and checks that every
+ * claim in the request has at least one evidence entry. Zero dependencies.
+ *
+ * Both commands run through the shell with cwd set to repo_path. They come from
+ * stack.yaml, which is trusted config, so never feed them request data.
+ *
+ * Args:   --test "<cmd>" (required)  --evidence "<cmd>" (required)  --out <dir> (default .verify, under repo_path)
+ * stdin:  {"repo_path","diff_ref","ticket_id","claims":[...]}
+ * The evidence command also gets that request on its stdin and prints one JSON
+ * object per line: {"claim","kind","note","artifact"?}.
+ * stdout: {"verdict","test_results","evidence","uncovered_claims"?,"next_step"}
+ * exit:   0 pass | 1 fail or evidence missing | 2 contract violation (bad request or bad evidence line)
+ */
+"use strict";
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+
+const KINDS = ["e2e-run", "integration", "screenshot", "log-capture", "request-trace"];
+
+function emit(obj, code) {
+  process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
+  process.exit(code);
+}
+
+function bad(error, next_step) {
+  emit({ error, next_step }, 2);
+}
+
+function readStdin() {
+  const chunks = [];
+  const buf = Buffer.alloc(65536);
+  while (true) {
+    let n;
+    try { n = fs.readSync(0, buf, 0, buf.length); } catch (e) {
+      if (e.code === "EAGAIN") continue;
+      throw e;
+    }
+    if (n === 0) break;
+    chunks.push(Buffer.from(buf.slice(0, n)));
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function parseArgs(argv) {
+  const out = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--test" || a === "--evidence" || a === "--out") out[a.slice(2)] = argv[++i];
+    else bad("unknown argument: " + a, "use --test, --evidence and --out");
+  }
+  return out;
+}
+
+const args = parseArgs(process.argv.slice(2));
+if (!args.test) bad("--test is required", 'add args: ["--test", "<cmd>", "--evidence", "<cmd>"] to stack.yaml');
+if (!args.evidence) bad("--evidence is required", 'add args: ["--test", "<cmd>", "--evidence", "<cmd>"] to stack.yaml');
+
+let req;
+try { req = JSON.parse(readStdin()); } catch (e) {
+  bad("stdin is not valid JSON: " + e.message, "send the verifier request JSON on stdin");
+}
+const fix = "fix the request and re-invoke (see engine/sockets/verifier.md)";
+if (!req || typeof req !== "object") bad("request must be a JSON object", fix);
+if (typeof req.repo_path !== "string" || !path.isAbsolute(req.repo_path) ||
+    !fs.existsSync(req.repo_path) || !fs.statSync(req.repo_path).isDirectory()) {
+  bad("repo_path must be an absolute path to an existing directory", fix);
+}
+if (typeof req.diff_ref !== "string" || !req.diff_ref) bad("diff_ref must be a non-empty string", fix);
+if (typeof req.ticket_id !== "string" || !req.ticket_id) bad("ticket_id must be a non-empty string", fix);
+if (!Array.isArray(req.claims) || req.claims.length === 0 || !req.claims.every(c => typeof c === "string")) {
+  bad("claims must be a non-empty array of strings", fix);
+}
+
+const outDir = path.resolve(req.repo_path, args.out || ".verify");
+fs.mkdirSync(outDir, { recursive: true });
+const rel = path.relative(req.repo_path, outDir) || ".";
+const ignored = spawnSync("git", ["-C", req.repo_path, "check-ignore", "-q", rel + "/"]);
+if (ignored.status !== 0) {
+  process.stderr.write(`warning: ${outDir} is not ignored by git in ${req.repo_path}, so the artifacts will show up in the diff\n`);
+}
+
+function sh(cmd, input) {
+  return spawnSync(cmd, {
+    shell: true, cwd: req.repo_path, input, encoding: "utf8", maxBuffer: 256 * 1024 * 1024,
+  });
+}
+
+const testRun = sh(args.test);
+if (testRun.error) emit({ error: "test command could not run: " + testRun.error.message, next_step: "check --test" }, 1);
+const testOut = (testRun.stdout || "") + (testRun.stderr || "");
+const testFile = path.join(outDir, "test-output.txt");
+fs.writeFileSync(testFile, testOut);
+
+const testExit = testRun.status === null ? 1 : testRun.status;
+const pass = /^# pass (\d+)/m.exec(testOut);
+const fail = /^# fail (\d+)/m.exec(testOut);
+const test_results = { command: args.test };
+if (pass && fail) {
+  test_results.passed = Number(pass[1]);
+  test_results.failed = Number(fail[1]);
+} else {
+  test_results.passed = testExit === 0 ? 1 : 0;
+  test_results.failed = testExit === 0 ? 0 : 1;
+  test_results.note = "no TAP '# pass' and '# fail' lines found, so counts come from the exit code";
+}
+
+const evRun = sh(args.evidence, JSON.stringify(req));
+if (evRun.error) emit({ error: "evidence command could not run: " + evRun.error.message, next_step: "check --evidence" }, 1);
+const evFile = path.join(outDir, "evidence-output.txt");
+fs.writeFileSync(evFile, evRun.stdout || "");
+
+const evidence = [];
+(evRun.stdout || "").split("\n").forEach((line, i) => {
+  if (!line.trim()) return;
+  const where = `evidence output line ${i + 1}`;
+  const evFix = "the evidence command must print one JSON object per line: {claim, kind, note, artifact?}";
+  let e;
+  try { e = JSON.parse(line); } catch (err) {
+    bad(`${where} is not valid JSON: ${err.message}`, evFix);
+  }
+  if (!e || typeof e !== "object" || typeof e.claim !== "string" || typeof e.note !== "string") {
+    bad(`${where} needs string fields claim and note`, evFix);
+  }
+  if (!KINDS.includes(e.kind)) bad(`${where} has kind '${e.kind}', expected one of ${KINDS.join(" | ")}`, evFix);
+  if (e.artifact !== undefined && typeof e.artifact !== "string") bad(`${where} artifact must be a string`, evFix);
+  evidence.push({ claim: e.claim, kind: e.kind, artifact: e.artifact || evFile, note: e.note });
+});
+
+const covered = new Set(evidence.map(e => e.claim));
+const uncovered = req.claims.filter(c => !covered.has(c));
+const ok = testExit === 0 && test_results.failed === 0 && uncovered.length === 0 && evidence.length > 0;
+
+if (ok) {
+  emit({
+    verdict: "pass", test_results, evidence,
+    next_step: `attach ${evFile} and the evidence artifact paths to the PR description, then mark the PR ready`,
+  }, 0);
+}
+const why = [];
+if (testExit !== 0 || test_results.failed > 0) why.push(`tests failed, see ${testFile}`);
+if (uncovered.length) why.push(`${uncovered.length} claim(s) have no evidence`);
+emit({
+  verdict: "fail", test_results, evidence,
+  ...(uncovered.length ? { uncovered_claims: uncovered } : {}),
+  next_step: why.join("; ") + ". Fix and re-invoke.",
+}, 1);
