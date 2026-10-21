@@ -164,11 +164,11 @@ function bombBundle(w, head, resultBytes) {
     const body = g(w.work, ["cat-file", type, oid], { raw: true });
     return Buffer.concat([hdr(TYPES[type], body.length), deflateSync(body)]);
   });
-  const BASE_LEN = 0xffffff;
+  const BASE_LEN = 0x100000;
   const baseEntry = Buffer.concat([hdr(3, BASE_LEN), deflateSync(Buffer.alloc(BASE_LEN), { level: 9 })]);
   const n = Math.ceil(resultBytes / BASE_LEN);
   const ins = Buffer.alloc(n * 4);
-  for (let i = 0; i < n; i++) { ins[i * 4] = 0xf0; ins[i * 4 + 1] = 0xff; ins[i * 4 + 2] = 0xff; ins[i * 4 + 3] = 0xff; }
+  for (let i = 0; i < n; i++) { ins[i * 4] = 0xf0; ins[i * 4 + 1] = 0x00; ins[i * 4 + 2] = 0x00; ins[i * 4 + 3] = 0x10; }
   const delta = Buffer.concat([varint(BASE_LEN), varint(n * BASE_LEN), ins]);
   let body = Buffer.concat(entries);
   const baseOfs = 12 + body.length;
