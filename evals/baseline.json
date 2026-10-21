@@ -1,10 +1,10 @@
 {
   "schema": "detent-eval-baseline-v1",
-  "generated_at": "2026-10-19T12:21:16.285Z",
-  "git_sha": "7a10349",
+  "generated_at": "2026-10-20T15:02:21.713Z",
+  "git_sha": "4e53929",
   "suites": {
     "context-adherence": {
-      "score": 0.9167,
+      "score": 1,
       "cases": {
         "S1-1": {
           "score": 1,
@@ -29,13 +29,13 @@
           ]
         },
         "S1-11": {
-          "score": 0,
-          "pass": false,
+          "score": 1,
+          "pass": true,
           "checks": [
             {
               "name": "hooks-wiring-parity",
-              "ok": false,
-              "detail": "hooks/cold-resume-warn.mjs: has a shebang (directly-executable hook script) but is not wired anywhere in hooks.json; hooks/session-cost-statusline.mjs: has a shebang (directly-executable hook script) but is not wired anywhere in hooks.json"
+              "ok": true,
+              "detail": "14 wired script(s) verified on disk; 14 hooks/ script(s) verified wired"
             }
           ]
         },
@@ -57,7 +57,7 @@
             {
               "name": "hooks-kill-switch",
               "ok": true,
-              "detail": "13 hook script(s) verified (3 kill-switch-checked)"
+              "detail": "14 hook script(s) verified (3 kill-switch-checked)"
             }
           ]
         },
@@ -90,7 +90,7 @@
             {
               "name": "ledger-parseable",
               "ok": true,
-              "detail": "benchmarks/ledger.jsonl is empty — trivially valid"
+              "detail": "1 ledger line(s) parsed and shape-checked"
             }
           ]
         },

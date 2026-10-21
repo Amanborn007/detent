@@ -1,0 +1,9 @@
+[
+  "`slugify(input, { maxLength })` returns a string of at most `maxLength` characters",
+  "The cut lands on a separator, so no word is split",
+  "When the first word alone is longer than `maxLength`, that word is cut at `maxLength`",
+  "The result never ends in the separator",
+  "`maxLength` below 1, or not an integer, throws `RangeError`",
+  "Calls without `maxLength` return exactly what they return today",
+  "Tests cover each criterion above"
+]

@@ -1,0 +1,11 @@
+{"ts":"2026-10-21T07:58:31Z","decision":"D-001","option":"throw RangeError on null","why":"a null from a config file means unset; separator already treats ?? that way"}
+{"ts":"2026-10-21T07:58:31Z","decision":"D-001","option":"other (specify)","why":"no other behaviour was needed"}
+{"ts":"2026-10-21T07:58:31Z","decision":"D-002","option":"drop step 4","why":"an option nobody can find in the docs is not usable"}
+{"ts":"2026-10-21T07:58:31Z","decision":"D-003","option":"revise","why":"the fresh intent check covered all 7 criteria"}
+{"ts":"2026-10-21T07:58:32Z","decision":"D-004","option":"accept the agent's own review for this PR","why":"wanted a reviewer independent of the author"}
+{"ts":"2026-10-21T07:58:32Z","decision":"D-005","option":"accept the hand-gathered evidence","why":"evidence from the author is not independent"}
+{"ts":"2026-10-21T07:58:32Z","decision":"D-006","option":"do not push","why":"the change was ready and verified"}
+{"ts":"2026-10-21T07:58:32Z","decision":"D-007","option":"accept, note in PR","why":"it broke the documented no-split guarantee"}
+{"ts":"2026-10-21T07:58:32Z","decision":"D-007","option":"don't ship yet","why":"the fix was small and test-first"}
+{"ts":"2026-10-21T08:04:08Z","decision":"D-004","option":"other (specify)","why":"no third path was needed"}
+{"ts":"2026-10-21T08:04:08Z","decision":"D-005","option":"other (specify)","why":"no third path was needed"}

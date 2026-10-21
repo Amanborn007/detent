@@ -54,6 +54,8 @@ If you have nothing yet, start with only the built-in adapters, and give each `c
 - `/path/to/detent/engine/adapters/gh-ticket` for the `ticket` socket (a GitHub issue).
 - `/path/to/detent/engine/adapters/repo-docs-knowledge` for the `knowledge` socket (grep over the repo's own docs).
 - `/path/to/detent/engine/adapters/gh-bot-comments` for the `bot-comments` socket.
+- `/path/to/detent/engine/adapters/claude-reviewer` for the `reviewer` socket (needs a signed-in `claude` CLI, spends tokens).
+- `/path/to/detent/engine/adapters/cmd-verifier` for the `verifier` socket (runs your `--test` and `--evidence` commands).
 
 Leave the other sockets out. Check that everything is wired:
 
@@ -132,6 +134,8 @@ detent gate open <gate-id> --repo ~/code/your-repo
 ```
 
 With curator installed this writes `.plans/<run-id>-<gate>.html`, a page with one question per pending decision and the plan or research text underneath, and prints a `curator open` command. Answer in the browser, then run `detent gate collect --run <run-id>`. It reads your clicks from curator and writes an answer into `decisions.json` only when it is exactly one of the decision's options. Anything else stays pending and is listed under `unresolved`. Comments you add are saved to `review-feedback.jsonl` in the run directory. Run `detent dashboard` to see every active run with its stage and pending gates.
+
+**Letting the engine drive.** `detent drive --run <run-id>` runs the stages for you with one headless Claude child per stage and stops when it needs your decision, before implement, or when it has spent `--budget` (default 5 USD). In a Claude Code session, `/detent:drive` launches it in the background and walks you through the gate page. `detent drive` is experimental, works on macOS and Linux only, and spends Claude credit. It covers intake, research and plan only; children get file tools and no Bash, so the target repo's hooks and scripts never run. The details are in [engine/cli/README.md](engine/cli/README.md).
 
 ### 4.3 You pushed a PR
 

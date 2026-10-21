@@ -5,7 +5,24 @@
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-c8501a.svg)](https://code.claude.com/docs/en/plugins)
 [![Version](https://img.shields.io/badge/version-0.11.0-informational.svg)](.claude-plugin/plugin.json)
 
-**Hand Claude Code a ticket. Get back a draft PR you approved twice.**
+**Ticket in. Draft PR out. Nothing ships without your yes.**
+
+From `detent setup` to the plan gate in 20 seconds, on the real engine. A stub stands in for your tracker so it runs offline, and canned files stand in for Claude's stage output.
+
+<p align="center">
+  <img alt="A terminal runs detent setup, then detent run new for a ticket, then the stages one line each, and stops at the plan gate with 'waiting on you: plan approval' and the path of the gate page." src="docs/demo/demo.gif" width="720">
+</p>
+
+<!-- DRIVE-CLIP: add the in-Claude-Code recording here once `detent drive` ships. Script: docs/demo/RECORDING.md -->
+
+The plan gate opens as a local page. You click approve or revise.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/demo-gate-dark.png">
+    <img alt="The plan gate page for the demo run: the question, approve and revise buttons, and the plan text under review." src="docs/assets/demo-gate.png" width="560">
+  </picture>
+</p>
 
 Left alone, an agent can spend an hour building the wrong thing and then push it. Detent stops it twice. It researches the ticket and writes a plan, then waits for you. It builds in a worktree, checks the diff against the plan you approved, then waits again before it pushes. It never merges.
 
@@ -120,7 +137,7 @@ sockets:
         version: "builtin"
 ```
 
-Three GitHub adapters ship with Detent: `gh-ticket`, `repo-docs-knowledge` and `gh-bot-comments`. With those alone you can take a GitHub issue through a run. Add your own `reviewer` and `verifier` to give the ship stage real checks. A socket you leave out is off, and the stage that needs it says so instead of guessing. The contracts are in `engine/sockets/`, and [GUIDE.md](GUIDE.md#6-writing-a-provider-and-a-pack) walks through writing a provider.
+Five adapters ship with Detent: `gh-ticket`, `repo-docs-knowledge`, `gh-bot-comments`, `claude-reviewer` and `cmd-verifier`. With the first three you can take a GitHub issue through a run. Add `claude-reviewer` (needs a signed-in `claude` CLI and spends tokens) and `cmd-verifier` (runs your own test and evidence commands) to give the ship stage real checks. A socket you leave out is off, and the stage that needs it says so instead of guessing. The contracts are in `engine/sockets/`, and [GUIDE.md](GUIDE.md#6-writing-a-provider-and-a-pack) walks through writing a provider.
 
 ## What it needs
 
@@ -150,7 +167,7 @@ Type them as `/detent:<skill>`.
 
 ## Status
 
-Early, v0.11.0. Most of it waits for you, but a few hooks run on their own, for example a review prompt after `git push`. [What runs without asking](docs/REFERENCE.md#what-runs-without-asking-you) lists every one and its kill switch. The stages have not yet run end to end on a public project, and a worked example is coming.
+Early, v0.11.0. Most of it waits for you, but a few hooks run on their own, for example a review prompt after `git push`. [What runs without asking](docs/REFERENCE.md#what-runs-without-asking-you) lists every one and its kill switch. One run of all seven stages is committed as a [worked example](docs/examples/2026-10-20-amanborn007-detent-demo-1/), and it produced [this demo PR](https://github.com/Amanborn007/detent-demo/pull/2).
 
 ## Read more
 

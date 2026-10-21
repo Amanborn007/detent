@@ -1,0 +1,74 @@
+
+> detent-demo@0.1.0 test
+> node --test
+
+TAP version 13
+# Subtest: lowercases and joins words with dashes
+ok 1 - lowercases and joins words with dashes
+  ---
+  duration_ms: 0.569
+  ...
+# Subtest: strips accents
+ok 2 - strips accents
+  ---
+  duration_ms: 0.086583
+  ...
+# Subtest: collapses runs of punctuation and trims the ends
+ok 3 - collapses runs of punctuation and trims the ends
+  ---
+  duration_ms: 0.054917
+  ...
+# Subtest: honours a custom separator
+ok 4 - honours a custom separator
+  ---
+  duration_ms: 0.120833
+  ...
+# Subtest: rejects non-strings
+ok 5 - rejects non-strings
+  ---
+  duration_ms: 0.186459
+  ...
+# Subtest: rejects a maxLength below 1 or not an integer
+ok 6 - rejects a maxLength below 1 or not an integer
+  ---
+  duration_ms: 0.094708
+  ...
+# Subtest: caps the length by cutting at the last separator that fits
+ok 7 - caps the length by cutting at the last separator that fits
+  ---
+  duration_ms: 0.063792
+  ...
+# Subtest: never leaves a trailing separator after the cut
+ok 8 - never leaves a trailing separator after the cut
+  ---
+  duration_ms: 0.123333
+  ...
+# Subtest: cuts a first word that is longer than maxLength
+ok 9 - cuts a first word that is longer than maxLength
+  ---
+  duration_ms: 0.095042
+  ...
+# Subtest: never splits a multi-character separator
+ok 10 - never splits a multi-character separator
+  ---
+  duration_ms: 0.148083
+  ...
+# Subtest: leaves output unchanged when maxLength is not given or not needed
+ok 11 - leaves output unchanged when maxLength is not given or not needed
+  ---
+  duration_ms: 0.055042
+  ...
+# Subtest: treats maxLength: null as no cap
+ok 12 - treats maxLength: null as no cap
+  ---
+  duration_ms: 0.087666
+  ...
+1..12
+# tests 12
+# suites 0
+# pass 12
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 63.741375

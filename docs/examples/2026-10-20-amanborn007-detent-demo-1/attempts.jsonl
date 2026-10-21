@@ -1,0 +1,1 @@
+{"ts":"2026-10-21T06:39:18Z","stage":"implement","approach":"cut with window.lastIndexOf(separator) on slug.slice(0, maxLength)","outcome":"failed","evidence":"a multi-character separator that starts inside the cap but ends past it is invisible to the window, so 'ab--cd--ef' at maxLength 7 gave 'ab'; red test 9529cdc, fixed by slug.lastIndexOf(separator, maxLength) in c595989"}

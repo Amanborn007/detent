@@ -1,0 +1,2 @@
+Tests cover each criterion above
+see test-output.txt: npm test in the repo under test

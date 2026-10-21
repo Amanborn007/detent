@@ -18,19 +18,19 @@
 
 import {
   readFileSync, writeFileSync, appendFileSync, renameSync, existsSync,
-  mkdirSync, readdirSync, statSync, accessSync, constants, rmSync, realpathSync, writeSync,
+  mkdirSync, readdirSync, statSync, accessSync, constants, rmSync, realpathSync, writeSync, mkdtempSync,
 } from "node:fs";
 import { join, resolve, dirname, delimiter, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { spawnSync, spawn } from "node:child_process";
 import process from "node:process";
 import { runBenchmark, checkpointBenchmark, ledgerLine } from "../bench/bench.mjs";
 import { runEval, EvalRefusal, resolveEvalRoots } from "../eval/eval.mjs";
 import { loadRoutingConfig, tierOf, advisorConsultEvent } from "../routing/routing.mjs";
 import { readSteps, renderLiveHtml, isRunComplete, STEP_KINDS, STEP_STATUSES } from "./liveview.mjs";
-import { loadRunState, buildNote, checkSufficiency, currentStage } from "../handoff/handoff.mjs";
+import { loadRunState, buildNote, checkSufficiency, currentStage, optionKey } from "../handoff/handoff.mjs";
 import { analyzeSpend, trackingLine, compareTracking } from "../spend/spend.mjs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { resolvePackPath, validatePackFile, PackPathError } from "../pack/pack.mjs";
 
 // ---------------------------------------------------------------------------
@@ -77,6 +77,11 @@ const STAGE_END_GATES = {
 // Output helpers — one JSON line, always a next_step, structured refusals.
 // ---------------------------------------------------------------------------
 
+// There is no `engine` binary on PATH; under the detent wrapper, name the one that exists.
+function forCaller(text) {
+  return process.env.DETENT_CLI === "1" ? text.replace(/\bengine (?=(?:setup|run|stage|gate|drive|socket|next|dashboard|live|bench|eval|pack|respond|step|advisor|handoff|attempt|env|decide-why|spend|help)\b)/g, "detent ") : text;
+}
+
 // process.exit() drops a buffered stream write, and a pipe truncates past ~8KB.
 // Write synchronously and retry the EAGAIN a non-blocking pipe returns.
 function writeLineSync(line) {
@@ -92,6 +97,7 @@ function writeLineSync(line) {
 }
 
 function out(obj, code = 0) {
+  if (typeof obj.next_step === "string") obj.next_step = forCaller(obj.next_step);
   writeLineSync(JSON.stringify(obj) + "\n");
   process.exit(code);
 }
@@ -431,6 +437,7 @@ function cmdRunNew(flags) {
   const wantWorktree = !flags["no-worktree"];
   let worktree = null;
   let branch = null;
+  let baseSha = null;
   if (wantWorktree) {
     const head = spawnSync("git", ["-C", repo, "rev-parse", "--verify", "-q", "HEAD"], { encoding: "utf8" });
     if (head.status !== 0) {
@@ -439,6 +446,7 @@ function cmdRunNew(flags) {
         "commit something first, or pass --no-worktree to run without a dedicated worktree",
       );
     }
+    baseSha = head.stdout.trim();
     branch = `sdlc/${runId}`;
     worktree = join(runDir, "worktree");
     mkdirSync(runDir, { recursive: true });
@@ -458,6 +466,7 @@ function cmdRunNew(flags) {
     repo,
     worktree,
     branch,
+    base_sha: baseSha,
     created_at: nowIso(),
   });
   const stages = {};
@@ -798,6 +807,13 @@ function endStage(stage, repo, runId, runDir, tddRecord) {
   if (entry.status !== "in_progress" && entry.status !== "blocked") {
     return no(`cannot end '${stage}': it is '${entry.status}', not in_progress (was it ever begun?)`,
       `engine stage begin ${stage} --run ${runId} --repo ${repo}`);
+  }
+  const endBlockers = pendingBlockers(loadDecisions(runDir), stage);
+  if (endBlockers.length > 0) {
+    const ids = endBlockers.map((d) => d.id);
+    refuse(`cannot end '${stage}': pending decision(s) block it: ${ids.join(", ")}`,
+      `engine gate open ${endBlockers[0].gate || ids[0]} --run ${runId} --repo ${repo}`,
+      { blocked_on: ids });
   }
   // Required artifacts per CONTRACT.md. Every missing one is named, so a single
   // re-run fixes them all rather than one refusal per file.
@@ -1471,7 +1487,9 @@ function runExec(entry, payload, stackPath, providerName) {
     timeout,
   });
   let r = attempt();
-  if (r.status === 1) {
+  // A JSON body on exit 1 is a deliberate provider answer, so retrying cannot change it.
+  const jsonBody = (x) => { try { return JSON.parse(x.stdout); } catch { return undefined; } };
+  if (r.status === 1 && jsonBody(r) === undefined) {
     process.stderr.write(`warning: provider '${providerName}' exited 1, retrying once\n`);
     r = attempt();
   }
@@ -1479,7 +1497,13 @@ function runExec(entry, payload, stackPath, providerName) {
     return { ok: false, code: 1, stderr: `spawn failed: ${r.error.message}` };
   }
   if (r.status !== 0) {
-    return { ok: false, code: r.status === 2 ? 2 : 1, stderr: (r.stderr || "").trim() };
+    const body = r.status === 1 || r.status === 2 ? jsonBody(r) : undefined;
+    return {
+      ok: false,
+      code: r.status === 2 ? 2 : 1,
+      stderr: (r.stderr || "").trim(),
+      ...(body !== undefined ? { response: body } : {}),
+    };
   }
   try {
     return { ok: true, code: 0, response: JSON.parse(r.stdout) };
@@ -1536,9 +1560,11 @@ function cmdSocketCall(name, flags) {
   if (kind === "exec") {
     const r = runExec(entry, payload, stackPath, name);
     if (!r.ok) {
-      const msg = `socket '${name}' exec provider failed (exit ${r.code}): ${r.stderr}`;
-      if (r.code === 2) refuse(msg, "the provider rejected the request as a contract violation — fix the payload or the provider");
-      fail(msg, "check the provider command in stack.yaml, then re-invoke");
+      const why = r.stderr || (r.response && typeof r.response.error === "string" ? r.response.error : "");
+      const msg = `socket '${name}' exec provider failed (exit ${r.code}): ${why}`;
+      const extra = r.response !== undefined ? { response: r.response } : {};
+      if (r.code === 2) refuse(msg, "the provider rejected the request as a contract violation — fix the payload or the provider", extra);
+      fail(msg, "check the provider command in stack.yaml, then re-invoke", extra);
     }
     out({
       ok: true,
@@ -2432,11 +2458,11 @@ function cmdDecideWhy(flags) {
   }
   // Recording a reason for the option that WON would be incoherent, and would
   // satisfy the sufficiency check without explaining any discard.
-  if (target.answer !== undefined && option === target.answer) {
+  if (target.answer !== undefined && optionKey(option) === optionKey(target.answer)) {
     refuse(`option ${JSON.stringify(option)} is the ANSWER to ${decision}, not a discard`,
       "record why the REJECTED options lost; the chosen one needs no rejection reason");
   }
-  if (Array.isArray(target.options) && target.options.length && !target.options.includes(option)) {
+  if (Array.isArray(target.options) && target.options.length && !target.options.some((o) => optionKey(o) === optionKey(option))) {
     refuse(`option ${JSON.stringify(option)} is not among ${decision}'s options (${target.options.map((o) => JSON.stringify(o)).join(", ")})`,
       "a reason attached to an option nobody offered would never be shown");
   }

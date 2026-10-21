@@ -17,11 +17,13 @@ appends pending decisions to `decisions.json`, and owns the `intake` key in
    ```yaml
    sockets:
      ticket:
-       fetch: "tickets fetch --json {ticket_ref}"   # any CLI the org wires in
+       command: "/abs/path/to/engine/adapters/gh-ticket"   # any CLI the org wires in
+       version: "builtin"
    ```
 
-   Substitute `{ticket_ref}` and run the command. No `sockets.ticket.fetch` entry,
-   or the command exits non-zero → set `intake: blocked` with the exact error and
+   Call it through the engine, which sends the JSON request on stdin:
+   `echo '{"ticket_ref":"<ref>"}' > req.json && detent socket call ticket --payload-file req.json`.
+   No `sockets.ticket` entry, or the call exits non-zero → set `intake: blocked` with the exact error and
    STOP. Never proceed on a ticket you invented from memory or from the ref alone.
 
 2. **Create the run.** `run-id = <YYYY-MM-DD>-<ticket-key-lowercase>-<slug>` (slug:

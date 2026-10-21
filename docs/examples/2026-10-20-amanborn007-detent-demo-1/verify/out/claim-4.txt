@@ -1,0 +1,2 @@
+The result never ends in the separator
+cap 12 -> "hello-brave"; "--" cap 3 -> "ab"

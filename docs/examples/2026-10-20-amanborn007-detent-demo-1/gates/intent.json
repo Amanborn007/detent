@@ -1,0 +1,29 @@
+{
+  "schema": "engine-gate-request-v0",
+  "run_id": "2026-10-20-amanborn007-detent-demo-1",
+  "gate_id": "intent",
+  "decision_id": "D-003",
+  "stage": "plan",
+  "playbook": "plan-review",
+  "artifact_path": "$DETENT_ROOT/.sdlc/2026-10-20-amanborn007-detent-demo-1/plan/plan.md",
+  "context_paths": [
+    "$DETENT_ROOT/.sdlc/2026-10-20-amanborn007-detent-demo-1/brief.md",
+    "$DETENT_ROOT/.sdlc/2026-10-20-amanborn007-detent-demo-1/research.md"
+  ],
+  "decision": {
+    "id": "D-003",
+    "gate": "intent",
+    "raised_by": "engine",
+    "blocks": [
+      "implement"
+    ],
+    "question": "Intent gate: does plan/plan.md faithfully implement brief.md (goal, acceptance criteria, constraints)? Approve to unlock implement; revise to loop back to plan.",
+    "options": [
+      "approve",
+      "revise"
+    ],
+    "context": "plan/plan.md",
+    "status": "pending"
+  },
+  "refreshed_at": "2026-10-20T15:13:56Z"
+}

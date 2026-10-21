@@ -1,0 +1,15 @@
+#!/usr/bin/env node
+// Offline stand-in for the ticket socket: answers the same JSON contract as engine/adapters/gh-ticket, with no network.
+let s = "";
+process.stdin.on("data", (d) => (s += d)).on("end", () => {
+  const req = JSON.parse(s || "{}");
+  process.stdout.write(JSON.stringify({
+    id: req.ticket_ref || "acme/widgets#1",
+    title: "Retry delay drifts when Retry-After is 0",
+    status: "open",
+    labels: ["bug"],
+    url: "https://example.com/acme/widgets/issues/1",
+    body_excerpt: "Subscribers see redelivery land up to a second late. Repro: register an endpoint that answers Retry-After: 0 and watch the next attempt.",
+    next_step: "feed this ticket JSON to the research stage",
+  }) + "\n");
+});

@@ -42,3 +42,31 @@ test('detent herald window computes the since-last-run window', () => {
   assert.equal(out.window.first_run, true);
   fs.rmSync(root, { recursive: true, force: true });
 });
+test('detent run new prints a next_step that names detent, not engine', () => {
+  const tmp = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'detentnext-'));
+  const repo = path.join(tmp, 'repo');
+  fs.mkdirSync(repo);
+  spawnSync('git', ['init', '-q', '-b', 'main', repo]);
+  spawnSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init']);
+  const r = spawnSync('node', [DETENT, 'run', 'new', '--ticket', 'o/r#1', '--repo', repo, '--no-worktree'],
+    { encoding: 'utf8', env: { ...process.env, DETENT_ROOT: tmp } });
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const out = JSON.parse(r.stdout);
+  assert.match(out.next_step, /^detent stage begin intake /);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+test('detent drive refusal prints a next_step that names detent, not engine', () => {
+  const tmp = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'detentdrive-'));
+  const repo = path.join(tmp, 'repo');
+  fs.mkdirSync(repo);
+  spawnSync('git', ['init', '-q', '-b', 'main', repo]);
+  spawnSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init']);
+  const env = { ...process.env, DETENT_ROOT: tmp };
+  const made = spawnSync('node', [DETENT, 'run', 'new', '--ticket', 'o/r#1', '--repo', repo, '--no-worktree'], { encoding: 'utf8', env });
+  assert.equal(made.status, 0, made.stderr + made.stdout);
+  const runId = JSON.parse(made.stdout).run_id;
+  const r = spawnSync('node', [DETENT, 'drive', '--run', runId, '--repo', repo, '--max-steps', '0'], { encoding: 'utf8', env });
+  assert.equal(r.status, 2, r.stderr + r.stdout);
+  assert.match(JSON.parse(r.stdout).next_step, /^detent drive --run /);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});

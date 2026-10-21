@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan: slugify maxLength</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --ink: #1b1e23; --paper: #fbfbfa; --muted: #5b6470; --line: #d9dde3;
+    --accent: #2563c9; --good: #1d7a3d; --warn: #9a6200; --bad: #b3362b;
+    --chip: #eef1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink: #e8eaed; --paper: #191b1f; --muted: #9aa3ae; --line: #33383f; --chip: #23262b; }
+  }
+  * { box-sizing: border-box; min-width: 0; }
+  body {
+    margin: 0; padding: 32px 20px 80px; background: var(--paper); color: var(--ink);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+  h1 { font-size: 26px; margin: 0; letter-spacing: -.01em; }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 0 0 10px; }
+  p { margin: 0 0 10px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  section { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+  .phases { display: flex; flex-direction: column; gap: 10px; }
+  .phase { display: flex; gap: 12px; align-items: baseline; }
+  .phase b { flex: none; width: 72px; font-variant-numeric: tabular-nums; }
+  .risk { border-left: 4px solid var(--bad); background: var(--chip); border-radius: 6px; padding: 10px 12px; margin: 8px 0; }
+  .risk.medium { border-left-color: var(--warn); }
+  .risk .sev { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--bad); }
+  .risk.medium .sev { color: var(--warn); }
+  .options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 620px) { .options { grid-template-columns: 1fr; } }
+  .option { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .option h3 { margin: 0 0 6px; font-size: 15px; }
+  .option ul { margin: 6px 0 0; padding-left: 18px; }
+  .option li { margin: 3px 0; }
+  .pro { color: var(--good); } .con { color: var(--bad); }
+  .q-label { font-weight: 600; margin-bottom: 10px; }
+  .hint { font-size: 12.5px; color: var(--muted); font-style: italic; }
+  button.custom {
+    border: 1px solid var(--accent); color: var(--accent); background: none;
+    border-radius: 8px; padding: 8px 14px; font: 600 13px inherit; cursor: pointer;
+  }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  td, th { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+  ol li { margin: 6px 0; } code { background: var(--chip); padding: 1px 4px; border-radius: 4px; }
+</style></head><body><main>
+<header><h1>Plan v1: add maxLength to slugify</h1>
+<p class="meta">Amanborn007/detent-demo#1 · run 2026-10-20-amanborn007-detent-demo-1 · click an option card to decide, alt-click to annotate</p></header>
+
+<section id="access"><h2>Access and data completeness</h2>
+<table><tr><th>Source</th><th>Status</th><th>Criticality</th><th>Feeds</th></tr>
+<tr><td>Target repo (worktree)</td><td>reachable</td><td>critical</td><td>F1 to F5, every step</td></tr>
+<tr><td>Ticket (gh-ticket)</td><td>reachable</td><td>critical</td><td>acceptance criteria, U1</td></tr>
+<tr><td>Repo docs (knowledge socket)</td><td>reachable</td><td>supporting</td><td>README behaviour</td></tr>
+<tr><td>GitHub PRs and code search</td><td>reachable</td><td>supporting</td><td>blast radius: no other consumers</td></tr></table>
+<p class="meta">Every source is reachable, so nothing here blocks approval.</p></section>
+
+<section id="approach"><h2>Approach</h2>
+<p>Validate <code>maxLength</code> first and throw <code>RangeError</code> when it is below 1 or not an integer. Build the slug exactly as today. If it is longer than <code>maxLength</code>, keep the first <code>maxLength</code> characters and back up to the last whole separator in that window, so neither a word nor a multi-character separator is split. With no separator in the window, keep the hard cut. Then strip a trailing separator with the regex the function already uses.</p></section>
+
+<section id="steps"><h2>Steps</h2><ol>
+<li>Failing tests in <code>test/slugify.test.js</code>: length cap, separator cut, first-word cut, no trailing <code>-</code> or <code>--</code>, <code>RangeError</code> for 0, -1, 2.5 and "10", unchanged output without the option. Verify: <code>npm test</code> fails on the new tests only.</li>
+<li>Validation and the cut in <code>src/index.js</code>. Verify: <code>npm test</code> passes, the 5 existing tests included.</li>
+<li>Conditional on D-001: test and handling for <code>maxLength: null</code>.</li>
+<li>Conditional on D-002: JSDoc <code>@param</code> and README example.</li></ol>
+<p class="meta">Files touched: src/index.js, test/slugify.test.js, README.md (only if D-002 keeps step 4)</p></section>
+
+<section id="risks"><h2>Risks</h2>
+<div class="risk medium"><span class="sev">Medium</span><p>A multi-character separator such as <code>--</code> could leave half a separator at the cut. Step 1 tests it and step 2 backs up to a whole separator.</p></div>
+<div class="risk medium"><span class="sev">Low</span><p><code>TypeError</code> for a non-string input and <code>RangeError</code> for a bad <code>maxLength</code> now coexist. Step 1 asserts the exact class.</p></div></section>
+
+<section id="intent"><h2>Intent check (fresh context)</h2>
+<p>All 7 acceptance criteria map to a step and a test. One addition was found: step 4 documents the option, which the brief did not ask for. That is D-002.</p></section>
+
+<section><h2>Decision D-001</h2><div data-plan-question="D-001" data-curator-answered="treat null like undefined (no cap)" data-curator-answered-at="2026-10-21T06:33:31.058Z">
+<p class="q-label">What should slugify do with <code>maxLength: null</code>? (<code>undefined</code> means the option was not given.)</p>
+<div class="options"><div class="option" data-plan-option="treat null like undefined (no cap)" data-curator-answered-option><h3>No cap</h3><ul><li class="pro">Matches how separator uses ??</li><li class="pro">A null from a config file still gives a slug</li><li class="con">Hides a caller bug that passes null by mistake</li></ul></div>
+<div class="option" data-plan-option="throw RangeError on null"><h3>Throw RangeError</h3><ul><li class="pro">Literal reading of 'not an integer'</li><li class="con">A null from config becomes an exception</li></ul></div></div></div></section>
+
+<section><h2>Decision D-002</h2><div data-plan-question="D-002" data-curator-answered="keep step 4" data-curator-answered-at="2026-10-21T06:33:31.061Z">
+<p class="q-label">Step 4 documents the option in the JSDoc and the README, which the brief never asked for. Keep or drop it?</p>
+<div class="options"><div class="option" data-plan-option="keep step 4" data-curator-answered-option><h3>Keep</h3><ul><li class="pro">Callers can find the option</li><li class="con">Two more files in the diff</li></ul></div>
+<div class="option" data-plan-option="drop step 4"><h3>Drop</h3><ul><li class="pro">Diff stays at two files</li><li class="con">The option is undocumented</li></ul></div></div></div></section>
+
+<section><h2>Decision D-003: intent gate</h2><div data-plan-question="D-003" data-curator-answered="approve" data-curator-answered-at="2026-10-21T06:33:31.062Z">
+<p class="q-label">Does plan/plan.md faithfully implement brief.md? Approve to unlock implement, revise to loop back to plan.</p>
+<div class="options"><div class="option" data-plan-option="approve" data-curator-answered-option><h3>Approve</h3><ul><li class="pro">Implement starts with the red tests</li></ul></div>
+<div class="option" data-plan-option="revise"><h3>Revise</h3><ul><li class="pro">Annotate what to change first</li></ul></div></div></div></section>
+</main></body></html>

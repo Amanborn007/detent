@@ -4,7 +4,7 @@
 # Division of labour (plugin-first):
 #   The Claude Code PLUGIN owns skills, hooks, and in-session executable calls
 #   (skills invoke ${CLAUDE_PLUGIN_ROOT}/engine/.../cli.mjs; hooks/hooks.json
-#   wires all four hooks automatically). Install it with:
+#   wires every hook automatically). Install it with:
 #       claude plugin marketplace add Amanborn007/detent
 #       claude plugin install detent@detent
 #

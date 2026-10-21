@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { engine, readJson } from "./helpers.mjs";
+import { engine, readJson, mkRun } from "./helpers.mjs";
 
 const GIT_ENV = {
   GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.invalid",
@@ -115,4 +115,11 @@ test("run resolution without --run is scoped to the work repo (centralized home,
     { env: { DETENT_ROOT: home } });
   assert.equal(byId.code, 0, byId.stdout);
   assert.equal(byId.json.stage, "intake");
+});
+
+test("run new records base_sha equal to the repo HEAD at creation", () => {
+  const ctx = mkRun();
+  const head = spawnSync("git", ["-C", ctx.repo, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+  const run = readJson(join(ctx.runDir, "run.json"));
+  assert.equal(run.base_sha, head);
 });

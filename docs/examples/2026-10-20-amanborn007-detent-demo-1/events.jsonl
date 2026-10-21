@@ -1,0 +1,36 @@
+{"ts":"2026-10-20T15:10:22Z","event":"run_created","run_id":"2026-10-20-amanborn007-detent-demo-1","ticket_ref":"Amanborn007/detent-demo#1"}
+{"ts":"2026-10-20T15:10:50Z","event":"stage_begin","stage":"intake"}
+{"ts":"2026-10-20T15:11:27Z","event":"stage_end","stage":"intake"}
+{"ts":"2026-10-20T15:11:54Z","event":"stage_begin","stage":"research"}
+{"ts":"2026-10-20T15:12:22Z","event":"stage_end","stage":"research"}
+{"ts":"2026-10-20T15:12:49Z","event":"stage_begin","stage":"plan"}
+{"ts":"2026-10-20T15:13:47Z","event":"gate_raised","stage":"plan","gate":"intent","decision_id":"D-003"}
+{"ts":"2026-10-20T15:13:56Z","event":"gate_opened","gate":"intent","decision_id":"D-003"}
+{"ts":"2026-10-21T06:33:54Z","event":"gate_answered","gate":"D-001","decision_id":"D-001","answer":"treat null like undefined (no cap)","answered_at":"2026-10-21T06:33:54Z"}
+{"ts":"2026-10-21T06:33:54Z","event":"gate_answered","gate":"D-002","decision_id":"D-002","answer":"keep step 4","answered_at":"2026-10-21T06:33:54Z"}
+{"ts":"2026-10-21T06:33:54Z","event":"gate_answered","gate":"intent","decision_id":"D-003","answer":"approve","answered_at":"2026-10-21T06:33:54Z"}
+{"ts":"2026-10-21T06:33:54Z","event":"stage_end","stage":"plan"}
+{"ts":"2026-10-21T06:36:24Z","event":"stage_begin","stage":"implement"}
+{"ts":"2026-10-21T06:38:59Z","event":"stage_end","stage":"implement"}
+{"ts":"2026-10-21T06:39:18Z","event":"attempt_recorded","stage":"implement","outcome":"failed"}
+{"ts":"2026-10-21T06:39:18Z","event":"stage_begin","stage":"recheck"}
+{"ts":"2026-10-21T06:42:25Z","event":"stage_end","stage":"recheck"}
+{"ts":"2026-10-21T06:42:25Z","event":"stage_begin","stage":"ship"}
+{"ts":"2026-10-21T07:25:45Z","event":"stage_end","stage":"ship"}
+{"ts":"2026-10-21T07:25:45Z","event":"gate_answered","gate":"D-004","decision_id":"D-004","answer":"wire a reviewer socket first","answered_at":"2026-10-21T06:48:09Z"}
+{"ts":"2026-10-21T07:25:45Z","event":"gate_answered","gate":"D-005","decision_id":"D-005","answer":"wire a verifier socket first","answered_at":"2026-10-21T06:48:09Z"}
+{"ts":"2026-10-21T07:25:45Z","event":"gate_answered","gate":"D-006","decision_id":"D-006","answer":"approve this push and draft PR","answered_at":"2026-10-21T06:48:09Z"}
+{"ts":"2026-10-21T07:25:45Z","event":"gate_answered","gate":"D-007","decision_id":"D-007","answer":"Fix in this PR","answered_at":"2026-10-21T07:16:26Z"}
+{"ts":"2026-10-21T07:27:41Z","event":"stage_begin","stage":"respond"}
+{"ts":"2026-10-21T07:28:30Z","event":"stage_end","stage":"respond"}
+{"ts":"2026-10-21T07:58:31Z","event":"decision_rationale_recorded","decision_id":"D-001"}
+{"ts":"2026-10-21T07:58:31Z","event":"decision_rationale_recorded","decision_id":"D-001"}
+{"ts":"2026-10-21T07:58:31Z","event":"decision_rationale_recorded","decision_id":"D-002"}
+{"ts":"2026-10-21T07:58:31Z","event":"decision_rationale_recorded","decision_id":"D-003"}
+{"ts":"2026-10-21T07:58:32Z","event":"decision_rationale_recorded","decision_id":"D-004"}
+{"ts":"2026-10-21T07:58:32Z","event":"decision_rationale_recorded","decision_id":"D-005"}
+{"ts":"2026-10-21T07:58:32Z","event":"decision_rationale_recorded","decision_id":"D-006"}
+{"ts":"2026-10-21T07:58:32Z","event":"decision_rationale_recorded","decision_id":"D-007"}
+{"ts":"2026-10-21T07:58:32Z","event":"decision_rationale_recorded","decision_id":"D-007"}
+{"ts":"2026-10-21T08:04:08Z","event":"decision_rationale_recorded","decision_id":"D-004"}
+{"ts":"2026-10-21T08:04:08Z","event":"decision_rationale_recorded","decision_id":"D-005"}
