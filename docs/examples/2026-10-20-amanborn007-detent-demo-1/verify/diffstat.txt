@@ -1,0 +1,4 @@
+ README.md            |  1 +
+ src/index.js         | 14 ++++++++++++--
+ test/slugify.test.js | 33 +++++++++++++++++++++++++++++++++
+ 3 files changed, 46 insertions(+), 2 deletions(-)
