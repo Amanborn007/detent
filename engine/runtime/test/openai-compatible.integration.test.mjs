@@ -217,3 +217,14 @@ test("reviewer against an unreachable endpoint under openai-compatible names the
   assert.match(r.json.next_step, /DETENT_OPENAI_BASE_URL/);
   assert.doesNotMatch(JSON.stringify(r.json), /claude/i);
 });
+
+test("runtime run with a key pasted into DETENT_OPENAI_API_KEY_ENV exits 2 and never prints it", () => {
+  const pasted = "gsk_AbC123SecretGroqKey";
+  const r = spawnSync(process.execPath, [ENGINE, "runtime", "run", "--runtime", "openai-compatible"], {
+    input: JSON.stringify(baseRequest(tmpdir())), encoding: "utf8",
+    env: envWith(cfg("http://127.0.0.1:1/v1", { DETENT_OPENAI_API_KEY_ENV: pasted })),
+  });
+  assert.equal(r.status, 2);
+  assert.ok(!r.stdout.includes(pasted));
+  assert.ok(!r.stderr.includes(pasted));
+});

@@ -59,8 +59,8 @@ test("config refusals are RuntimeConfigError naming the setting", () => {
     { env: { ...ENV, DETENT_OPENAI_BASE_URL: "ftp://example.com/v1" }, setting: "DETENT_OPENAI_BASE_URL", match: /http/ },
     { env: { ...ENV, DETENT_OPENAI_BASE_URL: "file:///etc/passwd" }, setting: "DETENT_OPENAI_BASE_URL", match: /http/ },
     { env: without("DETENT_OPENAI_MODEL"), setting: "DETENT_OPENAI_MODEL", match: /request\.model.*DETENT_OPENAI_MODEL|DETENT_OPENAI_MODEL.*request\.model/ },
-    { env: { ...ENV, DETENT_OPENAI_API_KEY_ENV: "OPENAI_API_KEY", OPENAI_API_KEY: "" }, setting: "OPENAI_API_KEY", match: /OPENAI_API_KEY/ },
-    { env: { ...ENV, DETENT_OPENAI_API_KEY_ENV: "OPENAI_API_KEY" }, setting: "OPENAI_API_KEY", match: /OPENAI_API_KEY/ },
+    { env: { ...ENV, DETENT_OPENAI_API_KEY_ENV: "OPENAI_API_KEY", OPENAI_API_KEY: "" }, setting: "DETENT_OPENAI_API_KEY_ENV", match: /variable named by DETENT_OPENAI_API_KEY_ENV/ },
+    { env: { ...ENV, DETENT_OPENAI_API_KEY_ENV: "OPENAI_API_KEY" }, setting: "DETENT_OPENAI_API_KEY_ENV", match: /variable named by DETENT_OPENAI_API_KEY_ENV/ },
     { env: ENV, over: { auth: "api_key" }, setting: "DETENT_OPENAI_API_KEY_ENV", match: /api_key.*DETENT_OPENAI_API_KEY_ENV/ },
     { env: { ...KEYED, DETENT_OPENAI_BASE_URL: "http://api.example.com/v1" }, setting: "DETENT_OPENAI_BASE_URL", match: /https|loopback/ },
     { env: { ...ENV, DETENT_OPENAI_API_KEY_ENV: "sk-not-a-name" }, setting: "DETENT_OPENAI_API_KEY_ENV", match: /NAME/ },
@@ -215,4 +215,15 @@ test("parse: spawn, timeout and exit failures", () => {
   assert.equal(crashed.error.exit_code, 2);
   assert.equal(crashed.raw.stderr, "bad argv\n");
   assertError(parse("", { status: null, signal: "SIGKILL" }), "exit", /SIGKILL/);
+});
+
+test("a key pasted into DETENT_OPENAI_API_KEY_ENV is never echoed", () => {
+  const pasted = "gsk_AbC123SecretGroqKey";
+  assert.throws(() => plan({}, { ...ENV, DETENT_OPENAI_API_KEY_ENV: pasted }), (e) => {
+    assert.ok(e instanceof RuntimeConfigError);
+    assert.ok(!e.message.includes(pasted));
+    assert.ok(!String(e.setting).includes(pasted));
+    assert.ok(!JSON.stringify(e).includes(pasted));
+    return true;
+  });
 });
