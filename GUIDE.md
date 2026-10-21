@@ -196,7 +196,7 @@ These verbs sit on top of the commands in 4.2. Use them first. The low-level com
 ```sh
 detent doctor                        # one line per check; exit 1 if any fail
 cd ~/code/your-repo
-detent start your-org/your-repo#123  # checks origin, runs setup if needed, creates the run
+detent start your-org/your-repo#123  # checks origin, runs setup if needed, indexes the repo, creates the run
 detent continue                      # one step, after printing the budget
 detent status                        # stages, waiting gates, next step in words
 ```

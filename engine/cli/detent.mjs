@@ -28,7 +28,7 @@ const ROUTES = {
 if (group === '--help' || group === 'help' && rest.length === 0) {
   process.stdout.write(
     'detent — detent umbrella CLI (one vocabulary: crew names)\n' +
-    '  detent start <owner/repo#N> [--repo .]  begin work on a ticket: setup if needed, then a new run\n' +
+    '  detent start <owner/repo#N> [--repo .]  begin work on a ticket: setup if needed, index the repo, then a new run\n' +
     '  detent status           where the run stands: stages, waiting gates, what to do next\n' +
     '  detent continue [--yes] run one step of the run (inside Claude Code it names the stage skill instead)\n' +
     '  detent decide           answer the waiting gate in curator\n' +

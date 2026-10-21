@@ -206,7 +206,7 @@ Start with the friendly verbs. The rows after them are the machine layer, which 
 | Command | What it does |
 |---|---|
 | `detent doctor` | One line per check: node 20 or newer, git, `gh` login and push access to the origin repo, curator, `stack.yaml` and its socket commands, `DETENT_ROOT`. Exit 1 if any fail. |
-| `detent start <owner/repo#N> [--repo .] [--slug s]` | Refuse unless `origin` matches the ticket's repo, run `setup` if `stack.yaml` is missing, then create the run. |
+| `detent start <owner/repo#N> [--repo .] [--slug s] [--no-index]` | Refuse unless `origin` matches the ticket's repo, run `setup` if `stack.yaml` is missing, build or refresh the repo index (one line with file and symbol counts; an index error refuses unless `--no-index`), then create the run. |
 | `detent status` | The run's stages, waiting gates and next step. With `--json` it is `next` plus a `stages` map. |
 | `detent continue [--yes]` | Run one drive step after printing the budget. Inside Claude Code it prints the stage `SKILL.md` path and the run id instead. |
 | `detent decide` | Answer the waiting gate in curator, or print the terminal fallback when curator is missing. |

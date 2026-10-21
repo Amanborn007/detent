@@ -2380,12 +2380,33 @@ function originOf(repo) {
   return m ? { owner: m[1], repo: m[2] } : { raw: r.stdout.trim() };
 }
 
-/** Hook for the indexing lane: runs after setup and before the run is created. */
-function prepareContextIndex(_repo, _ticket) {}
+/** Runs after setup and before the run is created, so run new can read suggested.verify from the index. */
+function prepareContextIndex(repo) {
+  const INDEX = join(ENGINE_ROOT, "index", "index.mjs");
+  const ix = (...args) => spawnSync(process.execPath, [INDEX, ...args, "--repo", repo], { encoding: "utf8", env: process.env });
+  const stop = (what, r) => {
+    const detail = (r.stderr || r.stdout || r.error?.message || "").trim().slice(-400);
+    process.stderr.write(`index: ${what} failed: ${detail}\n`);
+    refuse(`indexing ${repo} failed (${what}): ${detail}`, "fix the error above, or re-run with --no-index to start without an index");
+  };
+  const st = ix("status");
+  if (st.status !== 0) stop("status", st);
+  let state;
+  try { state = JSON.parse(st.stdout.trim().split("\n").pop()).state; } catch { stop("status printed no JSON", st); }
+  const verb = state === "missing" ? "build" : state === "stale" ? "refresh" : null;
+  if (verb) {
+    const b = ix(verb);
+    if (b.status !== 0) stop(verb, b);
+  }
+  const dir = join(repo, ".detent", "index");
+  const m = readJson(join(dir, "manifest.json"));
+  const symbols = readFileSync(join(dir, "symbols.jsonl"), "utf8").split("\n").filter(Boolean).length;
+  process.stderr.write(`index: ${verb || "fresh"}: ${Object.keys(m.files).length} files, ${symbols} symbols, tagger ${m.tagger}\n`);
+}
 
 function cmdStart(ticket, flags) {
   const parsed = parseTicketRef(ticket);
-  if (!parsed) refuse(`start needs a ticket as owner/repo#N, got '${ticket ?? ""}'`, "detent start <owner/repo#N> [--repo .] [--slug s]");
+  if (!parsed) refuse(`start needs a ticket as owner/repo#N, got '${ticket ?? ""}'`, "detent start <owner/repo#N> [--repo .] [--slug s] [--no-index]");
   const repo = repoOf(flags);
   const origin = originOf(repo);
   if (!origin) refuse(`${repo} has no origin remote, so it cannot be matched to ${ticket}`, "git remote add origin <url>, then re-run");
@@ -2399,7 +2420,7 @@ function cmdStart(ticket, flags) {
     const s = selfJson(["setup", "--repo", repo]);
     if (!s.json.ok) relay(s);
   }
-  prepareContextIndex(repo, ticket);
+  if (flags["no-index"] !== true) prepareContextIndex(repo);
   const created = selfJson(["run", "new", "--ticket", ticket, "--repo", repo, ...(flags.slug && flags.slug !== true ? ["--slug", String(flags.slug)] : [])]);
   if (!created.json.ok) relay(created);
   out({
@@ -3199,7 +3220,7 @@ function cmdHelp() {
   out({
     ok: true,
     usage: {
-      "start": "engine start <owner/repo#N> [--repo .] [--slug s] — the friendly way in: refuses unless the repo's origin is that owner/repo, runs setup when stack.yaml is missing, then run new. Machine layer: setup, run new",
+      "start": "engine start <owner/repo#N> [--repo .] [--slug s] — the friendly way in: refuses unless the repo's origin is that owner/repo, runs setup when stack.yaml is missing, builds or refreshes the repo index (skip with --no-index), then run new. Machine layer: setup, index, run new",
       "status": "engine status [--run <ref>] — readable view of the run (stages, pending gates, next step). With --json it is `next` plus a `stages` map",
       "continue": "engine continue [--yes] [--run <ref>] — run exactly one drive step (--max-steps 1) after printing the budget. Inside Claude Code it spawns nothing and names the stage SKILL.md for this session to run. Machine layer: drive",
       "decide": "engine decide [--run <ref>] — answer the waiting gate: gate open, curator open, block on curator poll, gate collect. Without curator it prints the terminal fallback. Machine layer: gate open, gate collect",
