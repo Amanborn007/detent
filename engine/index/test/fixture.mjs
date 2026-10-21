@@ -24,7 +24,7 @@ export function put(repo, rel, content) {
 
 export function commit(repo, files, msg = "change") {
   for (const [rel, c] of Object.entries(files)) put(repo, rel, c);
-  git(repo, "add", "-A");
+  git(repo, "add", "-f", "--", ...Object.keys(files));
   git(repo, "commit", "-q", "-m", msg);
 }
 
