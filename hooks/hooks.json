@@ -16,6 +16,11 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/voice-discipline.sh\""
+          },
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/cold-resume-warn.mjs\"",
+            "statusMessage": "Cold resume check"
           }
         ]
       }
