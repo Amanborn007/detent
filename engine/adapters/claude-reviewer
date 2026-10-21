@@ -10,6 +10,7 @@
  * tools or MCP servers, and user, project and plugin settings and hooks are not
  * loaded. claude runs in an empty temp dir so no project CLAUDE.md is read.
  * The spawn goes through the runtime port (engine/runtime), selected by DETENT_RUNTIME.
+ * DETENT_RUNTIME=openai-compatible sends the same request to an OpenAI-compatible endpoint instead.
  *
  * Args:   --model <m> | --max-diff-bytes <n> (default 200000) | --bare (needs ANTHROPIC_API_KEY)
  * Env:    DETENT_CLAUDE_BIN overrides the `claude` binary.
@@ -119,7 +120,7 @@ function violation(reason) {
 }
 
 async function main() {
-  const { getRuntime, UnknownRuntimeError } = await import(pathToFileURL(path.join(__dirname, "..", "runtime", "runtime.mjs")).href);
+  const { getRuntime, RuntimeError, UnknownRuntimeError } = await import(pathToFileURL(path.join(__dirname, "..", "runtime", "runtime.mjs")).href);
   const bin = process.env.DETENT_CLAUDE_BIN || "claude";
   let runtime;
   try {
@@ -130,14 +131,19 @@ async function main() {
   }
   const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), "detent-claude-reviewer-"));
   let res;
+  let refused;
   try {
     res = runtime.run({
       prompt, cwd: emptyDir, output: "json", tools: "none", mcp: "none", persist_session: false,
       settings: { sources: "none" }, ...(args.bare ? { auth: "api_key" } : {}), ...(args.model ? { model: args.model } : {}),
     });
+  } catch (e) {
+    if (!(e instanceof RuntimeError)) throw e;
+    refused = e;
   } finally {
     fs.rmSync(emptyDir, { recursive: true, force: true });
   }
+  if (refused) emit({ error: refused.message, next_step: "fix the runtime config or request; see engine/runtime/CONTRACT.md" }, 2);
   if (res.cost_usd !== null) process.stderr.write(`claude-reviewer: cost $${res.cost_usd}\n`);
   if (res.error) {
     const k = res.error.kind;
