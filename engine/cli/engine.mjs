@@ -27,6 +27,7 @@ import process from "node:process";
 import { runBenchmark, checkpointBenchmark, ledgerLine } from "../bench/bench.mjs";
 import { runEval, EvalRefusal, resolveEvalRoots } from "../eval/eval.mjs";
 import { loadRoutingConfig, tierOf, advisorConsultEvent } from "../routing/routing.mjs";
+import { renderText } from "./render.mjs";
 import { readSteps, renderLiveHtml, isRunComplete, STEP_KINDS, STEP_STATUSES } from "./liveview.mjs";
 import { loadRunState, buildNote, checkSufficiency, currentStage, optionKey } from "../handoff/handoff.mjs";
 import { analyzeSpend, trackingLine, compareTracking } from "../spend/spend.mjs";
@@ -96,9 +97,25 @@ function writeLineSync(line) {
   }
 }
 
+// --json is stripped before parseArgs, so it can never swallow the next positional.
+const WANT_JSON = process.argv.includes("--json");
+const humanOut = () => !WANT_JSON && (process.stdout.isTTY === true || process.env.DETENT_FORCE_TTY === "1");
+
+function renderContext(obj) {
+  const runDir = obj.run_id ? join(sdlcHome(), obj.run_id) : null;
+  if (!runDir || !existsSync(join(runDir, "stage-status.json"))) return {};
+  const decisions = loadDecisions(runDir);
+  return {
+    ticket: readJson(join(runDir, "run.json")).ticket_ref,
+    stages: loadStatus(runDir).stages,
+    gates: decisions.filter((d) => d.status === "pending"),
+  };
+}
+
 function out(obj, code = 0) {
   if (typeof obj.next_step === "string") obj.next_step = forCaller(obj.next_step);
-  writeLineSync(JSON.stringify(obj) + "\n");
+  if (humanOut()) writeLineSync(renderText(obj, renderContext(obj)) + "\n");
+  else writeLineSync(JSON.stringify(obj) + "\n");
   process.exit(code);
 }
 
@@ -2880,7 +2897,7 @@ function cmdHelp() {
 }
 
 function main() {
-  const { positional, flags, duplicates } = parseArgs(process.argv.slice(2));
+  const { positional, flags, duplicates } = parseArgs(process.argv.slice(2).filter((a) => a !== "--json"));
   if (duplicates.length) {
     refuse(
       `flag(s) given more than once: ${duplicates.map((d) => `--${d}`).join(", ")}`,
