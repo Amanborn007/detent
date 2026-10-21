@@ -189,6 +189,34 @@ Highlight text, annotate elements and click decisions. Your feedback reaches the
 
 `/herald` or `detent herald` collects what happened since the last brief: owl results, open PRs that need action, active engine runs, and tracker, mail and chat items when those connectors are present. Items are labeled urgent, needs-action or FYI. `herald -3` widens the window to three days. Details are in `docs/morning-brief.md`.
 
+### 4.7 Driving a run with the friendly verbs
+
+These verbs sit on top of the commands in 4.2. Use them first. The low-level commands stay as the machine layer that skills and scripts call.
+
+```sh
+detent doctor                        # one line per check; exit 1 if any fail
+cd ~/code/your-repo
+detent start your-org/your-repo#123  # checks origin, runs setup if needed, creates the run
+detent continue                      # one step, after printing the budget
+detent status                        # stages, waiting gates, next step in words
+```
+
+You can leave out `--run` on every command that takes it. Detent finds the run in this order. An exact run id wins. Then a ticket key such as `your-org-your-repo-123` or `your-org/your-repo#123`, or a part of the run id that is not just a date. Then the newest run for the repo you are in that still has stages to do. If two runs match, detent refuses and lists them. A bare prefix of a run id never matches.
+
+At a terminal you get readable text. In a pipe, or with `--json`, you get the one JSON line the machine layer always printed.
+
+`detent continue` runs `detent drive` for exactly one step. It prints the budget first and asks for a yes unless you pass `--yes`. Inside a Claude Code session it starts nothing. It prints the path of the current stage's `SKILL.md` and the run id, so the session you are already in can run that stage.
+
+When the run waits for you:
+
+```sh
+detent decide                       # gate open, curator open, wait for your answer, gate collect
+detent approve                      # answer the pending intent gate with approve
+detent revise --note "split step 2" # answer it with revise
+```
+
+`approve` and `revise` ask `Answer D-001 on run <run> (<ticket>) with "approve"? [y/N]`. They record `answered_by: "human"` and `answered_via: "terminal"` in `decisions.json`. They refuse inside Claude Code, inside a drive child, and when stdin or stdout is not a terminal. A decision whose options are not approve and revise goes through `detent decide`.
+
 ---
 
 ## 5. Sockets and providers

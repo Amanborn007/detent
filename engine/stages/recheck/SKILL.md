@@ -51,6 +51,12 @@ your current context, hand recheck off; do not run it yourself.
    | `not-done` | step absent (note if `CONDITIONAL on D-xxx` and D-xxx still pending — that is expected, not drift) |
    | `extra` | work in the diff mapping to NO step (one row per cluster of extra work) |
 
+   Run `detent index cochange <changed files>` over the diff. A file that changed
+   without its usual partner (a pair the history shows moving together) is a warning in
+   `## Divergences`: say which partner was left out and why that is or is not a problem.
+   It is a material divergence only when the partner carries a contract the change
+   affects. If the index reports `stale`, note that the check ran on old history.
+
    Then check the diff footprint against `## Files touched` (files changed that the
    plan never listed) and each answered decision against the code (does the
    implementation honor the answer — e.g. D-001 "capped + dead-letter" must not have

@@ -6,7 +6,7 @@
 //   detent owl      <args>  -> owl      (engine/owl/owl.sh)
 //   detent herald   <args>  -> herald   (engine/herald/herald.mjs)  e.g. detent herald assemble
 //   detent courier  <args>  -> courier  (engine/courier/courier.mjs)
-//   detent <anything else>  -> engine   (engine/cli/engine.mjs)     e.g. detent next | detent run new --ticket X | detent dashboard | detent bench <run>
+//   detent <anything else>  -> engine   (engine/cli/engine.mjs)     e.g. detent start owner/repo#1 | detent status | detent approve | detent next | detent dashboard
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,11 +22,19 @@ const ROUTES = {
   herald:   { bin: 'node', script: path.join(ENGINE_ROOT, 'herald', 'herald.mjs') },
   courier:  { bin: 'node', script: path.join(ENGINE_ROOT, 'courier', 'courier.mjs') },
   feedback: { bin: 'node', script: path.join(ENGINE_ROOT, 'self-feedback', 'feedback.mjs') },
+  index:    { bin: 'node', script: path.join(ENGINE_ROOT, 'index', 'index.mjs') },
 };
 
 if (group === '--help' || group === 'help' && rest.length === 0) {
   process.stdout.write(
     'detent — detent umbrella CLI (one vocabulary: crew names)\n' +
+    '  detent start <owner/repo#N> [--repo .]  begin work on a ticket: setup if needed, then a new run\n' +
+    '  detent status           where the run stands: stages, waiting gates, what to do next\n' +
+    '  detent continue [--yes] run one step of the run (inside Claude Code it names the stage skill instead)\n' +
+    '  detent decide           answer the waiting gate in curator\n' +
+    '  detent approve [D-xxx]  approve the intent gate, from your own terminal\n' +
+    '  detent revise [D-xxx] [--note ".."]  send the plan back with a note, from your own terminal\n' +
+    '  detent doctor           check node, git, gh, curator, stack.yaml and DETENT_ROOT\n' +
     '  detent curator  <...>   curator review surface (open|poll|reply|end|status)\n' +
     '  detent sentinel <...>   sentinel PR-bot watcher\n' +
     '  detent owl      <...>   owl overnight loop\n' +
@@ -35,8 +43,9 @@ if (group === '--help' || group === 'help' && rest.length === 0) {
     '  detent drive --run <id> contained intake, research and plan with headless claude children (experimental, spends credit)\n' +
     '  detent runtime run|capabilities  run one prompt through a model runtime, request JSON on stdin (see engine/runtime/CONTRACT.md)\n' +
     '  detent feedback <...>   agent self-feedback journal (add|list) — coverage gaps the AGENT logs; not curator human feedback\n' +
+    '  detent index    <...>   repo index (build|refresh|status|query <words>|cochange <files>)\n' +
     '  detent drive --run <id> run a run end to end with headless claude children (experimental, spends credit, see engine/cli/README.md)\n' +
-    '  detent <cmd>    <...>   engine runner (run new|next|stage|gate|socket|dashboard|bench|help)\n');
+    '  detent <cmd>    <...>   machine layer: engine runner (run new|next|stage|gate|socket|dashboard|bench|help)\n');
   process.exit(0);
 }
 

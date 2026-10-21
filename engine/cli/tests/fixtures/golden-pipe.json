@@ -1,0 +1,30 @@
+{
+  "next-fresh": {
+    "code": 0,
+    "stdout": "{\"ok\":true,\"run_id\":\"<DATE>-octo-repo-1-gold\",\"stage\":\"intake\",\"status\":\"pending\",\"entry_state\":\"all prior stages done, no blocking decisions\",\"exit_state\":\"will require brief.md\",\"next_step\":\"engine stage begin intake --run <DATE>-octo-repo-1-gold --repo <REPO>\"}\n"
+  },
+  "begin-intake": {
+    "code": 0,
+    "stdout": "{\"ok\":true,\"run_id\":\"<DATE>-octo-repo-1-gold\",\"stage\":\"intake\",\"status\":\"in_progress\",\"next_step\":\"produce brief.md in <RUN_DIR>, then: engine stage end intake --run <DATE>-octo-repo-1-gold --repo <REPO>\"}\n"
+  },
+  "end-intake-missing-artifact": {
+    "code": 2,
+    "stdout": "{\"ok\":false,\"reason\":\"cannot end 'intake': required artifact missing: brief.md (expected in <RUN_DIR>)\",\"next_step\":\"write brief.md, then re-run: engine stage end intake --run <DATE>-octo-repo-1-gold --repo <REPO>\",\"missing_artifact\":[\"brief.md\"]}\n"
+  },
+  "step": {
+    "code": 0,
+    "stdout": "{\"ok\":true,\"run_id\":\"<DATE>-octo-repo-1-gold\",\"stage\":\"intake\",\"kind\":\"tool\",\"label\":\"reading code\",\"status\":\"todo\",\"next_step\":\"engine dashboard to view the run's step checklist\"}\n"
+  },
+  "next-in-progress": {
+    "code": 0,
+    "stdout": "{\"ok\":true,\"run_id\":\"<DATE>-octo-repo-1-gold\",\"stage\":\"intake\",\"status\":\"in_progress\",\"exit_state\":\"artifact present: brief.md\",\"next_step\":\"engine stage end intake --run <DATE>-octo-repo-1-gold --repo <REPO>\"}\n"
+  },
+  "end-intake": {
+    "code": 0,
+    "stdout": "{\"ok\":true,\"run_id\":\"<DATE>-octo-repo-1-gold\",\"stage\":\"intake\",\"status\":\"done\",\"handoff\":\"<RUN_DIR>/handoff/intake.md\",\"sufficient\":true,\"missing\":[],\"next_session\":\"this session can end — the next episode starts fresh from the handoff note\",\"episode_boundary\":\"this stage is a clean episode boundary — end the session and start the next stage fresh\",\"next_step\":\"engine stage begin research --run <DATE>-octo-repo-1-gold --repo <REPO>\"}\n"
+  },
+  "env": {
+    "code": 0,
+    "stdout": "{\"ok\":true,\"run_id\":\"<DATE>-octo-repo-1-gold\",\"env_file\":\"<RUN_DIR>/env.json\",\"env\":{\"commands\":{\"verify\":\"node --test\"},\"gotchas\":[]},\"verify_set\":true,\"next_step\":\"handoff can now certify this run from implement onward\"}\n"
+  }
+}

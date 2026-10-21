@@ -81,14 +81,16 @@ detent curator poll "$DETENT_ROOT/.plans/my-plan.html"
 
 `open` checks the page with `engine/curator/scripts/artifact-check.py` and refuses a page that fails. `poll` waits and prints your clicks and annotations as JSON.
 
-**Drive a run.** Copy `engine/stack.example.yaml` to `stack.yaml` in your work repo and wire at least the `ticket` socket, then:
+**Drive a run.** From a clone of the ticket's repo:
 
 ```sh
-detent run new --ticket owner/repo#12 --repo ~/code/your-repo
-detent next --repo ~/code/your-repo
+detent doctor
+detent start owner/repo#12
+detent continue
+detent status
 ```
 
-`run new` creates the run directory and a worktree on branch `sdlc/<run-id>`. `next` prints the command to run next. Then ask Claude to follow `engine/stages/<stage>/SKILL.md` for that run id, and run `detent next` again after each stage. `detent dashboard` lists every run. `owner/repo#12` assumes the built-in `gh-ticket` adapter. These commands need a real install and a real ticket, so they are not run in this repo's CI.
+`doctor` checks your setup. `start` checks that `origin` matches the ticket, runs `detent setup` if `stack.yaml` is missing, and creates the run directory and a worktree on branch `sdlc/<run-id>`. `continue` runs one step, and inside Claude Code it names the stage `SKILL.md` for that session to follow. `status` shows the stages, any waiting gate and the next step in words. `detent dashboard` lists every run. `owner/repo#12` assumes the built-in `gh-ticket` adapter. These commands need a real install and a real ticket, so they are not run in this repo's CI. The same flow with the machine-layer commands is `detent run new`, `detent next`, then following `engine/stages/<stage>/SKILL.md` by hand.
 
 ## How a run works
 
@@ -197,7 +199,20 @@ Sentinel is a tool and a hook, not a skill. It sits in the same loop.
 
 ## Tools and CLI
 
-`detent` is the one command. It sends `curator`, `sentinel`, `owl`, `herald`, `courier` and `feedback` to their own programs and everything else to the engine.
+`detent` is the one command. It sends `curator`, `sentinel`, `owl`, `herald`, `courier`, `feedback` and `index` to their own programs and everything else to the engine.
+
+Start with the friendly verbs. The rows after them are the machine layer, which the verbs, the skills and your scripts call. You can leave out `--run` on any command that takes it: detent uses an exact run id, then a unique ticket key or non-date part of an id, then the newest unfinished run for the repo you are in. At a terminal the output is readable text. In a pipe, or with `--json`, it is one JSON line.
+
+| Command | What it does |
+|---|---|
+| `detent doctor` | One line per check: node 20 or newer, git, `gh` login and push access to the origin repo, curator, `stack.yaml` and its socket commands, `DETENT_ROOT`. Exit 1 if any fail. |
+| `detent start <owner/repo#N> [--repo .] [--slug s]` | Refuse unless `origin` matches the ticket's repo, run `setup` if `stack.yaml` is missing, then create the run. |
+| `detent status` | The run's stages, waiting gates and next step. With `--json` it is `next` plus a `stages` map. |
+| `detent continue [--yes]` | Run one drive step after printing the budget. Inside Claude Code it prints the stage `SKILL.md` path and the run id instead. |
+| `detent decide` | Answer the waiting gate in curator, or print the terminal fallback when curator is missing. |
+| `detent approve [D-xxx]`, `detent revise [D-xxx] [--note "..."]` | Answer the intent gate from your own terminal. They refuse inside Claude Code, inside a drive child, and without a terminal. |
+
+Machine layer:
 
 | Command | What it does |
 |---|---|
@@ -212,11 +227,40 @@ Sentinel is a tool and a hook, not a skill. It sits in the same loop.
 | `detent dashboard`, `detent live <run-id>` | One curator page of all runs, or a live view of one run. |
 | `detent respond --pr <url>` | Arm the respond stage on an open PR with no ticket. |
 | `detent eval`, `detent bench`, `detent spend` | Evals, run timing, and measured Claude Code cost. |
+| `detent index build\|refresh\|status\|query <words>\|cochange <files>` | Build and read the repo index, see below. |
 | `detent pack validate` | Check the provider pack. |
 | `detent sentinel scan --pr <url>` | One read-only scan of a PR. |
 | `detent curator open\|check\|poll\|drain\|reply\|log\|answer\|end\|status` | The review surface. |
 
 `detent help` lists the umbrella commands. `node engine/cli/engine.mjs help` prints the engine's commands as JSON. [GUIDE.md](../GUIDE.md) covers all of them.
+
+## Repo index
+
+`detent index build` reads a work repo once and writes a small index of it, so research and the later stages start from a map instead of searching blind. Run it in the work repo, or pass `--repo <path>`.
+
+**What it writes.** Everything goes in `<repo>/.detent/index/`:
+
+| File | Holds |
+|---|---|
+| `profile.md` | Build, test, lint and start commands, CI steps, languages, top-level layout, entry points, CODEOWNERS team handles, and pointers to `CLAUDE.md`, `AGENTS.md`, the README and `docs/`. At most 200 lines. |
+| `map.md` | The most referenced files with their main definitions, about 1.5k tokens. |
+| `symbols.jsonl` | One line per definition: file, name, kind, line. |
+| `history.json` | Twelve months of per-file churn and co-change pairs, with no author names. |
+| `manifest.json` | The head sha, the blob sha of every indexed file, the generator version, which tagger ran, and a truncation note if the 60 second budget ran out. |
+
+`graph.json` and `history-state.json` sit beside them as working data for `query` and `refresh`.
+
+**What it reads.** Only files from `git ls-files -s`, so untracked and gitignored files are never seen. It skips `*.pem`, `*.key`, `*.p12`, `id_*`, `.env*`, `secrets/`, `credentials*`, binaries, files over 256 KB, and anything past 5000 files. It never runs repo code: commands in the profile are read from `package.json`, `Makefile`, `pyproject.toml`, `go.mod`, `Cargo.toml` and `.github/workflows`, and printed, not executed. Every value is stripped of invisible and non-printable characters and length capped, and a definition name must match `[A-Za-z0-9_$./-]`, so a hostile comment or an odd name does not reach the index.
+
+**Where it lives.** `build` adds `.detent/` to `.git/info/exclude`, resolved through `git rev-parse --git-common-dir` so a linked worktree writes to the main repo. It never edits `.gitignore`. Pass `--commit` to skip the exclude when you want the index checked in; it then shows in `git status`.
+
+**How it refreshes.** `detent index refresh` compares the manifest's blob shas with `git ls-files -s`, re-tags only changed and added files, drops removed ones, then recomputes the graph and map and adds only the new commits to the history. The result is the same as a full `build`. `detent index status` prints `fresh`, `stale` or `missing`. `query` and `cochange` print a warning on a stale index and exit 1 on a missing one.
+
+**How it ranks.** A file points at another when it uses a name the other defines. Names shorter than 4 characters, or defined in more than 3 files, are ignored. Edges are weighted by the square root of the use count and ranked with PageRank (20 iterations, damping 0.85). `detent index query <words>` boosts files whose path or definitions match the words ten times and returns the top ten as JSON. `detent index cochange <files>` lists the files that usually change with them: at least 5 revisions each, 5 shared, and 30% coupling. Commits touching more than 50 files are skipped.
+
+**What reads it.** The research stage runs `detent index status` first and reads `profile.md` before anything else. Plan and recheck use `cochange` to catch a file edited without its usual partner. The `repo-index-knowledge` adapter serves the index to the knowledge socket, and `detent setup` adds it to the starter `stack.yaml`. When a profile exists, `detent run new` writes `suggested.verify` (`source: "index"` and the command) into the run's `env.json`. It does not write `commands.verify`, because `detent drive` turns that into a Bash permission.
+
+**Tree-sitter, optionally.** The core is plain Node 20 with no installs and tags definitions with regular expressions for JavaScript, TypeScript, Python, Go, Java and Rust. For exact tags, run `npm i --prefix engine/index` to add `web-tree-sitter` and `tree-sitter-wasms`, which are optional dependencies. When they load, `manifest.json` records `tree-sitter` as the tagger; when they do not, the index falls back to regex and notes why. Set `DETENT_INDEX_TAGGER=regex` to force the regex tagger.
 
 ## Hooks
 

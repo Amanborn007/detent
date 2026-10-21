@@ -28,8 +28,8 @@ const REQUIRED_HEADINGS = {
   "brief.md": ["## Goal", "## Unknowns & open questions"],
   "research.md": ["## Blast radius"],
 };
-const DEFAULT_MODEL = "claude-sonnet-5-5";
-const DEFAULT_BUDGET_USD = 5;
+export const DEFAULT_MODEL = "claude-sonnet-5-5";
+export const DEFAULT_BUDGET_USD = 5;
 const BUDGET_FLOOR_USD = 0.1;
 const MAX_REPO_ARCHIVE_BYTES = 200 * 1024 * 1024;
 const MANIFEST_CAP = 256 * 1024;
@@ -129,7 +129,7 @@ function acquireLock(E, runDir) {
   throw new Error(`could not acquire ${p}`);
 }
 
-function positiveFlag(E, flags, name, dflt, integer) {
+export function positiveFlag(E, flags, name, dflt, integer) {
   if (flags[name] === undefined) return dflt;
   const n = Number(flags[name]);
   if (flags[name] === true || !Number.isFinite(n) || n <= 0 || (integer && !Number.isInteger(n))) {
@@ -530,7 +530,7 @@ function stopFail(E, ctx, reason, next_step, { stage, detail, extra } = {}) {
 // What next (slice A: never past plan)
 // ---------------------------------------------------------------------------
 
-function nextAction(E, status, decisions, runDir) {
+export function nextAction(E, status, decisions, runDir) {
   const stage = E.STAGES.find((s) => !["done", "skipped"].includes(status.stages[s].status));
   if (!stage) return { action: "done", stage: null };
   const blockers = E.pendingBlockers(decisions, stage);

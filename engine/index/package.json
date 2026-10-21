@@ -1,0 +1,12 @@
+{
+  "name": "detent-index",
+  "version": "1.0.0",
+  "description": "detent repo index: profile, map, symbols and co-change history for a work repo",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "optionalDependencies": {
+    "tree-sitter-wasms": "^0.1.11",
+    "web-tree-sitter": "^0.20.8"
+  }
+}

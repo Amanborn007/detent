@@ -131,5 +131,6 @@ export function buildChildEnv(parent, { tmpdir, sandboxRoot }) {
   env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
   env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
   env.DISABLE_TELEMETRY = "1";
+  env.DETENT_DRIVE_CHILD = "1";
   return { env, literals };
 }
