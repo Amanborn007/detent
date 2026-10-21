@@ -2,7 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { engine, mkRepo, detentHome } from "./helpers.mjs";
 import { HUMAN, scratch, stubBin, setOrigin } from "./verbs-helpers.mjs";
 
@@ -75,4 +76,14 @@ test("doctor at a terminal prints one line per check", () => {
   const r = engine(["doctor"], { cwd: repo, env: { ...env, DETENT_FORCE_TTY: "1" } });
   const lines = r.stdout.trim().split("\n").filter((l) => /^(PASS|FAIL|WARN) /.test(l));
   assert.ok(lines.length >= 8, r.stdout);
+});
+
+test("doctor with DETENT_ROOT unset warns with the fallback path and still exits 0", () => {
+  const { repo, env } = healthy();
+  const r = engine(["doctor"], { cwd: repo, env: { ...env, DETENT_ROOT: "" } });
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  const c = byName(r, "DETENT_ROOT");
+  assert.equal(c.status, "WARN", r.stdout);
+  assert.match(c.detail, /detent/);
+  assert.ok(c.detail.includes(resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..")), c.detail);
 });
