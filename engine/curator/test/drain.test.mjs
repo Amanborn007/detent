@@ -17,6 +17,13 @@ import http from 'node:http';
 import net from 'node:net';
 import crypto from 'node:crypto';
 
+function browserHeaders(stateDir, port, sid) {
+  const secret = readFileSync(join(stateDir, 'secret'), 'utf8').trim();
+  const boot = JSON.parse(readFileSync(join(stateDir, 'state.json'), 'utf8')).bootId;
+  const cap = crypto.createHmac('sha256', secret).update(`curator-session:${boot}:${sid}`).digest('hex');
+  return { 'X-Curator-Cap': cap, Origin: `http://127.0.0.1:${port}` };
+}
+
 const CURATOR_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLI = join(CURATOR_DIR, 'cli.mjs');
 const MINIMAL_HTML = '<!DOCTYPE html>\n<html><body><h1>plan</h1></body></html>\n';
@@ -35,11 +42,11 @@ function runCli(args, env) {
     child.on('close', (code) => resolve({ code, stdout, stderr }));
   });
 }
-function fetchRaw(port, path, { method = 'GET', body } = {}) {
+function fetchRaw(port, path, { method = 'GET', body, headers = {} } = {}) {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? undefined : JSON.stringify(body);
     const req = http.request(
-      { host: '127.0.0.1', port, path, method, headers: payload ? { 'Content-Type': 'application/json' } : {} },
+      { host: '127.0.0.1', port, path, method, headers: { ...(payload ? { 'Content-Type': 'application/json' } : {}), ...headers } },
       (res) => {
         const chunks = [];
         res.on('data', (c) => chunks.push(c));
@@ -101,8 +108,8 @@ test('drain: running server delivers pending feedback from every session without
   });
 
   // Queue feedback on A and B while nobody is polling -> durable, undelivered.
-  await fetchRaw(port, '/api/send', { method: 'POST', body: { sessionId: sidA, items: [{ type: 'comment', text: 'fix A' }] } });
-  await fetchRaw(port, '/api/send', { method: 'POST', body: { sessionId: sidB, items: [{ type: 'comment', text: 'fix B' }] } });
+  await fetchRaw(port, `/api/send?s=${sidA}`, { method: 'POST', body: { sessionId: sidA, items: [{ type: 'comment', text: 'fix A' }] }, headers: browserHeaders(stateDir, port, sidA) });
+  await fetchRaw(port, `/api/send?s=${sidB}`, { method: 'POST', body: { sessionId: sidB, items: [{ type: 'comment', text: 'fix B' }] }, headers: browserHeaders(stateDir, port, sidB) });
 
   // drain must return promptly (no long-poll on the empty session C).
   const start = Date.now();
@@ -145,8 +152,8 @@ test('drain: named files scope the sweep and leave other sessions queued', async
     if (state.pid) process.kill(state.pid);
   });
 
-  await fetchRaw(port, '/api/send', { method: 'POST', body: { sessionId: openedA.session, items: [{ type: 'comment', text: 'fix A' }] } });
-  await fetchRaw(port, '/api/send', { method: 'POST', body: { sessionId: sidB, items: [{ type: 'comment', text: 'fix B' }] } });
+  await fetchRaw(port, `/api/send?s=${openedA.session}`, { method: 'POST', body: { sessionId: openedA.session, items: [{ type: 'comment', text: 'fix A' }] }, headers: browserHeaders(stateDir, port, openedA.session) });
+  await fetchRaw(port, `/api/send?s=${sidB}`, { method: 'POST', body: { sessionId: sidB, items: [{ type: 'comment', text: 'fix B' }] }, headers: browserHeaders(stateDir, port, sidB) });
 
   const scoped = lines((await runCli(['drain', a], env)).stdout).filter((l) => l.status === 'feedback');
   assert.deepEqual(scoped.map((f) => f.key), [a], `scoped drain must only deliver ${a}`);

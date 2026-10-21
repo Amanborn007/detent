@@ -1,9 +1,9 @@
 ---
-name: sdlc-recheck
-description: SDLC engine stage 6 — fresh-context comparison of what implement actually committed against the approved plan/plan.md and the answered decisions in decisions.json, producing recheck.md with a per-step verdict table. Every material divergence becomes a pending decision (the conditional drift gate) with options accept / route-to-plan / route-to-implement; a clean recheck unlocks ship with no human interrupt. Drift means a human call, never forward motion. Trigger: /sdlc-recheck <run-id>.
+name: recheck
+description: SDLC engine stage 6 — fresh-context comparison of what implement actually committed against the approved plan/plan.md and the answered decisions in decisions.json, producing recheck.md with a per-step verdict table. Every material divergence becomes a pending decision (the conditional drift gate) with options accept / route-to-plan / route-to-implement; a clean recheck unlocks ship with no human interrupt. Drift means a human call, never forward motion.
 ---
 
-# sdlc-recheck — diff vs approved plan, drift becomes a gate
+# recheck — diff vs approved plan, drift becomes a gate
 
 Contract: `engine/stages/CONTRACT.md`. Inputs: `plan/plan.md`, `decisions.json`, the
 brief's acceptance criteria, and the implementation diff. Output: `recheck.md` +
@@ -50,6 +50,12 @@ your current context, hand recheck off; do not run it yourself.
    | `done-differently` | goal met via other means; describe the delta, cite evidence |
    | `not-done` | step absent (note if `CONDITIONAL on D-xxx` and D-xxx still pending — that is expected, not drift) |
    | `extra` | work in the diff mapping to NO step (one row per cluster of extra work) |
+
+   Run `detent index cochange <changed files>` over the diff. A file that changed
+   without its usual partner (a pair the history shows moving together) is a warning in
+   `## Divergences`: say which partner was left out and why that is or is not a problem.
+   It is a material divergence only when the partner carries a contract the change
+   affects. If the index reports `stale`, note that the check ran on old history.
 
    Then check the diff footprint against `## Files touched` (files changed that the
    plan never listed) and each answered decision against the code (does the

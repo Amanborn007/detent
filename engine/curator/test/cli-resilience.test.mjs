@@ -35,6 +35,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import http from 'node:http';
+import crypto from 'node:crypto';
 
 const CURATOR_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLI = join(CURATOR_DIR, 'cli.mjs');
@@ -106,11 +107,11 @@ function runCli(args, env) {
   });
 }
 
-function fetchRaw(port, path, { method = 'GET', body } = {}) {
+function fetchRaw(port, path, { method = 'GET', body, headers = {} } = {}) {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? undefined : JSON.stringify(body);
     const req = http.request(
-      { host: '127.0.0.1', port, path, method, headers: payload ? { 'Content-Type': 'application/json' } : {} },
+      { host: '127.0.0.1', port, path, method, headers: { ...(payload ? { 'Content-Type': 'application/json' } : {}), ...headers } },
       (res) => {
         const chunks = [];
         res.on('data', (c) => chunks.push(c));
@@ -491,9 +492,13 @@ test('poll: a successful poll against a reachable server resets a pre-existing f
   });
 
   // Queue feedback while nobody is polling, so it lands durably in state.json.
-  const send = await fetchRaw(port, '/api/send', {
+  const secret = readFileSync(join(stateDir, 'secret'), 'utf8').trim();
+  const boot = readStateFile(stateDir).bootId;
+  const cap = crypto.createHmac('sha256', secret).update(`curator-session:${boot}:${sessionId}`).digest('hex');
+  const send = await fetchRaw(port, `/api/send?s=${sessionId}`, {
     method: 'POST',
     body: { sessionId, items: [{ type: 'comment', text: 'looks good' }] },
+    headers: { 'X-Curator-Cap': cap, Origin: `http://127.0.0.1:${port}` },
   });
   assert.equal(send.code, 200);
   assert.equal(JSON.parse(send.body).delivered, false, 'queued, not delivered, since no one is polling yet');

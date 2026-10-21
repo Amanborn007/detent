@@ -5,9 +5,11 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import {
+  resolveStateDir, checkStateDir, loadOrCreateSecret, ensureGitignore, healthProof, artifactKey, sessionKey, safeEqual,
+} from './auth.mjs';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -234,9 +236,9 @@ export class SessionStore {
       };
     }
     const data = { ...this.meta, updatedAt: new Date().toISOString(), sessions };
-    fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });
+    fs.mkdirSync(path.dirname(this.stateFile), { recursive: true, mode: 0o700 });
     const tmp = `${this.stateFile}.tmp-${process.pid}`;
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
     fs.renameSync(tmp, this.stateFile);
   }
 
@@ -277,7 +279,7 @@ function readBody(req, limit = 1024 * 1024) {
     req.on('data', (c) => {
       size += c.length;
       if (size > limit) {
-        reject(new Error('request body too large'));
+        reject(Object.assign(new Error('request body too large'), { tooLarge: true }));
         req.destroy();
         return;
       }
@@ -381,13 +383,16 @@ function chromePage(session) {
   .msg.agent .who { color: #2563c9; opacity: 1; }
   #banner { display: none; padding: 8px 14px; background: #b0b6bd; color: #17191c; font-size: 13px; font-weight: 600; flex: none; }
   body.ended #banner { display: block; }
+  #nokey { display: none; padding: 8px 14px; background: #f2cf8a; color: #17191c; font-size: 13px; font-weight: 600; flex: none; }
+  body.nokey #nokey { display: block; }
 </style>
 </head>
 <body>
 <header id="hdr"><span class="dot"></span><h1>${title}</h1><span class="hint">alt-click to annotate · select text to comment</span></header>
 <div id="banner">Session ended. Nothing further will be sent to the agent.</div>
+<div id="nokey">This link has no access key, or its keys came from an earlier curator server, so nothing on this page can reach the agent. Run <code>curator open &lt;file&gt;</code> again and use the link it prints.</div>
 <main>
-  <iframe id="plan" src="/artifact/${sid}" sandbox="allow-scripts allow-forms" title="plan artifact"></iframe>
+  <iframe id="plan" sandbox="allow-scripts allow-forms" title="plan artifact"></iframe>
   <aside>
     <h2>Queued for agent</h2>
     <div id="queue"></div>
@@ -406,6 +411,12 @@ function chromePage(session) {
 (function () {
   'use strict';
   var SID = ${JSON.stringify(sid)};
+  // C authorises this page's own calls; R lets the iframe load the artifact and nothing else.
+  var keys = new URLSearchParams(location.hash.slice(1));
+  var CAP = keys.get('c') || '';
+  var RKEY = keys.get('r') || '';
+  var noKey = !CAP || !RKEY;
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
   var frame = document.getElementById('plan');
   var queueEl = document.getElementById('queue');
   var chatEl = document.getElementById('chat');
@@ -474,8 +485,8 @@ function chromePage(session) {
       div.appendChild(kind); div.appendChild(body); div.appendChild(rm);
       queueEl.appendChild(div);
     });
-    sendBtn.disabled = ended;
-    endBtn.disabled = ended;
+    sendBtn.disabled = ended || noKey;
+    endBtn.disabled = ended || noKey;
   }
 
   // Edit a queued item in place. A decision edits its note, since the answer
@@ -522,6 +533,7 @@ function chromePage(session) {
   }
 
   window.addEventListener('message', function (ev) {
+    if (ev.source !== frame.contentWindow) return;
     var d = ev.data;
     if (!d || d.curator !== true) return;
     if (d.action === 'annotate-request') {
@@ -547,6 +559,7 @@ function chromePage(session) {
       enqueue(dec);
       toFrame({ action: 'decision-accepted', question: d.question, answer: d.answer });
     } else if (d.action === 'prompt') {
+      if (!window.confirm('The artifact page wants to queue this prompt for the agent: ' + String(d.text).slice(0, 300))) return;
       enqueue({ type: 'prompt', text: d.text });
     }
   });
@@ -554,9 +567,12 @@ function chromePage(session) {
   function api(method, url, body) {
     return fetch(url, {
       method: method,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Curator-Cap': CAP },
       body: body === undefined ? undefined : JSON.stringify(body),
-    }).then(function (r) { return r.json(); });
+    }).then(function (r) {
+      if (r.status === 401) stale();
+      return r.json();
+    });
   }
 
   function addMsg(from, text) {
@@ -578,8 +594,8 @@ function chromePage(session) {
     if (c) items.push({ type: 'comment', text: c });
     if (items.length === 0) { window.alert('Nothing to send — queue an annotation, decision, or comment first.'); return; }
     sendBtn.disabled = true;
-    api('POST', '/api/send', { sessionId: SID, items: items }).then(function (resp) {
-      if (resp.error) { window.alert('Send failed: ' + resp.error); sendBtn.disabled = false; return; }
+    api('POST', '/api/send?s=' + SID, { items: items }).then(function (resp) {
+      if (resp.error) { window.alert('Send failed: ' + resp.error + (resp.next_step ? '\\n' + resp.next_step : '')); sendBtn.disabled = false; return; }
       queue.forEach(function (item) {
         if (item.type === 'decision') toFrame({ action: 'decision-cleared', question: item.question });
       });
@@ -593,13 +609,24 @@ function chromePage(session) {
   endBtn.addEventListener('click', function () {
     if (ended) return;
     if (!window.confirm('End the session? The agent will stop polling this plan.')) return;
-    api('POST', '/api/end', { sessionId: SID, by: 'user' }).then(function () { markEnded(); });
+    api('POST', '/api/end?s=' + SID, { by: 'user' }).then(function (resp) {
+      if (resp.error) { window.alert('End failed: ' + resp.error + (resp.next_step ? '\\n' + resp.next_step : '')); return; }
+      markEnded();
+    });
   });
 
   function markEnded() {
     ended = true;
     document.body.classList.add('ended');
     document.getElementById('hdr').classList.add('ended');
+    render();
+  }
+
+  var timer = null;
+  function stale() {
+    if (timer) { clearInterval(timer); timer = null; }
+    noKey = true;
+    document.body.classList.add('nokey');
     render();
   }
 
@@ -612,8 +639,13 @@ function chromePage(session) {
       if (resp.ended && !ended) markEnded();
     }).catch(function () { /* server restarting; retry on next tick */ });
   }
-  setInterval(tick, 1500);
-  tick();
+  if (noKey) {
+    document.body.classList.add('nokey');
+  } else {
+    frame.src = '/artifact/' + SID + '?k=' + encodeURIComponent(RKEY);
+    timer = setInterval(tick, 1500);
+    tick();
+  }
   render();
 })();
 </script>
@@ -621,20 +653,64 @@ function chromePage(session) {
 </html>`;
 }
 
-export function createServer(store) {
+const PAGE_HEADERS = { 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "frame-ancestors 'self'" };
+
+const NO_CREDENTIAL = {
+  error: 'missing or invalid credential',
+  next_step: 'Use engine/curator/cli.mjs from your detent clone (an older curator CLI sends no credential), or run: curator open <file.html>',
+};
+
+class HttpError extends Error {
+  constructor(code, error, next_step) {
+    super(error);
+    this.code = code;
+    this.next_step = next_step;
+  }
+}
+
+const isJsonType = (ct) => /^application\/json\s*(;|$)/i.test(String(ct || ''));
+
+export function createServer(store, { secret } = {}) {
+  if (typeof secret !== 'string' || !/^[0-9a-f]{64}$/.test(secret)) {
+    throw new Error('createServer requires the server secret: refusing to serve without authentication');
+  }
+  let boundPort = 0;
+  const bootId = crypto.randomBytes(16).toString('hex');
+
+  const bearerOk = (req) => {
+    const m = /^Bearer (.+)$/.exec(String(req.headers.authorization || ''));
+    return Boolean(m) && safeEqual(m[1], secret);
+  };
+  const capOf = (req) => String(req.headers['x-curator-cap'] || '');
+  const sessionFor = (url) => store.getById(url.searchParams.get('s') || '');
+  // An unknown session still compares against a throwaway key so the 401 does not reveal whether it exists.
+  const capOk = (session, given) => safeEqual(given, sessionKey(secret, bootId, session ? session.id : '-')) && Boolean(session);
+  const unauthorized = () => new HttpError(401, NO_CREDENTIAL.error, NO_CREDENTIAL.next_step);
+
   const server = http.createServer(async (req, res) => {
     store.touch();
     const url = new URL(req.url, 'http://127.0.0.1');
     const p = url.pathname;
     try {
-      // DNS-rebinding guard: a hostile website resolving its own domain to
-      // 127.0.0.1 would reach us with that domain in Host. Loopback only.
-      const host = String(req.headers.host || '').replace(/:\d+$/, '').toLowerCase();
-      if (host && host !== '127.0.0.1' && host !== 'localhost' && host !== '[::1]') {
-        return sendJson(res, 403, { error: `forbidden Host header: ${req.headers.host}`, next_step: 'Access curator via http://127.0.0.1:<port> only.' });
+      // 1. Host: present, loopback, and this server's own port. Defeats DNS rebinding and other-port pages.
+      const host = String(req.headers.host || '').toLowerCase();
+      const allowedHosts = [`127.0.0.1:${boundPort}`, `localhost:${boundPort}`, `[::1]:${boundPort}`];
+      if (!allowedHosts.includes(host)) {
+        throw new HttpError(403, `forbidden Host header: ${req.headers.host || '(none)'}`, 'Access curator via http://127.0.0.1:<port> only.');
       }
+      // 2. Origin, when a browser sends one, must be this very server (rejects "null" from the sandboxed iframe).
+      if (req.headers.origin !== undefined && req.headers.origin !== `http://${host}`) {
+        throw new HttpError(403, `forbidden Origin header: ${req.headers.origin}`, 'Use the curator page opened by the curator CLI.');
+      }
+      if (req.method === 'OPTIONS') {
+        res.writeHead(405, { ...JSON_HEADERS, Allow: 'GET, POST' });
+        return res.end(JSON.stringify({ error: 'OPTIONS is not supported', next_step: 'See engine/curator/README.md for the API.' }));
+      }
+
       if (req.method === 'GET' && p === '/healthz') {
-        return sendJson(res, 200, { ok: true, pid: process.pid });
+        const nonce = url.searchParams.get('nonce') || '';
+        if (!/^[A-Za-z0-9_-]{16,128}$/.test(nonce)) throw new HttpError(400, 'missing or malformed nonce', 'GET /healthz?nonce=<16 to 128 url-safe characters>');
+        return sendJson(res, 200, { ok: true, pid: process.pid, boot: bootId, proof: healthProof(secret, nonce) });
       }
 
       if (req.method === 'GET' && p === '/sdk.js') {
@@ -646,13 +722,14 @@ export function createServer(store) {
       if (req.method === 'GET' && p.startsWith('/s/')) {
         const session = store.getById(p.slice(3));
         if (!session) return sendJson(res, 404, { error: 'unknown session', next_step: 'Run: curator open <file.html>' });
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...PAGE_HEADERS });
         return res.end(chromePage(session));
       }
 
       if (req.method === 'GET' && p.startsWith('/artifact/')) {
         const session = store.getById(p.slice('/artifact/'.length));
-        if (!session) return sendJson(res, 404, { error: 'unknown session', next_step: 'Run: curator open <file.html>' });
+        const given = url.searchParams.get('k') || '';
+        if (!session || !safeEqual(given, artifactKey(secret, bootId, session.id))) throw unauthorized();
         // A registered artifact that has since been moved/deleted is a routine,
         // expected condition (the agent regenerated the plan) — report it as a
         // clean 404, not a 500 with a raw ENOENT that leaks the fs path.
@@ -663,18 +740,29 @@ export function createServer(store) {
           });
         }
         const bytes = safeReadArtifact(session.file);
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...PAGE_HEADERS });
         return res.end(injectedArtifact(bytes, session.id));
       }
 
-      if (req.method === 'POST' && p === '/api/open') {
-        const body = JSON.parse((await readBody(req)) || '{}');
-        if (!body.file) return sendJson(res, 400, { error: 'missing "file"', next_step: 'POST {"file": "/abs/path.html"}' });
-        const session = store.open(body.file);
-        return sendJson(res, 200, { ok: true, sessionId: session.id, key: session.key });
+      // Browser routes take one session (?s=) and its key (X-Curator-Cap). Agent routes take one file (key) and the bearer.
+      if (req.method === 'GET' && p === '/api/updates') {
+        const session = sessionFor(url);
+        if (!capOk(session, capOf(req))) throw unauthorized();
+        return sendJson(res, 200, {
+          version: session.version,
+          chat: session.chat,
+          ended: session.ended,
+          ended_by: session.endedBy,
+        });
+      }
+
+      if (req.method === 'GET' && p === '/api/status') {
+        if (!bearerOk(req)) throw unauthorized();
+        return sendJson(res, 200, { pid: process.pid, sessions: store.statusList() });
       }
 
       if (req.method === 'GET' && p === '/api/poll') {
+        if (!bearerOk(req)) throw unauthorized();
         const key = url.searchParams.get('key');
         const session = key && store.get(key);
         if (!session) {
@@ -699,58 +787,90 @@ export function createServer(store) {
         return res.end(JSON.stringify(payload));
       }
 
-      if (req.method === 'POST' && p === '/api/send') {
-        const body = JSON.parse((await readBody(req)) || '{}');
-        const session = body.sessionId ? store.getById(body.sessionId) : body.key ? store.get(body.key) : null;
-        if (!session) return sendJson(res, 404, { error: 'unknown session', next_step: 'Run: curator open <file.html>' });
-        if (!Array.isArray(body.items) || body.items.length === 0) {
-          return sendJson(res, 400, { error: 'items must be a non-empty array', next_step: 'Queue at least one item before sending.' });
+      if (req.method === 'POST') {
+        const hasBearer = req.headers.authorization !== undefined;
+        const hasCap = req.headers['x-curator-cap'] !== undefined;
+        if (!['/api/open', '/api/send', '/api/end', '/api/reply'].includes(p)) {
+          return sendJson(res, 404, { error: `no route: ${req.method} ${p}`, next_step: 'See engine/curator/README.md for the API.' });
         }
-        const delivered = store.send(session.key, body.items);
-        store.addUserChat(session.key, `sent ${body.items.length} item(s) to the agent`);
-        return sendJson(res, 200, { ok: true, delivered });
-      }
+        // /api/end serves both callers; the credential presented says which one this is.
+        const browserRoute = p === '/api/send' || (p === '/api/end' && !hasBearer);
+        let session = null;
+        if (browserRoute) {
+          if (hasBearer) throw unauthorized();
+          session = sessionFor(url);
+          if (!capOk(session, capOf(req))) throw unauthorized();
+        } else if (hasCap || !bearerOk(req)) {
+          throw unauthorized();
+        }
+        if (!isJsonType(req.headers['content-type'])) {
+          throw new HttpError(415, 'Content-Type must be application/json', 'Send the body as application/json.');
+        }
+        let body;
+        try {
+          body = JSON.parse((await readBody(req)) || '{}');
+        } catch (e) {
+          if (e.tooLarge) throw new HttpError(413, 'request body too large', 'Send a smaller body.');
+          throw new HttpError(400, 'body is not valid JSON', 'Send a JSON object.');
+        }
+        if (body === null || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'body must be a JSON object', 'Send a JSON object.');
 
-      if (req.method === 'POST' && p === '/api/end') {
-        const body = JSON.parse((await readBody(req)) || '{}');
-        const session = body.sessionId ? store.getById(body.sessionId) : body.key ? store.get(body.key) : null;
-        if (!session) return sendJson(res, 404, { error: 'unknown session', next_step: 'Nothing to end; run curator status.' });
-        store.end(session.key, { by: body.by === 'agent' ? 'agent' : 'user' });
-        return sendJson(res, 200, { ok: true, status: 'ended', ended_by: body.by === 'agent' ? 'agent' : 'user' });
-      }
+        if (p === '/api/open') {
+          if (!body.file) throw new HttpError(400, 'missing "file"', 'POST {"file": "/abs/path.html"}');
+          if (typeof body.file !== 'string' || path.extname(body.file).toLowerCase() !== '.html') {
+            throw new HttpError(400, 'only .html artifacts can be opened', 'Point curator open at a self-contained .html artifact.');
+          }
+          const opened = store.open(body.file);
+          return sendJson(res, 200, { ok: true, sessionId: opened.id, key: opened.key });
+        }
 
-      if (req.method === 'POST' && p === '/api/reply') {
-        const body = JSON.parse((await readBody(req)) || '{}');
-        const session = body.key ? store.get(body.key) : body.sessionId ? store.getById(body.sessionId) : null;
-        if (!session) return sendJson(res, 404, { error: 'unknown session', next_step: 'Run: curator open <file.html>' });
+        if (p === '/api/send') {
+          if (body.key !== undefined) throw new HttpError(400, 'send takes the session in ?s=, not a "key"', 'POST /api/send?s=<session> with {"items": [...]}');
+          if (!Array.isArray(body.items) || body.items.length === 0) {
+            return sendJson(res, 400, { error: 'items must be a non-empty array', next_step: 'Queue at least one item before sending.' });
+          }
+          const delivered = store.send(session.key, body.items);
+          store.addUserChat(session.key, `sent ${body.items.length} item(s) to the agent`);
+          return sendJson(res, 200, { ok: true, delivered });
+        }
+
+        if (p === '/api/end') {
+          if (session) {
+            if (body.key !== undefined) throw new HttpError(400, 'a browser end takes the session in ?s=, not a "key"', 'POST /api/end?s=<session>');
+            store.end(session.key, { by: 'user' });
+            return sendJson(res, 200, { ok: true, status: 'ended', ended_by: 'user' });
+          }
+          if (body.sessionId !== undefined) throw new HttpError(400, 'an agent end takes a "key", not a sessionId', 'POST {"key": "/abs/path.html", "by": "agent"}');
+          const target = typeof body.key === 'string' ? store.get(body.key) : null;
+          if (!target) return sendJson(res, 404, { error: 'unknown session', next_step: 'Nothing to end; run curator status.' });
+          store.end(target.key, { by: 'agent' });
+          return sendJson(res, 200, { ok: true, status: 'ended', ended_by: 'agent' });
+        }
+
+        if (body.sessionId !== undefined) throw new HttpError(400, 'reply takes a "key", not a sessionId', 'POST {"key": "/abs/path.html", "message": "..."}');
+        const target = typeof body.key === 'string' ? store.get(body.key) : null;
+        if (!target) return sendJson(res, 404, { error: 'unknown session', next_step: 'Run: curator open <file.html>' });
         if (typeof body.message !== 'string' || body.message.trim() === '') {
           return sendJson(res, 400, { error: 'missing "message"', next_step: 'Pass -m "<what you changed>".' });
         }
-        store.addReply(session.key, body.message);
+        store.addReply(target.key, body.message);
         return sendJson(res, 200, { ok: true });
-      }
-
-      if (req.method === 'GET' && p === '/api/updates') {
-        const session = store.getById(url.searchParams.get('s') || '');
-        if (!session) return sendJson(res, 404, { error: 'unknown session' });
-        return sendJson(res, 200, {
-          version: session.version,
-          chat: session.chat,
-          ended: session.ended,
-          ended_by: session.endedBy,
-        });
-      }
-
-      if (req.method === 'GET' && p === '/api/status') {
-        return sendJson(res, 200, { pid: process.pid, sessions: store.statusList() });
       }
 
       return sendJson(res, 404, { error: `no route: ${req.method} ${p}`, next_step: 'See engine/curator/README.md for the API.' });
     } catch (err) {
+      if (err instanceof HttpError) {
+        if (!res.headersSent) return sendJson(res, err.code, { error: err.message, next_step: err.next_step });
+        return res.destroy();
+      }
       if (!res.headersSent) return sendJson(res, 500, { error: String(err && err.message || err), next_step: 'Check the artifact path and re-run curator open.' });
       res.destroy();
     }
   });
+  server.on('listening', () => {
+    boundPort = server.address().port;
+  });
+  server.bootId = bootId;
   return server;
 }
 
@@ -762,27 +882,40 @@ function isDirectRun() {
 }
 
 if (isDirectRun() && process.argv.includes('--daemon')) {
-  const stateDir = process.env.CURATOR_STATE_DIR || path.join(os.homedir(), '.curator');
+  const stateDir = resolveStateDir();
   const stateFile = path.join(stateDir, 'state.json');
+  let secret;
+  try {
+    fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+    checkStateDir(stateDir);
+    secret = loadOrCreateSecret(stateDir);
+    ensureGitignore(stateDir);
+  } catch (err) {
+    process.stderr.write(`curator: ${err.message}\n${err.next_step ? `${err.next_step}\n` : ''}`);
+    process.exit(1);
+  }
   const store = new SessionStore({ stateFile });
   try {
     store.loadState(); // recover durable pending feedback from a previous run
   } catch (err) {
     process.stderr.write(`curator: could not load state file, starting fresh: ${err}\n`);
   }
-  const server = createServer(store);
+  const server = createServer(store, { secret });
   server.listen(0, '127.0.0.1', () => {
     const { port } = server.address();
-    store.meta = { pid: process.pid, port, startedAt: new Date().toISOString() };
+    store.meta = { pid: process.pid, port, bootId: server.bootId, startedAt: new Date().toISOString() };
     store.flush();
     process.stdout.write(JSON.stringify({ ok: true, pid: process.pid, port }) + '\n');
   });
+  const stop = () => {
+    store.meta = {};
+    store.flush();
+    process.exit(0);
+  };
+  process.on('SIGTERM', stop);
+  process.on('SIGINT', stop);
   // Idle self-shutdown: no live sessions and no activity for 60 minutes.
   setInterval(() => {
-    if (!store.hasLiveSessions() && Date.now() - store.lastActivity > IDLE_SHUTDOWN_MS) {
-      store.meta = {};
-      store.flush();
-      process.exit(0);
-    }
+    if (!store.hasLiveSessions() && Date.now() - store.lastActivity > IDLE_SHUTDOWN_MS) stop();
   }, 60 * 1000);
 }

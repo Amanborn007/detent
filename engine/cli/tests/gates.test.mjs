@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, } from "node:os";
 import { fileURLToPath } from "node:url";
-import { engine, mkRun, writeArtifact, readJson, writeJson, throughResearch, eventsOf } from "./helpers.mjs";
+import { engine, mkCuratorClone, mkRun, writeArtifact, readJson, writeJson, throughResearch, eventsOf } from "./helpers.mjs";
 
 function toPlanEnd(ctx) {
   throughResearch(ctx);
@@ -52,8 +52,10 @@ test("plan end raises the intent gate and refuses until it is answered", () => {
 test("gate open renders a terminal fallback when curator is not on PATH", () => {
   const ctx = mkRun();
   toPlanEnd(ctx); // raises the gate
+  const noCurator = mkdtempSync(join(tmpdir(), "no-curator-"));
+  mkCuratorClone(noCurator, null);
   const r = engine(["gate", "open", "intent", "--repo", ctx.repo, "--run", ctx.runId],
-    { env: { PATH: "/usr/bin:/bin" } }); // no curator here
+    { env: { PATH: "/usr/bin:/bin", TEST_CLONE: noCurator } }); // no bundled curator in this clone
   assert.equal(r.code, 0, r.stdout);
   assert.equal(r.json.mode, "terminal_fallback");
   assert.ok(r.json.decision.question, "renders the question");
@@ -72,13 +74,10 @@ test("gate open dispatches to curator when it is on PATH (by contract, never ven
   const ctx = mkRun();
   toPlanEnd(ctx);
   // stub curator binary on PATH
-  const binDir = join(tmpdir(), "engine-test-bin-" + process.pid);
-  mkdirSync(binDir, { recursive: true });
-  const stub = join(binDir, "curator");
-  writeFileSync(stub, "#!/bin/sh\necho stub-curator\n");
-  chmodSync(stub, 0o755);
+  const binDir = mkdtempSync(join(tmpdir(), "engine-test-bin-"));
+  mkCuratorClone(binDir, `#!${process.execPath}\nconsole.log("stub-curator");\n`);
   const r = engine(["gate", "open", "intent", "--repo", ctx.repo, "--run", ctx.runId],
-    { env: { PATH: binDir + ":/usr/bin:/bin" } });
+    { env: { PATH: "/usr/bin:/bin", TEST_CLONE: binDir } });
   assert.equal(r.code, 0, r.stdout);
   assert.equal(r.json.mode, "curator");
   assert.match(r.json.next_step, /curator open/);
@@ -97,13 +96,10 @@ test("gate open next_step uses only subcommands and flags the real curator CLI a
 
   const ctx = mkRun();
   toPlanEnd(ctx);
-  const binDir = join(tmpdir(), "engine-test-bin-real-" + process.pid);
-  mkdirSync(binDir, { recursive: true });
-  const stub = join(binDir, "curator");
-  writeFileSync(stub, "#!/bin/sh\necho stub-curator\n");
-  chmodSync(stub, 0o755);
+  const binDir = mkdtempSync(join(tmpdir(), "engine-test-bin-real-"));
+  mkCuratorClone(binDir, `#!${process.execPath}\nconsole.log("stub-curator");\n`);
   const r = engine(["gate", "open", "intent", "--repo", ctx.repo, "--run", ctx.runId],
-    { env: { PATH: binDir + ":/usr/bin:/bin" } });
+    { env: { PATH: "/usr/bin:/bin", TEST_CLONE: binDir } });
   assert.equal(r.json.mode, "curator");
 
   const calls = [...r.json.next_step.matchAll(/\bcurator ([a-z-]+)((?: [^\s&;]+)*)/g)];

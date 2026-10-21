@@ -3,14 +3,15 @@
 #
 # Usage: scripts/export-example.sh <run-dir> <dest-dir>
 #
-# Copies the run directory without worktree/ and node_modules, copies the
+# Copies the run directory without worktree/, node_modules and .detent/ (the repo index), copies the
 # run's plans (<DETENT_ROOT>/.plans/<run-id>-*.html) into <dest>/plans/, then
 # rewrites text files so the output holds no machine-specific detail:
 #   DETENT_ROOT path -> $DETENT_ROOT      home directory -> ~
 #   hostname         -> <host>            local username -> <user>
 # Em dashes in the run data are left alone. After rewriting, the script exits 1
 # and lists file:line if the home path, username or hostname still appear in
-# any text file.
+# any text file. It then runs engine/scripts/company-strings-check.sh over the
+# destination and exits 1 on any denylisted string (file:line only, never the text).
 #
 #   Env override:
 #     DETENT_ROOT   the root that holds the run (default: the nearest ancestor of
@@ -42,7 +43,7 @@ HOST_SHORT="$(hostname -s)"
 mkdir -p "$DEST/plans"
 
 echo "export-example: $RUN -> $DEST"
-rsync -a --exclude 'worktree/' --exclude 'node_modules/' "$RUN/" "$DEST/"
+rsync -a --exclude 'worktree/' --exclude 'node_modules/' --exclude '.detent/' "$RUN/" "$DEST/"
 for plan in "$ROOT/.plans/$RUN_ID"-*.html; do
   [[ -f "$plan" ]] && cp "$plan" "$DEST/plans/"
 done
@@ -94,6 +95,12 @@ for needle in "$HOME" "$USER_NAME" "$HOST_FULL" "$HOST_SHORT"; do
 done
 if [[ $status -ne 0 ]]; then
   echo "export-example: leftovers found, do not publish $DEST" >&2
+  exit 1
+fi
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! bash "$HERE/../engine/scripts/company-strings-check.sh" --dir "$DEST" --paths-only >&2; then
+  echo "export-example: company-identifying strings found, do not publish $DEST" >&2
   exit 1
 fi
 echo "export-example: done, no leftovers"

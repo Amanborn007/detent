@@ -6,7 +6,7 @@ export const CHILD_TOOLS = "Read,Glob,Grep,Write,Edit,TodoWrite";
 export const STATIC_DENY = ["WebFetch", "WebSearch", "Task", "Agent", "Skill", "NotebookEdit"];
 
 const ENV_ALLOW = new Set(["PATH", "HOME", "USER", "LANG", "TERM", "SHELL", "TMPDIR"]);
-const SECRET_NAME = /TOKEN|KEY|SECRET|PASS|CRED|AUTH|COOKIE|SESSION/i;
+export const SECRET_NAME =/TOKEN|KEY|SECRET|PASS|CRED|AUTH|COOKIE|SESSION/i;
 const OUTBOX_RULE = /^(Write|Edit)\(\/\/[^()]+\/\*\*\)$/;
 
 export function parseVersion(text) {
@@ -80,7 +80,7 @@ const shellQuote = (p) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(p) ? p : `'${p.replac
 const ab = (p) => `//${p.replace(/^\/+/, "")}`;
 
 // The settings file one child gets. base comes from profiles/drive.json, or --profile.
-export function buildChildSettings(base, { inputs, outbox, apiKeyFile }) {
+export function buildChildSettings(base, { inputs, outbox, apiKeyFile, curatorStateDir }) {
   const { drive: _drive, $comment: _c, ...rest } = JSON.parse(JSON.stringify(base));
   const settings = {
     ...rest,
@@ -93,6 +93,7 @@ export function buildChildSettings(base, { inputs, outbox, apiKeyFile }) {
         ...STATIC_DENY,
         `Write(${ab(inputs)}/**)`, `Edit(${ab(inputs)}/**)`,
         `Write(${ab(outbox)}/.git/**)`, `Edit(${ab(outbox)}/.git/**)`,
+        ...(curatorStateDir ? ["Read", "Edit", "Write"].map((t) => `${t}(${ab(curatorStateDir)}/**)`) : []),
       ])],
     },
     disableAllHooks: true,
@@ -131,5 +132,6 @@ export function buildChildEnv(parent, { tmpdir, sandboxRoot }) {
   env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
   env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
   env.DISABLE_TELEMETRY = "1";
+  env.DETENT_DRIVE_CHILD = "1";
   return { env, literals };
 }

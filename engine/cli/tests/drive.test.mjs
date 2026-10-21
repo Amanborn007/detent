@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { engine, mkRun, readJson, writeJson, writeArtifact, eventsOf, ENGINE } from "./helpers.mjs";
+import { engine, mkCuratorClone, mkRun, readJson, writeJson, writeArtifact, eventsOf, ENGINE } from "./helpers.mjs";
 
 const CURATOR_CLI = join(fileURLToPath(import.meta.url), "..", "..", "..", "curator", "cli.mjs");
 const BARE_PATH = "/usr/bin:/bin";
@@ -119,16 +119,13 @@ if (cfg.sleep) { setTimeout(() => {}, 60000); } else {
 }
 
 function mkCuratorStub(dir) {
-  const bin = join(dir, "curator");
-  writeFileSync(bin, `#!/bin/sh
-echo "$@" >> "${dir}/curator.log"
-case "$1" in
-  open) echo '{"url":"http://127.0.0.1:9/s/abc","key":"'"$2"'"}' ;;
-  drain) if [ -f "${dir}/marker" ]; then printf '%s\\n' '{"key":"'"$2"'","prompts":[{"type":"decision","question":"D-001","answer":"capped"}]}'; fi ;;
-esac
+  return mkCuratorClone(dir, `#!${process.execPath}
+import { appendFileSync, existsSync } from "node:fs";
+const a = process.argv.slice(2);
+appendFileSync("${dir}/curator.log", a.join(" ") + "\\n");
+if (a[0] === "open") console.log(JSON.stringify({ url: "http://127.0.0.1:9/s/abc", key: a[1] }));
+if (a[0] === "drain" && existsSync("${dir}/marker")) console.log(JSON.stringify({ key: a[1], prompts: [{ type: "decision", question: "D-001", answer: "capped" }] }));
 `);
-  chmodSync(bin, 0o755);
-  return bin;
 }
 
 /** A ticket exec stub + knowledge provider + stack.yaml. */
@@ -452,7 +449,7 @@ test("curator feedback is drained only at drive start; a child-planted marker an
   const cur = scratch();
   mkCuratorStub(cur);
   writeJson(join(t.runDir, "decisions.json"), [{ id: "D-001", raised_by: "intake", blocks: ["plan"], question: "Cap?", options: ["capped", "infinite"], status: "pending" }]);
-  const r = drive(t, { marker: join(cur, "marker") }, [], { PATH: `${cur}:${BARE_PATH}` });
+  const r = drive(t, { marker: join(cur, "marker") }, [], { PATH: BARE_PATH, TEST_CLONE: cur });
   assert.equal(r.code, 0, r.stdout + r.stderr);
   assert.equal(r.json.stopped, "needs_human");
   assert.ok(existsSync(join(cur, "marker")), "the child did plant it");
@@ -468,13 +465,13 @@ test("a human answer present at drive start is applied before any child runs", (
   const cur = scratch();
   mkCuratorStub(cur);
   writeJson(join(t.runDir, "decisions.json"), [{ id: "D-001", raised_by: "intake", blocks: ["plan"], question: "Cap?", options: ["capped", "infinite"], status: "pending" }]);
-  const first = drive(t, { outbox: "none", exit: 3 }, ["--max-steps", "1"], { PATH: `${cur}:${BARE_PATH}` });
+  const first = drive(t, { outbox: "none", exit: 3 }, ["--max-steps", "1"], { PATH: BARE_PATH, TEST_CLONE: cur });
   assert.equal(first.code, 1);
   rmFile(join(t.d, "stub.log"));
   // render the page so the next start has something to drain, then answer
-  engine(["gate", "open", "D-001", "--run", t.runId, "--repo", t.repo], { env: { PATH: `${cur}:${BARE_PATH}` } });
+  engine(["gate", "open", "D-001", "--run", t.runId, "--repo", t.repo], { env: { PATH: BARE_PATH, TEST_CLONE: cur } });
   writeFileSync(join(cur, "marker"), "answered");
-  const r = drive(t, {}, ["--max-steps", "1"], { PATH: `${cur}:${BARE_PATH}` });
+  const r = drive(t, {}, ["--max-steps", "1"], { PATH: BARE_PATH, TEST_CLONE: cur });
   assert.equal(readJson(join(t.runDir, "decisions.json"))[0].status, "answered");
   assert.ok(r.calls.length >= 1);
 });

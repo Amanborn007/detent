@@ -17,6 +17,11 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/export-example-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
+# The export runs the company-strings check; give it a synthetic denylist.
+LEAK="FakeCorp""Secret"
+printf '%s\n' "$LEAK" >"$TMP/denylist.txt"
+export DETENT_DENYLIST="$TMP/denylist.txt"
+
 USER_NAME="$(id -un)"
 HOST_FULL="$(hostname)"
 HOST_SHORT="$(hostname -s)"
@@ -40,6 +45,10 @@ printf 'k: %s/z\n' "$HOME" >"$RUN/cfg.yaml"
 printf '<p>%s on %s</p>\n' "$USER_NAME" "$HOST_FULL" >"$ROOT/.plans/demo-run-1-plan.html"
 printf '<p>other run %s</p>\n' "$USER_NAME" >"$ROOT/.plans/other-run-plan.html"
 
+mkdir -p "$RUN/.detent/index" "$RUN/research/.detent"
+echo "map $USER_NAME" >"$RUN/.detent/index/map.md"
+echo "profile $USER_NAME" >"$RUN/research/.detent/profile.md"
+
 # --- 1-3: clean export ---
 DEST="$TMP/out"
 "$EXPORT" "$RUN" "$DEST" >"$TMP/log" 2>&1 || { cat "$TMP/log" >&2; fail "clean export exited non-zero"; }
@@ -59,6 +68,20 @@ grep -q '—' "$DEST/brief.md" || fail "em dash was altered"
 [[ -f "$DEST/plans/demo-run-1-plan.html" ]] || fail "plan html not copied"
 [[ ! -e "$DEST/plans/other-run-plan.html" ]] || fail "unrelated plan copied"
 grep -q '<user>' "$DEST/plans/demo-run-1-plan.html" || fail "plan html not scrubbed"
+
+[[ -z "$(find "$DEST" -name .detent)" ]] || fail ".detent/ was copied"
+
+# --- 3b: a denylisted string fails the export, naming file:line, never the text ---
+printf 'one\ntwo %s\n' "$LEAK" >"$RUN/notes.txt"
+DEST3="$TMP/out3"
+set +e
+"$EXPORT" "$RUN" "$DEST3" >"$TMP/log3" 2>&1
+rc=$?
+set -e
+[[ "$rc" == 1 ]] || { cat "$TMP/log3" >&2; fail "expected exit 1 on denylisted string, got $rc"; }
+grep -q 'notes.txt:2' "$TMP/log3" || { cat "$TMP/log3" >&2; fail "output did not list notes.txt:2"; }
+grep -qiF "$LEAK" "$TMP/log3" && fail "denylisted text was printed"
+rm "$RUN/notes.txt"
 
 # --- 4: leftover in a type the rewriter skips must fail loudly ---
 printf 'line one\nran by %s\n' "$USER_NAME" >"$RUN/run.log"

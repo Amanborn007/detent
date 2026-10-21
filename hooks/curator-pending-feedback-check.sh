@@ -14,7 +14,7 @@
 #
 # Ownership scoping
 # ------------------
-# The curator state file is GLOBAL (one `~/.curator/state.json` for every
+# The curator state file is GLOBAL (one `.local/curator/state.json` for every
 # session on the machine), but this hook only speaks for the CURRENT agent
 # context. We only ever consider sessions whose artifact `file` path is under
 # $CLAUDE_PROJECT_DIR (if set), $DETENT_ROOT (if set — curator artifacts live
@@ -50,7 +50,7 @@
 #
 # Override the state dir with CURATOR_STATE_DIR (matches the CLI/server).
 
-STATE_DIR="${CURATOR_STATE_DIR:-$HOME/.curator}"
+STATE_DIR="${CURATOR_STATE_DIR:-${DETENT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}/.local/curator}"
 STATE_FILE="$STATE_DIR/state.json"
 POLL_FAILURES_FILE="$STATE_DIR/poll-failures.json"
 [ -f "$STATE_FILE" ] || exit 0

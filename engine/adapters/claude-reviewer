@@ -9,6 +9,7 @@
  * The reviewed repo is untrusted. The prompt goes in on stdin, claude gets no
  * tools or MCP servers, and user, project and plugin settings and hooks are not
  * loaded. claude runs in an empty temp dir so no project CLAUDE.md is read.
+ * The spawn goes through the runtime port (engine/runtime), selected by DETENT_RUNTIME.
  *
  * Args:   --model <m> | --max-diff-bytes <n> (default 200000) | --bare (needs ANTHROPIC_API_KEY)
  * Env:    DETENT_CLAUDE_BIN overrides the `claude` binary.
@@ -21,7 +22,8 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { execFileSync, spawnSync } = require("node:child_process");
+const { execFileSync } = require("node:child_process");
+const { pathToFileURL } = require("node:url");
 
 const ACTIONS = ["no-op", "auto-fix", "ask-user"];
 const RISKS = ["low", "medium", "high", "critical"];
@@ -111,56 +113,69 @@ ${diffText}
 -----END DIFF ${nonce}-----
 `;
 
-const claudeArgs = ["-p", "--output-format", "json", "--tools", "", "--strict-mcp-config", "--no-session-persistence"];
-claudeArgs.push(...(args.bare ? ["--bare"] : ["--setting-sources", ""]));
-if (args.model) claudeArgs.push("--model", args.model);
-
-const bin = process.env.DETENT_CLAUDE_BIN || "claude";
-const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), "detent-claude-reviewer-"));
-const r = spawnSync(bin, claudeArgs, { input: prompt, encoding: "utf8", cwd: emptyDir, maxBuffer: 64 * 1024 * 1024 });
-fs.rmSync(emptyDir, { recursive: true, force: true });
-if (r.error) {
-  emit({ error: `could not run '${bin}': ${r.error.message}`, next_step: "install claude or set DETENT_CLAUDE_BIN" }, 1);
-}
-if (r.status !== 0) {
-  emit({ error: `claude exited ${r.status}: ${(r.stderr || r.stdout || "").trim().slice(0, 2000)}`,
-         next_step: "check that `claude` is signed in, then re-invoke" }, 1);
-}
-
 const shape = "make claude return only JSON of the form {\"findings\":[...]}; see engine/sockets/reviewer.md";
 function violation(reason) {
   emit({ error: reason, next_step: shape }, 2);
 }
 
-let envelope;
-try { envelope = JSON.parse(r.stdout); } catch (e) { violation("claude stdout is not a JSON envelope: " + e.message); }
-// Newer claude versions print every message as an array; the answer is the result entry.
-if (Array.isArray(envelope)) envelope = envelope.findLast((m) => m && m.type === "result") || {};
-if (envelope.total_cost_usd !== undefined) process.stderr.write(`claude-reviewer: cost $${envelope.total_cost_usd}\n`);
-if (envelope.is_error) emit({ error: "claude reported an error: " + String(envelope.result).slice(0, 2000), next_step: "check `claude` auth and re-invoke" }, 1);
-if (typeof envelope.result !== "string") violation("envelope has no string .result");
-
-const text = envelope.result.trim().replace(/^```[a-zA-Z]*\s*\n/, "").replace(/\n```\s*$/, "");
-let body;
-try { body = JSON.parse(text); } catch (e) { violation("claude result is not JSON: " + e.message); }
-if (!body || !Array.isArray(body.findings)) violation("result must be an object with a findings array");
-
-body.findings.forEach((f, i) => {
-  const at = `findings[${i}]`;
-  if (!f || typeof f !== "object") violation(`${at} is not an object`);
-  for (const k of ["summary", "location", "detail"]) {
-    if (typeof f[k] !== "string" || !f[k]) violation(`${at}.${k} must be a non-empty string`);
+async function main() {
+  const { getRuntime, UnknownRuntimeError } = await import(pathToFileURL(path.join(__dirname, "..", "runtime", "runtime.mjs")).href);
+  const bin = process.env.DETENT_CLAUDE_BIN || "claude";
+  let runtime;
+  try {
+    runtime = getRuntime({ bins: process.env.DETENT_CLAUDE_BIN ? { "claude-code": bin } : {} });
+  } catch (e) {
+    if (e instanceof UnknownRuntimeError) emit({ error: e.message, next_step: "set DETENT_RUNTIME to a known runtime or unset it" }, 2);
+    throw e;
   }
-  if (!/^[^\s:]+:\d+/.test(f.location)) violation(`${at}.location must look like path:line, got '${f.location}'`);
-  if (!ACTIONS.includes(f.action)) violation(`${at}.action must be one of ${ACTIONS.join(" | ")}, got '${f.action}'`);
-  if (!RISKS.includes(f.risk_level)) violation(`${at}.risk_level must be one of ${RISKS.join(" | ")}, got '${f.risk_level}'`);
-});
+  const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), "detent-claude-reviewer-"));
+  let res;
+  try {
+    res = runtime.run({
+      prompt, cwd: emptyDir, output: "json", tools: "none", mcp: "none", persist_session: false,
+      settings: { sources: "none" }, ...(args.bare ? { auth: "api_key" } : {}), ...(args.model ? { model: args.model } : {}),
+    });
+  } finally {
+    fs.rmSync(emptyDir, { recursive: true, force: true });
+  }
+  if (res.cost_usd !== null) process.stderr.write(`claude-reviewer: cost $${res.cost_usd}\n`);
+  if (res.error) {
+    const k = res.error.kind;
+    if (k === "spawn") emit({ error: `could not run '${bin}': ${res.error.message}`, next_step: "install claude or set DETENT_CLAUDE_BIN" }, 1);
+    if (k === "exit") {
+      emit({ error: `claude exited ${res.raw.exit_code}: ${(res.raw.stderr || res.raw.stdout || "").trim().slice(0, 2000)}`,
+             next_step: "check that `claude` is signed in, then re-invoke" }, 1);
+    }
+    if (k === "bad_output") violation(res.error.message);
+    if (k === "runtime_error") emit({ error: "claude reported an error: " + res.error.message.slice(0, 2000), next_step: "check `claude` auth and re-invoke" }, 1);
+    emit({ error: `claude ${k}: ${res.error.message}`, next_step: "re-invoke" }, 1);
+  }
+  if (res.stop !== "ok") emit({ error: `claude stopped at its ${res.stop} limit`, next_step: "re-invoke" }, 1);
 
-const n = body.findings.length;
-emit({
-  findings: body.findings.map(f => ({
-    summary: f.summary, location: f.location, action: f.action, risk_level: f.risk_level, detail: f.detail,
-  })),
-  next_step: (n ? `apply the auto-fix findings and surface the ask-user ones before opening the PR` : "no findings, continue to the PR stage") +
-    (truncated ? `. The diff was truncated to ${args.maxDiffBytes} bytes, so part of it was not reviewed` : ""),
-}, 0);
+  const text = res.text.trim().replace(/^```[a-zA-Z]*\s*\n/, "").replace(/\n```\s*$/, "");
+  let body;
+  try { body = JSON.parse(text); } catch (e) { violation("claude result is not JSON: " + e.message); }
+  if (!body || !Array.isArray(body.findings)) violation("result must be an object with a findings array");
+
+  body.findings.forEach((f, i) => {
+    const at = `findings[${i}]`;
+    if (!f || typeof f !== "object") violation(`${at} is not an object`);
+    for (const k of ["summary", "location", "detail"]) {
+      if (typeof f[k] !== "string" || !f[k]) violation(`${at}.${k} must be a non-empty string`);
+    }
+    if (!/^[^\s:]+:\d+/.test(f.location)) violation(`${at}.location must look like path:line, got '${f.location}'`);
+    if (!ACTIONS.includes(f.action)) violation(`${at}.action must be one of ${ACTIONS.join(" | ")}, got '${f.action}'`);
+    if (!RISKS.includes(f.risk_level)) violation(`${at}.risk_level must be one of ${RISKS.join(" | ")}, got '${f.risk_level}'`);
+  });
+
+  const n = body.findings.length;
+  emit({
+    findings: body.findings.map(f => ({
+      summary: f.summary, location: f.location, action: f.action, risk_level: f.risk_level, detail: f.detail,
+    })),
+    next_step: (n ? `apply the auto-fix findings and surface the ask-user ones before opening the PR` : "no findings, continue to the PR stage") +
+      (truncated ? `. The diff was truncated to ${args.maxDiffBytes} bytes, so part of it was not reviewed` : ""),
+  }, 0);
+}
+
+main().catch((e) => emit({ error: "claude-reviewer crashed: " + e.message, next_step: "check the detent install (engine/runtime) and re-invoke" }, 1));

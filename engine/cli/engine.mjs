@@ -18,7 +18,7 @@
 
 import {
   readFileSync, writeFileSync, appendFileSync, renameSync, existsSync,
-  mkdirSync, readdirSync, statSync, accessSync, constants, rmSync, realpathSync, writeSync, mkdtempSync,
+  mkdirSync, readdirSync, statSync, accessSync, constants, rmSync, realpathSync, writeSync, mkdtempSync, readSync,
 } from "node:fs";
 import { join, resolve, dirname, delimiter, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,9 +27,12 @@ import process from "node:process";
 import { runBenchmark, checkpointBenchmark, ledgerLine } from "../bench/bench.mjs";
 import { runEval, EvalRefusal, resolveEvalRoots } from "../eval/eval.mjs";
 import { loadRoutingConfig, tierOf, advisorConsultEvent } from "../routing/routing.mjs";
+import { renderText } from "./render.mjs";
+import { detectTagger } from "../index/lib/tagger-ts.mjs";
 import { readSteps, renderLiveHtml, isRunComplete, STEP_KINDS, STEP_STATUSES } from "./liveview.mjs";
 import { loadRunState, buildNote, checkSufficiency, currentStage, optionKey } from "../handoff/handoff.mjs";
 import { analyzeSpend, trackingLine, compareTracking } from "../spend/spend.mjs";
+import { renderMarkdown } from "./markdown.mjs";
 import { homedir, tmpdir } from "node:os";
 import { resolvePackPath, validatePackFile, PackPathError } from "../pack/pack.mjs";
 
@@ -79,7 +82,7 @@ const STAGE_END_GATES = {
 
 // There is no `engine` binary on PATH; under the detent wrapper, name the one that exists.
 function forCaller(text) {
-  return process.env.DETENT_CLI === "1" ? text.replace(/\bengine (?=(?:setup|run|stage|gate|drive|socket|next|dashboard|live|bench|eval|pack|respond|step|advisor|handoff|attempt|env|decide-why|spend|help)\b)/g, "detent ") : text;
+  return process.env.DETENT_CLI === "1" ? text.replace(/\bengine (?=(?:setup|run|stage|gate|drive|runtime|socket|next|dashboard|live|bench|eval|pack|respond|step|advisor|handoff|attempt|env|decide-why|spend|start|status|continue|decide|approve|revise|doctor|help)\b)/g, "detent ") : text;
 }
 
 // process.exit() drops a buffered stream write, and a pipe truncates past ~8KB.
@@ -96,9 +99,25 @@ function writeLineSync(line) {
   }
 }
 
+// --json is stripped before parseArgs, so it can never swallow the next positional.
+const WANT_JSON = process.argv.includes("--json");
+const humanOut = () => !WANT_JSON && (process.stdout.isTTY === true || process.env.DETENT_FORCE_TTY === "1");
+
+function renderContext(obj) {
+  const runDir = obj.run_id ? join(sdlcHome(), obj.run_id) : null;
+  if (!runDir || !existsSync(join(runDir, "stage-status.json"))) return {};
+  const decisions = loadDecisions(runDir);
+  return {
+    ticket: readJson(join(runDir, "run.json")).ticket_ref,
+    stages: loadStatus(runDir).stages,
+    gates: decisions.filter((d) => d.status === "pending"),
+  };
+}
+
 function out(obj, code = 0) {
   if (typeof obj.next_step === "string") obj.next_step = forCaller(obj.next_step);
-  writeLineSync(JSON.stringify(obj) + "\n");
+  if (humanOut()) writeLineSync(renderText(obj, renderContext(obj)) + "\n");
+  else writeLineSync(JSON.stringify(obj) + "\n");
   process.exit(code);
 }
 
@@ -336,35 +355,76 @@ function runRepoOf(runDir) {
 }
 
 const RUN_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
+// Refs may be ticket keys like owner/repo#12, so only path-escaping shapes are refused.
+const UNSAFE_REF_RE = /^[./]|\.\./;
+
+function sameDir(a, b) {
+  if (!a || !b) return false;
+  try { return realpathSync(a) === realpathSync(b); } catch { return resolve(a) === resolve(b); }
+}
+
+function runIdsIn(sdlc) {
+  return existsSync(sdlc) ? readdirSync(sdlc).filter((d) => existsSync(join(sdlc, d, "run.json"))) : [];
+}
+
+// A ref of only digits and dashes is a date, which every run of the day shares.
+const DATE_ONLY = /^[\d-]+$/;
+
+/** Tier 2 of run resolution: a ticket key, then a substring that is neither a date nor a bare prefix. */
+function matchRunRef(sdlc, ref) {
+  const ids = runIdsIn(sdlc);
+  const want = slugify(ref);
+  const byTicket = ids.filter((id) => {
+    try { return slugify(String(readJson(join(sdlc, id, "run.json")).ticket_ref || "")) === want; } catch { return false; }
+  });
+  if (byTicket.length) return byTicket.sort();
+  const low = ref.toLowerCase();
+  if (DATE_ONLY.test(low)) return [];
+  return ids.filter((id) => id.includes(low) && !id.startsWith(low)).sort();
+}
+
+function runIsActive(runDir) {
+  try {
+    return Object.values(loadStatus(runDir).stages).some((s) => !["done", "skipped"].includes(s.status));
+  } catch { return false; }
+}
 
 function findRun(repo, flags) {
   const sdlc = sdlcHome();
   if (flags.run) {
-    if (flags.run === true || !RUN_ID_RE.test(flags.run)) {
+    if (flags.run === true || UNSAFE_REF_RE.test(String(flags.run))) {
       refuse(`invalid run id ${JSON.stringify(flags.run)}: a run id matches ${RUN_ID_RE}`, "pass the run id exactly as `engine dashboard` lists it");
     }
-    // --run resolves regardless of --repo: multi-repo tasks share the one home.
-    const runDir = join(sdlc, flags.run);
-    if (!existsSync(join(runDir, "run.json"))) {
-      refuse(`no run '${flags.run}' under ${sdlc}`, "engine run new --ticket <ref> to create one, or check --run");
+    const ref = String(flags.run);
+    // An exact id resolves regardless of --repo: multi-repo tasks share the one home.
+    if (RUN_ID_RE.test(ref) && existsSync(join(sdlc, ref, "run.json"))) return { runId: ref, runDir: join(sdlc, ref) };
+    const hits = matchRunRef(sdlc, ref);
+    if (hits.length === 1) return { runId: hits[0], runDir: join(sdlc, hits[0]) };
+    if (hits.length > 1) {
+      refuse(`'${ref}' matches ${hits.length} runs — ambiguous`, "pass the full --run <run-id>", { runs: hits });
     }
-    return { runId: flags.run, runDir };
+    refuse(`no run '${ref}' under ${sdlc}`, "engine run new --ticket <ref> to create one, or check --run");
   }
   if (!existsSync(sdlc)) {
     refuse(`no .sdlc/ directory in ${sdlc.replace(/\/\.sdlc$/, "")} — no runs exist`, "engine run new --ticket <ref> [--repo <path>]");
   }
-  // Without --run, scope to runs whose run.json records this work repo.
-  const runs = readdirSync(sdlc)
-    .filter((d) => existsSync(join(sdlc, d, "run.json")))
-    .filter((d) => runRepoOf(join(sdlc, d)) === repo);
-  if (runs.length === 0) {
+  const mine = runIdsIn(sdlc).filter((d) => sameDir(runRepoOf(join(sdlc, d)), repo));
+  if (mine.length === 0) {
     refuse(`no runs for repo ${repo} under ${sdlc}`,
       "engine run new --ticket <ref> [--repo <path>], or pass --run <run-id> (runs list: engine dashboard)");
   }
-  if (runs.length > 1) {
-    refuse(`multiple runs for repo ${repo} under ${sdlc} — ambiguous`, "pass --run <run-id>", { runs: runs.sort() });
+  const active = mine.filter((d) => runIsActive(join(sdlc, d)));
+  if (active.length === 0) {
+    refuse(`every run for repo ${repo} is finished`, "engine run new --ticket <ref> for new work, or pass --run <run-id>", { runs: mine.sort() });
   }
-  return { runId: runs[0], runDir: join(sdlc, runs[0]) };
+  const created = (d) => { try { return String(readJson(join(sdlc, d, "run.json")).created_at || ""); } catch { return ""; } };
+  active.sort((a, b) => (created(b) < created(a) ? -1 : created(b) > created(a) ? 1 : (b < a ? -1 : 1)));
+  return { runId: active[0], runDir: join(sdlc, active[0]) };
+}
+
+/** For commands that also take the run as a positional id. */
+function findRunFor(flags, positionalId) {
+  return findRun(repoOf(flags), { ...flags, run: positionalId || flags.run || undefined });
 }
 
 function loadStatus(runDir) {
@@ -399,6 +459,21 @@ function nextDecisionId(decisions) {
 function isUnresolvedJudgment(d) {
   return d.cause === "judgment" && typeof d.answer === "string" &&
     d.answer.trim().toLowerCase() === PROCEED_DEGRADED_ANSWER;
+}
+
+// Answering a gate must also clear the stage block that gate raised, or every later status read shows the stage waiting.
+function releaseAnsweredBlocks(runDir, decisions) {
+  const status = loadStatus(runDir);
+  let changed = false;
+  for (const [stage, entry] of Object.entries(status.stages)) {
+    if (entry.status !== "blocked") continue;
+    const open = decisions.some((d) => (entry.blocked_on || []).includes(d.id) && (d.status === "pending" || isUnresolvedJudgment(d)));
+    if (open) continue;
+    const raisedAtEnd = decisions.some((d) => (entry.blocked_on || []).includes(d.id) && STAGE_END_GATES[stage]?.name === d.gate);
+    status.stages[stage] = { status: raisedAtEnd ? "in_progress" : "pending", updated_at: nowIso() };
+    changed = true;
+  }
+  if (changed) saveStatus(runDir, status);
 }
 
 function pendingBlockers(decisions, stage) {
@@ -473,6 +548,10 @@ function cmdRunNew(flags) {
   for (const s of STAGES) stages[s] = { status: "pending" };
   writeJsonAtomic(join(runDir, "stage-status.json"), { run_id: runId, stages });
   writeJsonAtomic(join(runDir, "decisions.json"), []);
+  const suggested = indexSuggestedVerify(repo);
+  if (suggested) {
+    writeJsonAtomic(join(runDir, "env.json"), { commands: {}, gotchas: [], suggested: { verify: { source: "index", command: suggested } } });
+  }
   // attempts.jsonl is deliberately NOT created here. The handoff distinguishes
   // "nobody recorded anything" (absent) from "nothing was rejected" (present
   // and empty), and only an explicit `engine attempt --none` may produce the
@@ -491,6 +570,16 @@ function cmdRunNew(flags) {
     status: "pending",
     next_step: `engine stage begin intake --run ${runId} --repo ${repo}`,
   });
+}
+
+// Only commands detent index itself emits are accepted, so a tampered manifest cannot seed an arbitrary one.
+const INDEX_VERIFY = new Set(["npm test", "make test", "go test ./...", "cargo test", "pytest"]);
+function indexSuggestedVerify(repo) {
+  const p = join(repo, ".detent", "index", "manifest.json");
+  if (!existsSync(p)) return null;
+  let m;
+  try { m = readJson(p); } catch (e) { return fail(`run new: ${p} is not valid JSON: ${e.message}`, "run \`detent index build\` to rewrite it"); }
+  return INDEX_VERIFY.has(m.suggested_verify) ? m.suggested_verify : null;
 }
 
 /** CONTRACT.md: ".sdlc/ MUST be gitignored ... the engine wiring adds the ignore
@@ -846,7 +935,7 @@ function endStage(stage, repo, runId, runDir, tddRecord) {
         { gate: gateDef.name, decision_id: gate.id, ...ho },
       );
     }
-    if (gate.status === "answered" && gate.answer === "revise") {
+    if (gate.status === "answered" && optionKey(gate.answer) === optionKey("revise")) {
       return no(
         `the ${gateDef.name} gate verdict is 'revise' — loop back, update ${primaryArtifact(stage) || "the stage artifact"}, and re-raise the gate (new decision block)`,
         `revise per the gate annotations, then engine stage end ${stage} again after a fresh gate approval`,
@@ -936,10 +1025,6 @@ function cmdStep(label, flags) {
     refuse("step requires a label",
       "engine step <label> --run <id> [--repo <path>] [--kind tool|thinking|plan|answer] [--status todo|doing|done]");
   }
-  if (!flags.run || flags.run === true) {
-    refuse("step requires --run <id>",
-      "engine step <label> --run <id> [--repo <path>] [--kind tool|thinking|plan|answer] [--status todo|doing|done]");
-  }
   const repo = repoOf(flags);
   const { runId, runDir } = findRun(repo, flags);
   const kind = flags.kind && flags.kind !== true ? String(flags.kind) : "tool";
@@ -969,21 +1054,16 @@ function cmdStep(label, flags) {
 // ---------------------------------------------------------------------------
 // engine gate open <gate-id>
 // Renders a pending gate. Curator is integrated BY CONTRACT (blueprint D7):
-// if a `curator` executable is on PATH we write/refresh the gate artifact and
-// print the curator open+poll commands; otherwise we print a terminal
-// fallback. This CLI never answers a decision — only a human does.
+// if the curator CLI bundled in this clone exists we write/refresh the gate artifact and
+// print the curator open+poll commands; otherwise we print a terminal fallback. This CLI never answers a decision — only a human does.
 // ---------------------------------------------------------------------------
 
-function curatorOnPath() {
-  for (const dir of (process.env.PATH || "").split(delimiter)) {
-    if (!dir) continue;
-    const candidate = join(dir, "curator");
-    try {
-      accessSync(candidate, constants.X_OK);
-      if (statSync(candidate).isFile()) return candidate;
-    } catch { /* not here */ }
-  }
-  return null;
+// Only the curator beside this engine is ever used for gates: a `curator` found elsewhere on PATH
+// could hold a different secret or be a stand-in that answers for a human.
+const CURATOR_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "curator", "cli.mjs");
+
+function siblingCurator() {
+  return existsSync(CURATOR_CLI) ? resolve(CURATOR_CLI) : null;
 }
 
 function cmdGateOpen(gateId, flags) {
@@ -1078,7 +1158,7 @@ function cmdGateOpen(gateId, flags) {
     });
   }
 
-  const curator = curatorOnPath();
+  const curator = siblingCurator();
   if (curator) {
     const html = renderGateArtifact({ runId, runDir }, {
       name: decision.gate || decision.id,
@@ -1094,7 +1174,7 @@ function cmdGateOpen(gateId, flags) {
       html,
       ...(parkHandoff || {}),
       next_step:
-        `curator open ${html} ; once the human has answered there, run: engine gate collect --run ${runId}` +
+        `curator open ${html} (run this clone's CLI: node ${curator} open ${html}) ; once the human has answered there, run: engine gate collect --run ${runId}` +
         ` — it maps the curator answer into decisions.json; then re-run the refused engine command`,
     });
   }
@@ -1106,7 +1186,7 @@ function cmdGateOpen(gateId, flags) {
     gate_artifact: gateArtifact,
     ...(parkHandoff || {}),
     next_step:
-      `curator is not on PATH. A HUMAN must answer decision ${decision.id} by editing ` +
+      `the curator CLI is missing from this clone. A HUMAN must answer decision ${decision.id} by editing ` +
       `${join(runDir, "decisions.json")}: set status:"answered", answer:<one of ${JSON.stringify(decision.options || [])}>, ` +
       `answered_by:"human", answered_at:<ISO-8601>. Agents never write answers. Then re-run the refused engine command.`,
   });
@@ -1131,9 +1211,11 @@ function renderGateArtifact({ runId, runDir }, gate) {
   const primary = (gate.stage && STAGE_ARTIFACTS[gate.stage]) || [];
   const docs = [...new Set([...primary, ...Object.values(STAGE_ARTIFACTS).flat()])]
     .filter((rel) => existsSync(join(runDir, rel)));
-  const docHtml = docs.map((rel, i) =>
-    `<details${i === 0 ? " open" : ""}><summary>${escapeHtml(rel)}</summary><p><strong>${i === 0 ? "The artifact this gate reviews" : "Earlier run artifact, for context"}: ${escapeHtml(rel)}</strong></p><pre>${escapeHtml(readFileSync(join(runDir, rel), "utf8"))}</pre></details>`,
-  ).join("\n");
+  const docHtml = docs.map((rel, i) => {
+    const src = readFileSync(join(runDir, rel), "utf8");
+    const body = rel.endsWith(".md") ? `<article class="doc">${renderMarkdown(src)}</article>` : `<pre>${escapeHtml(src)}</pre>`;
+    return `<details${i === 0 ? " open" : ""}><summary>${escapeHtml(rel)}</summary><p><strong>${i === 0 ? "The artifact this gate reviews" : "Earlier run artifact, for context"}: ${escapeHtml(rel)}</strong></p>${body}</details>`;
+  }).join("\n");
   const blocks = gate.decisions.map((d) => {
     const options = (d.options || []).map((o) =>
       `<div class="option" data-plan-option="${escapeHtml(o)}"><strong>${escapeHtml(o)}</strong></div>`,
@@ -1172,6 +1254,21 @@ ${options}
   pre { background: var(--paper-2); border: 1px solid var(--rule); padding: 1rem; overflow-x: auto;
         white-space: pre-wrap; font-family: var(--mono); font-size: .85rem; }
   summary { cursor: pointer; font-family: var(--mono); font-size: .85rem; }
+  .doc { border-left: 3px solid var(--rule); padding: .2rem 0 .2rem 1.2rem; margin: .5rem 0 1.5rem; }
+  .doc h3 { font-size: 1.15rem; margin: 1.2rem 0 .4rem; }
+  .doc h4 { font-size: 1rem; margin: 1.4rem 0 .4rem; }
+  .doc h5, .doc h6 { font-size: .95rem; margin: 1rem 0 .3rem; }
+  .doc p, .doc ul, .doc ol, .doc blockquote, .doc table { margin: .5rem 0; }
+  .doc ul, .doc ol { padding-left: 1.4rem; }
+  .doc li { margin: .25rem 0; }
+  .doc code { font-family: var(--mono); font-size: .85em; background: var(--paper-2); padding: .05rem .3rem; border-radius: .25rem; }
+  .doc pre code { background: none; padding: 0; }
+  .doc blockquote { border-left: 3px solid var(--accent); margin-left: 0; padding-left: 1rem; color: var(--muted); }
+  .doc table { border-collapse: collapse; display: block; overflow-x: auto; font-size: .9rem; }
+  .doc th, .doc td { border: 1px solid var(--rule); padding: .35rem .6rem; text-align: left; vertical-align: top; }
+  .doc th { background: var(--paper-2); }
+  .doc a { color: var(--accent); }
+  .doc hr { border: 0; border-top: 1px solid var(--rule); }
   .q-label { font-weight: 600; }
   .options { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .6rem; }
   .option { border: 1px solid var(--rule); border-radius: .4rem; padding: .6rem 1rem; cursor: pointer; background: var(--paper-2); }
@@ -1236,11 +1333,11 @@ function parseFeedbackText(text, label) {
 
 /** Run `curator drain` and return the prompts addressed to this run's gate pages. */
 function drainCuratorFor(runId, runDir) {
-  const curator = curatorOnPath();
-  if (!curator) return { items: [], note: "curator not on PATH" };
+  const curator = siblingCurator();
+  if (!curator) return { items: [], note: "curator CLI missing from this clone" };
   const htmls = gateHtmlsOf(runId, runDir);
   if (htmls.size === 0) return { items: [], note: "no gate page rendered for this run yet" };
-  const r = spawnSync(curator, ["drain", ...htmls], { encoding: "utf8", timeout: 30000 });
+  const r = spawnSync(process.execPath, [curator, "drain", ...htmls], { encoding: "utf8", timeout: 30000 });
   if (r.error) throw new Error(`curator drain could not run: ${r.error.message}`);
   if (r.status !== 0) throw new Error(`curator drain exited ${r.status}: ${(r.stdout + r.stderr).trim().slice(-400)}`);
   const items = [];
@@ -1288,6 +1385,7 @@ function applyFeedback(runDir, items) {
   }
   if (answered.length) saveDecisions(runDir, decisions);
   syncGateAnsweredEvents(runDir, decisions);
+  releaseAnsweredBlocks(runDir, decisions);
   return { answered, unresolved, feedback, pending: decisions.filter((d) => d.status === "pending" || isUnresolvedJudgment(d)).map((d) => d.id) };
 }
 
@@ -1332,15 +1430,26 @@ function cmdGateCollect(flags) {
 // The orchestration lives in its own module; it gets the engine's internals by injection.
 // ---------------------------------------------------------------------------
 
-async function cmdDriveEntry(flags) {
-  const { cmdDrive } = await import("./drive/drive.mjs");
-  const E = {
+const ENGINE_FILE = fileURLToPath(import.meta.url);
+const ENGINE_ROOT = resolve(dirname(ENGINE_FILE), "..");
+
+function driveInjection() {
+  return {
     STAGES, STAGE_ARTIFACTS, STAGE_END_GATES, out, refuse, fail, nowIso, readJson, appendEvent, detentRoot, repoOf, findRun,
     loadStatus, loadDecisions, saveDecisions, nextDecisionId, pendingBlockers, syncGateAnsweredEvents, beginStage, endStage,
-    raiseEndGate, renderGateArtifact, drainCuratorFor, collectResult, curatorOnPath, escapeHtml, parseYamlSubset, runExec,
-    engineFile: fileURLToPath(import.meta.url),
+    raiseEndGate, renderGateArtifact, drainCuratorFor, collectResult, siblingCurator, escapeHtml, parseYamlSubset, runExec,
+    engineFile: ENGINE_FILE,
   };
-  return cmdDrive(flags, E);
+}
+
+async function cmdDriveEntry(flags) {
+  const { cmdDrive } = await import("./drive/drive.mjs");
+  return cmdDrive(flags, driveInjection());
+}
+
+async function cmdRuntimeEntry(sub, flags) {
+  const { cmdRuntime } = await import("../runtime/cli.mjs");
+  return cmdRuntime(sub, flags, { out, refuse, fail });
 }
 
 // ---------------------------------------------------------------------------
@@ -1651,15 +1760,16 @@ function socketFanOut(name, entry, payload, stackPath) {
 // next command. No orchestrator prompt.
 // ---------------------------------------------------------------------------
 
-function cmdNext(flags) {
+function cmdNext(flags, { withStages = false } = {}) {
   const repo = repoOf(flags);
   const { runId, runDir } = findRun(repo, flags);
   const status = loadStatus(runDir);
+  const emit = (o) => out(withStages ? { ...o, stages: status.stages } : o);
   const decisions = loadDecisions(runDir);
   syncGateAnsweredEvents(runDir, decisions);
   const current = STAGES.find((s) => !["done", "skipped"].includes(status.stages[s].status));
   if (!current) {
-    out({ ok: true, run_id: runId, stage: null, status: "done",
+    emit({ ok: true, run_id: runId, stage: null, status: "done",
       next_step: "run complete — all stages done" });
   }
   const entry = status.stages[current];
@@ -1670,11 +1780,11 @@ function cmdNext(flags) {
   if (entry.status === "pending") {
     const blockers = pendingBlockers(decisions, current);
     if (blockers.length > 0) {
-      out({ ...base,
+      emit({ ...base,
         entry_state: `blocked by pending decision(s): ${blockers.map((d) => d.id).join(", ")}`,
         next_step: `engine gate open ${blockers[0].gate || blockers[0].id} ${suffix}` });
     }
-    out({ ...base,
+    emit({ ...base,
       entry_state: "all prior stages done, no blocking decisions",
       exit_state: artifact ? `will require ${artifact}` : "no required artifact",
       next_step: `engine stage begin ${current} ${suffix}` });
@@ -1682,13 +1792,13 @@ function cmdNext(flags) {
   if (entry.status === "blocked") {
     const ids = entry.blocked_on || [];
     const first = decisions.find((d) => ids.includes(d.id));
-    out({ ...base,
+    emit({ ...base,
       entry_state: `blocked on: ${ids.join(", ")}`,
       next_step: `engine gate open ${(first && first.gate) || ids[0] || "?"} ${suffix}` });
   }
   // in_progress
   if (artifact && !existsSync(join(runDir, artifact))) {
-    out({ ...base,
+    emit({ ...base,
       exit_state: `required artifact missing: ${artifact}`,
       next_step: `produce ${artifact} in ${runDir}, then: engine stage end ${current} ${suffix}` });
   }
@@ -1696,12 +1806,12 @@ function cmdNext(flags) {
   if (gateDef) {
     const gate = decisions.find((d) => d.gate === gateDef.name);
     if (gate && gate.status === "pending") {
-      out({ ...base,
+      emit({ ...base,
         exit_state: `artifact present; ${gateDef.name} gate pending (${gate.id})`,
         next_step: `engine gate open ${gateDef.name} ${suffix}` });
     }
   }
-  out({ ...base,
+  emit({ ...base,
     exit_state: artifact ? `artifact present: ${artifact}` : "no required artifact",
     next_step: `engine stage end ${current} ${suffix}` });
 }
@@ -1875,10 +1985,8 @@ function cmdDashboard() {
   let openHint;
   if (existsSync(curatorCli)) {
     openHint = `node ${curatorCli} open ${artifact} — review all runs in curator (delegate the open/poll loop to a subagent)`;
-  } else if (curatorOnPath()) {
-    openHint = `curator open ${artifact} — review all runs in curator (delegate the open/poll loop to a subagent)`;
   } else {
-    openHint = `open ${artifact} in a browser (curator CLI not found at ${curatorCli} and not on PATH)`;
+    openHint = `open ${artifact} in a browser (curator CLI not found at ${curatorCli})`;
   }
   out({
     ok: true,
@@ -1911,15 +2019,7 @@ function cmdDashboard() {
 // ---------------------------------------------------------------------------
 
 function cmdLive(runId, flags) {
-  const id = runId || (flags.run && flags.run !== true ? String(flags.run) : null);
-  if (!id) {
-    refuse("live requires a run id",
-      "engine live <run-id> [--run <id>] [--watch [--interval-ms 500] [--timeout-s N]]  (list runs: engine dashboard)");
-  }
-  const runDir = join(sdlcHome(), id);
-  if (!existsSync(join(runDir, "run.json"))) {
-    refuse(`no run '${id}' under ${sdlcHome()}`, "check the run id (engine dashboard lists all runs)");
-  }
+  const { runId: id, runDir } = findRunFor(flags, runId);
   const root = detentRoot();
   const plansDir = join(root, ".plans");
   mkdirSync(plansDir, { recursive: true });
@@ -1927,9 +2027,7 @@ function cmdLive(runId, flags) {
   const curatorCli = join(root, "engine", "curator", "cli.mjs");
   const openHint = existsSync(curatorCli)
     ? `node ${curatorCli} open ${artifact} — watch this run live (delegate the open/poll loop to a subagent)`
-    : curatorOnPath()
-      ? `curator open ${artifact} — watch this run live`
-      : `open ${artifact} in a browser (curator CLI not found at ${curatorCli} and not on PATH)`;
+    : `open ${artifact} in a browser (curator CLI not found at ${curatorCli})`;
 
   const eventsPath = join(runDir, "events.jsonl");
   const statusPath = join(runDir, "stage-status.json");
@@ -2104,12 +2202,7 @@ function cmdLive(runId, flags) {
 // ---------------------------------------------------------------------------
 
 function cmdBench(runId, flags) {
-  const id = runId || (flags.run && flags.run !== true ? flags.run : null);
-  if (!id) refuse("bench requires a run id", "engine bench <run-id>  (list runs: engine dashboard)");
-  const runDir = join(sdlcHome(), id);
-  if (!existsSync(join(runDir, "run.json"))) {
-    refuse(`no run '${id}' under ${sdlcHome()}`, "check the run id (engine dashboard lists all runs)");
-  }
+  const { runId: id, runDir } = findRunFor(flags, runId);
   // Make sure any human answers recorded since the last CLI touch are on the
   // timeline before we measure gate wait.
   syncGateAnsweredEvents(runDir, loadDecisions(runDir));
@@ -2228,7 +2321,323 @@ function cmdAdvisorConsult(flags) {
 // Dispatch.
 // ---------------------------------------------------------------------------
 
-const USAGE = "engine <setup|run new|stage begin|stage end|gate open|gate collect|drive|socket call|next|dashboard|live|bench|eval|pack validate|respond|step|advisor consult|handoff|attempt|env|decide-why|spend|help> — see engine/cli/README.md";
+// ---------------------------------------------------------------------------
+// Friendly verbs: start, status, continue, decide, approve, revise, doctor.
+// Each is built on the machine-layer commands above, which stay unchanged.
+// ---------------------------------------------------------------------------
+
+/** Run one of our own commands and parse its JSON line. */
+function selfJson(args, { stdio } = {}) {
+  const r = spawnSync(process.execPath, [ENGINE_FILE, ...args, "--json"], { encoding: "utf8", env: process.env, ...(stdio ? { stdio } : {}) });
+  if (r.error) throw new Error(`could not run ${args.join(" ")}: ${r.error.message}`);
+  const line = (r.stdout || "").trim().split("\n").pop();
+  let json;
+  try { json = JSON.parse(line); } catch { throw new Error(`${args.join(" ")} printed no JSON (exit ${r.status}): ${(r.stdout + r.stderr).trim().slice(-300)}`); }
+  return { json, code: r.status };
+}
+
+/** Hand a failed child command's result straight to our caller. */
+function relay(child) {
+  out(child.json, child.code || 1);
+}
+
+function ticketOf(runDir) {
+  return readJson(join(runDir, "run.json")).ticket_ref;
+}
+
+function readLineSync() {
+  const buf = Buffer.alloc(1);
+  let line = "";
+  for (;;) {
+    let n;
+    try { n = readSync(0, buf, 0, 1, null); } catch (e) { if (e.code === "EAGAIN") continue; if (e.code === "EOF") break; throw e; }
+    if (n === 0 || buf[0] === 10) break;
+    line += String.fromCharCode(buf[0]);
+  }
+  return line.trim();
+}
+
+/** Spending or answering is for a person at a terminal. DETENT_FORCE_TTY exists only for tests. */
+function requireHumanTerminal(verb) {
+  if (process.env.CLAUDECODE) {
+    refuse(`${verb} is for a person at a terminal, and this is a Claude Code session`,
+      "ask the person to run it in their own terminal");
+  }
+  if (process.env.DETENT_DRIVE_CHILD === "1") {
+    refuse(`${verb} cannot run inside a drive child`, "a person answers gates, in their own terminal");
+  }
+  const forced = process.env.DETENT_FORCE_TTY === "1";
+  if (!forced && !(process.stdin.isTTY && process.stdout.isTTY)) {
+    refuse(`${verb} needs a terminal for its confirmation prompt`, "run it in a terminal, not through a pipe");
+  }
+}
+
+function confirm(question) {
+  process.stderr.write(`${question} [y/N] `);
+  const line = readLineSync();
+  process.stderr.write("\n");
+  return /^y(es)?$/i.test(line);
+}
+
+// ---- start ----
+
+function parseTicketRef(ref) {
+  const m = /^([^/\s#]+)\/([^/\s#]+)#(\d+)$/.exec(String(ref));
+  return m ? { owner: m[1], repo: m[2], number: m[3] } : null;
+}
+
+function originOf(repo) {
+  const r = spawnSync("git", ["-C", repo, "remote", "get-url", "origin"], { encoding: "utf8" });
+  if (r.status !== 0) return null;
+  const m = /github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(r.stdout.trim());
+  return m ? { owner: m[1], repo: m[2] } : { raw: r.stdout.trim() };
+}
+
+/** Runs after setup and before the run is created, so run new can read suggested.verify from the index. */
+function prepareContextIndex(repo) {
+  const INDEX = join(ENGINE_ROOT, "index", "index.mjs");
+  const ix = (...args) => spawnSync(process.execPath, [INDEX, ...args, "--repo", repo], { encoding: "utf8", env: process.env });
+  const stop = (what, r) => {
+    const detail = (r.stderr || r.stdout || r.error?.message || "").trim().slice(-400);
+    process.stderr.write(`index: ${what} failed: ${detail}\n`);
+    refuse(`indexing ${repo} failed (${what}): ${detail}`, "fix the error above, or re-run with --no-index to start without an index");
+  };
+  const st = ix("status");
+  if (st.status !== 0) stop("status", st);
+  let state;
+  try { state = JSON.parse(st.stdout.trim().split("\n").pop()).state; } catch { stop("status printed no JSON", st); }
+  const verb = state === "missing" ? "build" : state === "stale" ? "refresh" : null;
+  if (verb) {
+    const b = ix(verb);
+    if (b.status !== 0) stop(verb, b);
+  }
+  const dir = join(repo, ".detent", "index");
+  const m = readJson(join(dir, "manifest.json"));
+  const symbols = readFileSync(join(dir, "symbols.jsonl"), "utf8").split("\n").filter(Boolean).length;
+  process.stderr.write(`index: ${verb || "fresh"}: ${Object.keys(m.files).length} files, ${symbols} symbols, tagger ${m.tagger}\n`);
+}
+
+function cmdStart(ticket, flags) {
+  const parsed = parseTicketRef(ticket);
+  if (!parsed) refuse(`start needs a ticket as owner/repo#N, got '${ticket ?? ""}'`, "detent start <owner/repo#N> [--repo .] [--slug s] [--no-index]");
+  const repo = repoOf(flags);
+  const origin = originOf(repo);
+  if (!origin) refuse(`${repo} has no origin remote, so it cannot be matched to ${ticket}`, "git remote add origin <url>, then re-run");
+  if (!origin.owner) refuse(`origin of ${repo} is not a github.com remote (${origin.raw})`, "point origin at the GitHub repo the ticket belongs to");
+  if (origin.owner.toLowerCase() !== parsed.owner.toLowerCase() || origin.repo.toLowerCase() !== parsed.repo.toLowerCase()) {
+    refuse(`the ticket is for ${parsed.owner}/${parsed.repo} but origin of ${repo} is ${origin.owner}/${origin.repo}`,
+      `run it from a clone of ${parsed.owner}/${parsed.repo}, or pass --repo <that clone>`);
+  }
+  const hasStack = existsSync(join(repo, "stack.yaml")) || existsSync(join(repo, "engine", "stack.yaml"));
+  if (!hasStack) {
+    const s = selfJson(["setup", "--repo", repo]);
+    if (!s.json.ok) relay(s);
+  }
+  if (flags["no-index"] !== true) prepareContextIndex(repo);
+  const created = selfJson(["run", "new", "--ticket", ticket, "--repo", repo, ...(flags.slug && flags.slug !== true ? ["--slug", String(flags.slug)] : [])]);
+  if (!created.json.ok) relay(created);
+  out({
+    ok: true,
+    run_id: created.json.run_id,
+    ticket,
+    setup: hasStack ? "present" : "ran",
+    worktree: created.json.worktree,
+    stage: "intake",
+    next_step: "detent continue. An agent writes the brief for the intake stage. Use detent status any time to see where the run stands.",
+  });
+}
+
+// ---- status ----
+
+function cmdStatus(flags) {
+  return cmdNext(flags, { withStages: true });
+}
+
+// ---- continue ----
+
+async function cmdContinue(flags) {
+  const { nextAction, positiveFlag, DEFAULT_MODEL, DEFAULT_BUDGET_USD } = await import("./drive/drive.mjs");
+  const E = driveInjection();
+  const repo = repoOf(flags);
+  const { runId, runDir } = findRun(repo, flags);
+  const ticket = ticketOf(runDir);
+  const decisions = loadDecisions(runDir);
+  syncGateAnsweredEvents(runDir, decisions);
+  const next = nextAction(E, loadStatus(runDir), decisions, runDir);
+  const base = { ok: true, run_id: runId, ticket };
+  if (next.action === "done") out({ ...base, stage: null, next_step: "run complete — all stages done" });
+  if (next.action === "needs_human") {
+    out({ ...base, stage: next.stage, waiting: next.blockers.map((d) => d.id),
+      next_step: "a human answer is needed first: detent decide (or detent approve / detent revise at your own terminal)" });
+  }
+  const stage = next.stage;
+  const skill = join(ENGINE_ROOT, "stages", stage, "SKILL.md");
+  if (process.env.CLAUDECODE) {
+    out({ ...base, stage, skill,
+      next_step: `run the ${stage} stage in this session: read ${skill} and follow it for run ${runId}; do not start another claude` });
+  }
+  const budget = positiveFlag(E, flags, "budget", DEFAULT_BUDGET_USD, false);
+  const model = flags.model && flags.model !== true ? flags.model : DEFAULT_MODEL;
+  process.stderr.write(`continue: run ${runId} (${ticket}), one step (${stage}), budget up to ${budget} USD, model ${model}\n`);
+  if (flags.yes !== true) {
+    const forced = process.env.DETENT_FORCE_TTY === "1";
+    if (!forced && !(process.stdin.isTTY && process.stdout.isTTY)) {
+      refuse("continue spends Claude credit and has no terminal to ask on", "re-run with --yes to accept the budget above");
+    }
+    if (!confirm("Run this step?")) refuse("not confirmed", "re-run when ready, or use --yes");
+  }
+  const passthrough = ["claude-bin", "model", "budget", "profile", "stack", "child-timeout-sec"].flatMap((k) => (flags[k] && flags[k] !== true ? [`--${k}`, String(flags[k])] : []));
+  const r = spawnSync(process.execPath, [ENGINE_FILE, "drive", "--run", runId, "--max-steps", "1", ...passthrough, ...(WANT_JSON ? ["--json"] : [])],
+    { stdio: "inherit", env: { ...process.env, DETENT_VERB: "continue" } });
+  process.exit(r.status ?? 1);
+}
+
+// ---- decide ----
+
+function waitingDecision(runDir) {
+  const decisions = loadDecisions(runDir);
+  const status = loadStatus(runDir);
+  const stage = STAGES.find((s) => !["done", "skipped"].includes(status.stages[s].status));
+  const blockers = stage ? pendingBlockers(decisions, stage) : [];
+  const blocked = stage ? decisions.filter((d) => (status.stages[stage].blocked_on || []).includes(d.id) && d.status === "pending") : [];
+  return blockers[0] || blocked[0] || decisions.find((d) => d.status === "pending") || null;
+}
+
+const hasApproveRevise = (d) => Array.isArray(d.options) && d.options.includes("approve") && d.options.includes("revise");
+
+function cmdDecide(flags) {
+  const repo = repoOf(flags);
+  const { runId, runDir } = findRun(repo, flags);
+  const ticket = ticketOf(runDir);
+  const waiting = waitingDecision(runDir);
+  if (!waiting) refuse(`no pending decision on run ${runId} (${ticket})`, "detent status shows where the run stands");
+  const gate = waiting.gate || waiting.id;
+  const opened = selfJson(["gate", "open", gate, "--run", runId, "--repo", repo]);
+  if (!opened.json.ok) relay(opened);
+  const info = { run_id: runId, ticket, decision_id: waiting.id };
+  if (opened.json.mode !== "curator") {
+    const hint = hasApproveRevise(waiting) ? ' If you are at your own terminal you can run: detent approve  or  detent revise --note "<why>".' : "";
+    out({ ...opened.json, ...info, next_step: `${opened.json.next_step}${hint}` });
+  }
+  const curator = siblingCurator();
+  if (!curator) fail("the bundled curator CLI disappeared after gate open", "check engine/curator/cli.mjs in this clone");
+  const html = opened.json.html;
+  const o = spawnSync(process.execPath, [curator, "open", html], { encoding: "utf8" });
+  if (o.error || o.status !== 0) fail(`curator open failed: ${(o.error?.message || o.stdout + o.stderr).trim().slice(-300)}`, `curator open ${html}`);
+  process.stderr.write(`decide: ${waiting.id} on run ${runId} (${ticket}) is open in curator; waiting for your answer\n`);
+  const p = spawnSync(process.execPath, [curator, "poll", html], { encoding: "utf8", stdio: ["inherit", "pipe", "inherit"] });
+  if (p.error || p.status !== 0) fail(`curator poll failed: ${(p.error?.message || p.stdout).trim().slice(-300)}`, `curator poll ${html}, then detent gate collect`);
+  const feedback = join(mkdtempSync(join(tmpdir(), "detent-decide-")), "feedback.json");
+  writeFileSync(feedback, p.stdout.trim().split("\n").pop());
+  const collected = selfJson(["gate", "collect", "--run", runId, "--repo", repo, "--file", feedback]);
+  if (!collected.json.ok) relay(collected);
+  const stillPending = loadDecisions(runDir).filter((d) => d.status === "pending").map((d) => d.id);
+  out({
+    ok: true, ...info, answered: collected.json.answered, unresolved: collected.json.unresolved, pending: stillPending,
+    next_step: stillPending.length
+      ? `still waiting on ${stillPending.join(", ")}: detent decide`
+      : "all answered: detent continue",
+  });
+}
+
+// ---- approve / revise ----
+
+function cmdAnswer(verb, id, flags) {
+  requireHumanTerminal(verb);
+  const repo = repoOf(flags);
+  const { runId, runDir } = findRun(repo, flags);
+  const ticket = ticketOf(runDir);
+  const decisions = loadDecisions(runDir);
+  const d = id ? decisions.find((x) => x.id === id) : decisions.find((x) => x.gate === "intent" && x.status === "pending");
+  if (!d) {
+    refuse(id ? `no decision ${id} on run ${runId} (${ticket})` : `no pending intent gate on run ${runId} (${ticket})`,
+      "detent status shows what the run is waiting for");
+  }
+  if (d.status !== "pending") refuse(`${d.id} is already ${d.status}`, "detent status shows what the run is waiting for");
+  if (!hasApproveRevise(d)) {
+    refuse(`${d.id} offers ${JSON.stringify(d.options || [])}, not approve/revise`, "detent decide answers any decision");
+  }
+  if (!confirm(`Answer ${d.id} on run ${runId} (${ticket}) with "${verb}"?`)) {
+    refuse("not confirmed, nothing was recorded", `re-run detent ${verb} when ready`);
+  }
+  const note = flags.note && flags.note !== true ? String(flags.note) : null;
+  Object.assign(d, {
+    status: "answered", answer: verb, answered_by: "human", answered_via: "terminal",
+    answered_at: new Date().toISOString(), ...(note ? { note } : {}),
+  });
+  saveDecisions(runDir, decisions);
+  appendEvent(runDir, { event: "decision_answered", decision_id: d.id, answer: verb, answered_by: "human", answered_via: "terminal" });
+  syncGateAnsweredEvents(runDir, decisions);
+  releaseAnsweredBlocks(runDir, decisions);
+  out({
+    ok: true, run_id: runId, ticket, decision_id: d.id, answer: verb,
+    next_step: verb === "approve"
+      ? "detent continue. The run moves on to the next stage."
+      : "detent continue. The plan stage picks up your note and revises.",
+  });
+}
+
+// ---- doctor ----
+
+function cmdDoctor(flags) {
+  const repo = repoOf(flags);
+  const checks = [];
+  const add = (name, ok, detail, warn = false) => checks.push({ name, status: ok ? "PASS" : warn ? "WARN" : "FAIL", detail });
+  const major = Number(process.versions.node.split(".")[0]);
+  add("node", major >= 20, `v${process.versions.node}${major >= 20 ? "" : " (need 20 or newer)"}`);
+  const git = spawnSync("git", ["--version"], { encoding: "utf8" });
+  add("git", git.status === 0, git.status === 0 ? git.stdout.trim() : "git is not installed or not on PATH");
+
+  const ghCmd = process.env.DETENT_GH_CMD || "gh";
+  const auth = spawnSync(ghCmd, ["auth", "status"], { encoding: "utf8", timeout: 15000 });
+  const authed = !auth.error && auth.status === 0;
+  add("gh auth", authed, authed ? (auth.stdout + auth.stderr).trim().split("\n")[0] : "run `gh auth login`");
+  const origin = originOf(repo);
+  if (!authed) add("gh push access", false, "needs gh auth first");
+  else if (!origin?.owner) add("gh push access", false, `${repo} has no github.com origin remote to check`);
+  else {
+    const api = spawnSync(ghCmd, ["api", `repos/${origin.owner}/${origin.repo}`, "--jq", ".permissions.push"], { encoding: "utf8", timeout: 15000 });
+    const can = !api.error && api.status === 0 && api.stdout.trim() === "true";
+    add("gh push access", can, can ? `the active account can push to ${origin.owner}/${origin.repo}`
+      : `the active account cannot push to ${origin.owner}/${origin.repo}; switch with gh auth switch (doctor never switches for you)`);
+  }
+  const curator = siblingCurator();
+  add("curator", !!curator, curator || "the curator CLI bundled in this clone is missing, so review pages cannot open");
+
+  const stackPath = [join(repo, "stack.yaml"), join(repo, "engine", "stack.yaml")].find((p) => existsSync(p));
+  let stack = null;
+  if (!stackPath) add("stack.yaml", false, `none in ${repo}; run detent setup --repo ${repo}`);
+  else {
+    try { stack = parseYamlSubset(readFileSync(stackPath, "utf8"), stackPath); add("stack.yaml", true, stackPath); } catch (e) { add("stack.yaml", false, e.message); }
+  }
+  if (!stack) add("sockets", false, "cannot check without a readable stack.yaml");
+  else {
+    const commands = [];
+    for (const entry of Object.values(stack.sockets || {})) {
+      for (const e of Array.isArray(entry.providers) ? entry.providers : [entry]) {
+        if (e && kindOf(e) === "exec") commands.push(resolveCommand(e.command, stackPath));
+      }
+    }
+    const runnable = (c) => {
+      const dirs = c.includes("/") ? [""] : (process.env.PATH || "").split(delimiter);
+      return dirs.some((dir) => { try { const p = dir ? join(dir, c) : c; accessSync(p, constants.X_OK); return statSync(p).isFile(); } catch { return false; } });
+    };
+    const missing = commands.filter((c) => !runnable(c));
+    add("sockets", missing.length === 0, missing.length ? `not found or not executable: ${missing.join(", ")}` : `${commands.length} exec socket command(s) found`);
+  }
+  if (process.env.DETENT_ROOT) add("DETENT_ROOT", true, process.env.DETENT_ROOT);
+  else add("DETENT_ROOT", false, `not set; falling back to the detent clone this CLI lives in: ${detentRoot()}`, true);
+  const tagger = detectTagger(process.env);
+  if (tagger.tagger === "tree-sitter") add("index tagger", true, "tree-sitter");
+  else add("index tagger", !!tagger.forced, `regex (${tagger.reason})`, true);
+  const failed = checks.filter((c) => c.status === "FAIL");
+  out({
+    ok: failed.length === 0, checks,
+    next_step: failed.length ? `fix: ${failed.map((c) => c.name).join(", ")}` : "everything checks out: detent start <owner/repo#N>",
+  }, failed.length ? 1 : 0);
+}
+
+const USAGE = "engine <start|status|continue|decide|approve|revise|doctor|setup|run new|stage begin|stage end|gate open|gate collect|drive|runtime run|runtime capabilities|socket call|next|dashboard|live|bench|eval|pack validate|respond|step|advisor consult|handoff|attempt|env|decide-why|spend|help> — see engine/cli/README.md";
 
 /**
  * cmdEval — wraps engine/eval/eval.mjs's runEval() for `engine eval`. An
@@ -2278,12 +2687,7 @@ function cmdEval(flags) {
  * cut the episode — but nothing can do it silently.
  */
 function cmdHandoff(runId, flags) {
-  const id = runId || (flags.run && flags.run !== true ? flags.run : null);
-  if (!id) refuse("handoff requires a run id", "engine handoff <run-id>  (list runs: engine dashboard)");
-  const runDir = join(sdlcHome(), id);
-  if (!existsSync(join(runDir, "run.json"))) {
-    refuse(`no run '${id}' under ${sdlcHome()}`, "check the run id (engine dashboard lists all runs)");
-  }
+  const { runId: id, runDir } = findRunFor(flags, runId);
 
   // --stage lands in a filesystem path below, so it is validated against the
   // known stage list first: "../../x" would otherwise escape the handoff
@@ -2351,12 +2755,7 @@ function cmdHandoff(runId, flags) {
  * ends, and the whole point is that a dead end stays dead.
  */
 function cmdAttempt(approach, flags) {
-  const runId = flags.run && flags.run !== true ? flags.run : null;
-  if (!runId) refuse("attempt requires --run", 'engine attempt "<approach>" --run <id> --outcome failed');
-  const runDir = join(sdlcHome(), runId);
-  if (!existsSync(join(runDir, "run.json"))) {
-    refuse(`no run '${runId}' under ${sdlcHome()}`, "check the run id (engine dashboard lists all runs)");
-  }
+  const { runId, runDir } = findRunFor(flags, null);
 
   // `--none`: assert that nothing was rejected. Runs created before
   // attempts.jsonl was initialized at birth have no log, and the handoff
@@ -2435,12 +2834,7 @@ function cmdAttempt(approach, flags) {
  * `decisions.json`.
  */
 function cmdDecideWhy(flags) {
-  const runId = flags.run && flags.run !== true ? flags.run : null;
-  if (!runId) refuse("decide-why requires --run", 'engine decide-why --run <id> --decision <D-00N> --option "<opt>" --why "<reason>"');
-  const runDir = join(sdlcHome(), runId);
-  if (!existsSync(join(runDir, "run.json"))) {
-    refuse(`no run '${runId}' under ${sdlcHome()}`, "check the run id (engine dashboard lists all runs)");
-  }
+  const { runId, runDir } = findRunFor(flags, null);
   const decision = flags.decision && flags.decision !== true ? String(flags.decision) : null;
   const option = flags.option && flags.option !== true ? String(flags.option) : null;
   const why = flags.why && flags.why !== true ? String(flags.why) : null;
@@ -2495,12 +2889,7 @@ function cmdDecideWhy(flags) {
  * stale entry a human can see.
  */
 function cmdEnv(flags) {
-  const runId = flags.run && flags.run !== true ? flags.run : null;
-  if (!runId) refuse("env requires --run", 'engine env --run <id> --verify "<test command>" [--build "<cmd>"] [--gotcha "<trap>"]');
-  const runDir = join(sdlcHome(), runId);
-  if (!existsSync(join(runDir, "run.json"))) {
-    refuse(`no run '${runId}' under ${sdlcHome()}`, "check the run id (engine dashboard lists all runs)");
-  }
+  const { runId, runDir } = findRunFor(flags, null);
   const path = join(runDir, "env.json");
   let env = { commands: {}, gotchas: [] };
   if (existsSync(path)) {
@@ -2750,6 +3139,9 @@ function starterStack(clone) {
     '      - name: "repo-docs"',
     `        command: ${adapter("repo-docs-knowledge")}`,
     '        version: "builtin"',
+    '      - name: "repo-index"',
+    `        command: ${adapter("repo-index-knowledge")}`,
+    '        version: "builtin"',
     "",
     "  bot-comments:",
     `    command: ${adapter("gh-bot-comments")}`,
@@ -2845,13 +3237,22 @@ function cmdHelp() {
   out({
     ok: true,
     usage: {
+      "start": "engine start <owner/repo#N> [--repo .] [--slug s] — the friendly way in: refuses unless the repo's origin is that owner/repo, runs setup when stack.yaml is missing, builds or refreshes the repo index (skip with --no-index), then run new. Machine layer: setup, index, run new",
+      "status": "engine status [--run <ref>] — readable view of the run (stages, pending gates, next step). With --json it is `next` plus a `stages` map",
+      "continue": "engine continue [--yes] [--run <ref>] — run exactly one drive step (--max-steps 1) after printing the budget. Inside Claude Code it spawns nothing and names the stage SKILL.md for this session to run. Machine layer: drive",
+      "decide": "engine decide [--run <ref>] — answer the waiting gate: gate open, curator open, block on curator poll, gate collect. Without curator it prints the terminal fallback. Machine layer: gate open, gate collect",
+      "approve": "engine approve [D-xxx] [--note \"...\"] — answer the pending intent gate with approve. A person at a terminal only: refuses (exit 2) under Claude Code, in a drive child, or without a TTY; asks for y/N and records answered_by human, answered_via terminal",
+      "revise": "engine revise [D-xxx] [--note \"...\"] — as approve, with the answer revise. A named decision must offer approve and revise; any other decision goes through detent decide",
+      "doctor": "engine doctor — one line per check (node >= 20, git, gh auth and push access to the origin repo, curator, stack.yaml, exec socket commands, DETENT_ROOT); exit 1 if any FAIL",
       "setup": "engine setup --repo <path> [--force] — first run: create <DETENT_ROOT>/detent.user.yaml and fill empty user.name/email/github_login from git and gh (never overwrites a set value), and write a starter stack.yaml in the work repo wired to the built-in adapters by absolute path. Refuses (exit 2) if --repo is missing or not a git repo, or if stack.yaml exists without --force. Values it cannot detect are listed in `unresolved`",
       "run new": "engine run new --ticket <ref> [--repo <path>] [--slug <slug>] [--no-worktree] — create a run under the centralized <DETENT_ROOT>/.sdlc/ with a dedicated git worktree (the default flow)",
       "stage begin": "engine stage begin <stage> [--run <id>] [--repo <path>] — enter a stage (refuses illegal transitions)",
       "stage end": "engine stage end <stage> [--run <id>] [--repo <path>] — finish a stage (checks artifact + gates). implement: [--tdd-test <name> --tdd-red <sha> --tdd-green <sha> | --tdd-exempt <reason>] records the tdd block (implement records, never judges). recheck: asserts red_sha is an ancestor of green_sha via git cat-file/merge-base, proving ORDER only, never that the test was observed failing.",
-      "gate open": "engine gate open <gate-name-or-decision-id> [--run <id>] [--repo <path>] — render a pending human gate; with curator on PATH it writes <DETENT_ROOT>/.plans/<run>-<gate>.html (one data-plan-question block per pending decision, stage artifacts embedded) and prints `curator open` then `engine gate collect`",
+      "gate open": "engine gate open <gate-name-or-decision-id> [--run <id>] [--repo <path>] — render a pending human gate; with the bundled curator CLI present it writes <DETENT_ROOT>/.plans/<run>-<gate>.html (one data-plan-question block per pending decision, stage artifacts embedded) and prints `curator open` then `engine gate collect`",
       "gate collect": "engine gate collect --run <id> [--file <feedback.json>] — non-blocking: map curator answers into decisions.json (only an exact decision option resolves one; null/other answers stay pending and are listed under `unresolved`); selection/prompt feedback is appended to <run>/review-feedback.jsonl. Without --file it runs `curator drain` for the run's gate pages only.",
       "drive": "engine drive --run <id> [--stack <path>] [--budget 5] [--model claude-sonnet-5-5] [--max-steps 12] [--child-timeout-sec 3600] [--profile <file>] [--claude-bin <b>] — experimental (macOS/Linux, spends Claude credit): runs intake, research and plan with one contained `claude -p --restricted` child per stage (file tools only, no Bash, allowlisted env, read-only repo export, outbox validated by drive), then always stops: at the plan gate or a decision (stopped:needs_human), at before_implement, at --max-steps, at --budget, or on a failure (state_tampered, outbox_rejected, secret_detected, child_*). Child text goes to <run>/drive-last.json, never stdout. --allow-ship is refused; implement and ship stay interactive.",
+      "runtime run": "engine runtime run [--runtime <name>] [--bin <path>] — run one prompt through a model runtime (default claude-code; --runtime beats DETENT_RUNTIME). Request JSON on stdin (prompt, cwd, output, tools, mcp, settings are required; schema in engine/runtime/CONTRACT.md). Prints one JSON line {ok:true, ...response} and exits 0 for stop ok|budget|turns, exits 1 {ok:false, reason, next_step, response} for stop error|timeout, and exits 2 for bad JSON, an unknown field, an unknown runtime, or a field the runtime does not declare",
+      "runtime capabilities": "engine runtime capabilities [--runtime <name>] — print what the runtime declares it can do; a request field outside that is refused, never dropped",
       "socket call": "engine socket call <name> [--payload-file <json>] [--stack <path>] — dispatch a socket per stack.yaml",
       "next": "engine next [--run <id>] [--repo <path>] — print the exact next command for the current run",
       "dashboard": "engine dashboard — render ALL runs under <DETENT_ROOT>/.sdlc/ into one curator artifact (stage, status, pending gates, age)",
@@ -2876,7 +3277,7 @@ function cmdHelp() {
 }
 
 function main() {
-  const { positional, flags, duplicates } = parseArgs(process.argv.slice(2));
+  const { positional, flags, duplicates } = parseArgs(process.argv.slice(2).filter((a) => a !== "--json"));
   if (duplicates.length) {
     refuse(
       `flag(s) given more than once: ${duplicates.map((d) => `--${d}`).join(", ")}`,
@@ -2892,6 +3293,7 @@ function main() {
   if (a === "gate" && b === "open") return cmdGateOpen(c, flags);
   if (a === "gate" && b === "collect") return cmdGateCollect(flags);
   if (a === "drive") return cmdDriveEntry(flags);
+  if (a === "runtime") return cmdRuntimeEntry(b, flags);
   if (a === "socket" && b === "call") return cmdSocketCall(c, flags);
   if (a === "next") return cmdNext(flags);
   if (a === "dashboard") return cmdDashboard();
@@ -2907,6 +3309,12 @@ function main() {
   if (a === "attempt") return cmdAttempt(b, flags);
   if (a === "env") return cmdEnv(flags);
   if (a === "decide-why") return cmdDecideWhy(flags);
+  if (a === "start") return cmdStart(b, flags);
+  if (a === "status") return cmdStatus(flags);
+  if (a === "continue") return cmdContinue(flags);
+  if (a === "decide") return cmdDecide(flags);
+  if (a === "approve" || a === "revise") return cmdAnswer(a, b, flags);
+  if (a === "doctor") return cmdDoctor(flags);
   refuse(`unknown command: ${positional.join(" ") || "(none)"}`, USAGE);
 }
 

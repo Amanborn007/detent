@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Offline stand-in for curator in the terminal demo. `open` reports a page; `poll` returns with no answer, as if the reader closed it.
+case "$1" in
+  open) echo '{"url":"http://127.0.0.1:9/s","key":"demo"}' ;;
+  poll) echo '{"status":"feedback","prompts":[]}' ;;
+  *) echo "stub curator: unsupported command $1" >&2; exit 2 ;;
+esac
