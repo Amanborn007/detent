@@ -81,14 +81,16 @@ detent curator poll "$DETENT_ROOT/.plans/my-plan.html"
 
 `open` checks the page with `engine/curator/scripts/artifact-check.py` and refuses a page that fails. `poll` waits and prints your clicks and annotations as JSON.
 
-**Drive a run.** Copy `engine/stack.example.yaml` to `stack.yaml` in your work repo and wire at least the `ticket` socket, then:
+**Drive a run.** From a clone of the ticket's repo:
 
 ```sh
-detent run new --ticket owner/repo#12 --repo ~/code/your-repo
-detent next --repo ~/code/your-repo
+detent doctor
+detent start owner/repo#12
+detent continue
+detent status
 ```
 
-`run new` creates the run directory and a worktree on branch `sdlc/<run-id>`. `next` prints the command to run next. Then ask Claude to follow `engine/stages/<stage>/SKILL.md` for that run id, and run `detent next` again after each stage. `detent dashboard` lists every run. `owner/repo#12` assumes the built-in `gh-ticket` adapter. These commands need a real install and a real ticket, so they are not run in this repo's CI.
+`doctor` checks your setup. `start` checks that `origin` matches the ticket, runs `detent setup` if `stack.yaml` is missing, and creates the run directory and a worktree on branch `sdlc/<run-id>`. `continue` runs one step, and inside Claude Code it names the stage `SKILL.md` for that session to follow. `status` shows the stages, any waiting gate and the next step in words. `detent dashboard` lists every run. `owner/repo#12` assumes the built-in `gh-ticket` adapter. These commands need a real install and a real ticket, so they are not run in this repo's CI. The same flow with the machine-layer commands is `detent run new`, `detent next`, then following `engine/stages/<stage>/SKILL.md` by hand.
 
 ## How a run works
 
@@ -198,6 +200,19 @@ Sentinel is a tool and a hook, not a skill. It sits in the same loop.
 ## Tools and CLI
 
 `detent` is the one command. It sends `curator`, `sentinel`, `owl`, `herald`, `courier` and `feedback` to their own programs and everything else to the engine.
+
+Start with the friendly verbs. The rows after them are the machine layer, which the verbs, the skills and your scripts call. You can leave out `--run` on any command that takes it: detent uses an exact run id, then a unique ticket key or non-date part of an id, then the newest unfinished run for the repo you are in. At a terminal the output is readable text. In a pipe, or with `--json`, it is one JSON line.
+
+| Command | What it does |
+|---|---|
+| `detent doctor` | One line per check: node 20 or newer, git, `gh` login and push access to the origin repo, curator, `stack.yaml` and its socket commands, `DETENT_ROOT`. Exit 1 if any fail. |
+| `detent start <owner/repo#N> [--repo .] [--slug s]` | Refuse unless `origin` matches the ticket's repo, run `setup` if `stack.yaml` is missing, then create the run. |
+| `detent status` | The run's stages, waiting gates and next step. With `--json` it is `next` plus a `stages` map. |
+| `detent continue [--yes]` | Run one drive step after printing the budget. Inside Claude Code it prints the stage `SKILL.md` path and the run id instead. |
+| `detent decide` | Answer the waiting gate in curator, or print the terminal fallback when curator is missing. |
+| `detent approve [D-xxx]`, `detent revise [D-xxx] [--note "..."]` | Answer the intent gate from your own terminal. They refuse inside Claude Code, inside a drive child, and without a terminal. |
+
+Machine layer:
 
 | Command | What it does |
 |---|---|

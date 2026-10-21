@@ -65,6 +65,29 @@ Open a new shell, go to any branch with changes, and run this in Claude Code. It
 
 It reads your own diff and lists the comments, defensive try/catch blocks and `any` casts it would remove. It changes nothing until you say yes.
 
+## Drive a ticket
+
+Check your setup first, then start from a clone of the ticket's repo:
+
+```sh
+detent doctor
+cd ~/code/your-repo
+detent start your-org/your-repo#123
+detent continue
+detent status
+```
+
+`start` refuses if the clone's `origin` is a different repo, runs `detent setup` when `stack.yaml` is missing, and creates the run. `continue` runs one step. `status` shows the stages, any gate waiting on you, and the next step in words. You never type a run id, because detent picks the newest unfinished run for the repo you are in.
+
+When a gate waits for you, answer it yourself:
+
+```sh
+detent decide      # opens the gate in curator and waits for your answer
+detent approve     # or answer the plan gate right here in your terminal
+```
+
+An agent cannot run `approve` or `revise`. They refuse inside Claude Code, inside a drive child, and without a terminal.
+
 ## It works the way you already do
 
 A good engineer does not treat every task the same. A clear ticket goes straight to a plan. A vague ask gets questions, research and a chosen approach before anyone writes a ticket, let alone code. Detent copies both habits, and the steps stay the same whether the task is a bug fix, a migration or a new endpoint. Only the tools you plug in change.
