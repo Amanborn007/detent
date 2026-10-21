@@ -7,7 +7,7 @@ import { delimiter, join } from "node:path";
 export const FLOORS = { claude: "2.1.306", git: "2.45.1", node: "20.0.0" };
 const MIN_SECRET_LEN = 8;
 
-const SECRET_NAME = /(_TOKEN|_SECRET|_KEY)$|PASSWORD|^AWS_|^(GITHUB_TOKEN|GH_TOKEN|ANTHROPIC_API_KEY|NPM_TOKEN)$/;
+const SECRET_NAME = /(_TOKEN|_SECRET|_KEY)$|PASSWORD|^(AWS_ACCESS_KEY_ID|GITHUB_TOKEN|GH_TOKEN|ANTHROPIC_API_KEY|NPM_TOKEN)$/;
 
 const MANAGED = {
   darwin: { file: "/Library/Application Support/ClaudeCode/managed-settings.json", dir: "/Library/Application Support/ClaudeCode/managed-settings.d" },
