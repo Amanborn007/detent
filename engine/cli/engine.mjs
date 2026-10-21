@@ -28,6 +28,7 @@ import { runBenchmark, checkpointBenchmark, ledgerLine } from "../bench/bench.mj
 import { runEval, EvalRefusal, resolveEvalRoots } from "../eval/eval.mjs";
 import { loadRoutingConfig, tierOf, advisorConsultEvent } from "../routing/routing.mjs";
 import { renderText } from "./render.mjs";
+import { detectTagger } from "../index/lib/tagger-ts.mjs";
 import { readSteps, renderLiveHtml, isRunComplete, STEP_KINDS, STEP_STATUSES } from "./liveview.mjs";
 import { loadRunState, buildNote, checkSufficiency, currentStage, optionKey } from "../handoff/handoff.mjs";
 import { analyzeSpend, trackingLine, compareTracking } from "../spend/spend.mjs";
@@ -2635,6 +2636,9 @@ function cmdDoctor(flags) {
   }
   if (process.env.DETENT_ROOT) add("DETENT_ROOT", true, process.env.DETENT_ROOT);
   else add("DETENT_ROOT", false, `not set; falling back to the detent clone this CLI lives in: ${detentRoot()}`, true);
+  const tagger = detectTagger(process.env);
+  if (tagger.tagger === "tree-sitter") add("index tagger", true, "tree-sitter");
+  else add("index tagger", !!tagger.forced, `regex (${tagger.reason})`, true);
   const failed = checks.filter((c) => c.status === "FAIL");
   out({
     ok: failed.length === 0, checks,
