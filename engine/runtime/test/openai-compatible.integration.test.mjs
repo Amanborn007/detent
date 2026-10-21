@@ -193,3 +193,27 @@ test("reviewer against an endpoint that answers garbage exits 2 as a contract vi
     assert.ok(r.json.next_step);
   });
 });
+
+test("reviewer failures under openai-compatible name that runtime and never mention claude", async () => {
+  for (const [mode, code, want] of [["401-echo-auth", 1, /openai-compatible.*HTTP 401/], ["down", 1, /openai-compatible.*HTTP 503/], ["ok", 2, /openai-compatible.*not JSON/], ["length", 1, /openai-compatible/]]) {
+    await withServer(mode, ({ url }) => {
+      const r = review(cfg(url));
+      assert.equal(r.code, code, r.stderr + JSON.stringify(r.json));
+      assert.match(r.json.error, want, mode);
+      assert.doesNotMatch(JSON.stringify(r.json), /claude/i, mode);
+      assert.ok(r.json.next_step, mode);
+    });
+  }
+  const garbage = await withServer("garbage", ({ url }) => review(cfg(url)));
+  assert.equal(garbage.code, 2);
+  assert.doesNotMatch(JSON.stringify(garbage.json), /claude/i);
+  assert.match(garbage.json.next_step, /DETENT_OPENAI_|findings/);
+});
+
+test("reviewer against an unreachable endpoint under openai-compatible names the runtime and its settings", () => {
+  const r = review(cfg("http://127.0.0.1:9/v1"));
+  assert.equal(r.code, 1, r.stderr + JSON.stringify(r.json));
+  assert.match(r.json.error, /openai-compatible.*network error/);
+  assert.match(r.json.next_step, /DETENT_OPENAI_BASE_URL/);
+  assert.doesNotMatch(JSON.stringify(r.json), /claude/i);
+});
