@@ -2,7 +2,8 @@
 // scrubbed env, hardened config on every call, a timeout on every call, and a
 // version floor. It never pushes, checks out, merges or otherwise writes a worktree.
 import { spawnSync } from "node:child_process";
-import { tmpdir } from "node:os";
+import { accessSync, statSync, constants } from "node:fs";
+import { isAbsolute, join } from "node:path";
 
 // Floor for the 2024 git CVE fixes (symlink/submodule/hook-on-clone issues).
 export const MIN_GIT = Object.freeze([2, 45, 1]);
@@ -46,14 +47,47 @@ const FORBIDDEN = new Set([
   "push", "checkout", "merge", "pull", "switch", "restore", "reset", "rebase", "cherry-pick", "am", "stash",
 ]);
 
+// Test seams (spy, alternate binary) are inert outside a node test run.
+export const testHooksEnabled = () => Boolean(process.env.NODE_TEST_CONTEXT);
+
 let spy = null;
 export function setGitSpy(fn) {
+  if (fn && !testHooksEnabled()) throw new GitError("git_forbidden", "setGitSpy is only available under node --test");
   spy = fn;
+}
+
+const PROTECTED_KEYS = new Set(CONFIG.map((c) => c.slice(0, c.indexOf("=")).toLowerCase()));
+
+function safePath() {
+  return (process.env.PATH || "").split(":").filter((d) => d && isAbsolute(d));
+}
+
+let resolved = null;
+function resolveGit(gitBin) {
+  if (gitBin !== undefined) {
+    if (!testHooksEnabled()) throw new GitError("git_forbidden", "gitBin is only available under node --test");
+    if (!isAbsolute(gitBin)) throw new GitError("git_forbidden", "gitBin must be an absolute path");
+    return gitBin;
+  }
+  if (resolved) return resolved;
+  for (const d of safePath()) {
+    const f = join(d, "git");
+    try {
+      if (statSync(f).isFile()) {
+        accessSync(f, constants.X_OK);
+        resolved = f;
+        return f;
+      }
+    } catch {
+      continue;
+    }
+  }
+  throw new GitError("git_unavailable", "no git executable in the absolute entries of PATH");
 }
 
 function hardEnv(extra) {
   const env = {
-    PATH: process.env.PATH || "/usr/bin:/bin",
+    PATH: safePath().join(":") || "/usr/bin:/bin",
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_ATTR_NOSYSTEM: "1",
@@ -65,6 +99,7 @@ function hardEnv(extra) {
     GIT_SEQUENCE_EDITOR: "true",
     GIT_ASKPASS: "/usr/bin/false",
     SSH_ASKPASS: "/usr/bin/false",
+    GIT_CEILING_DIRECTORIES: "/",
     LC_ALL: "C",
   };
   for (const [k, v] of Object.entries(extra || {})) {
@@ -81,8 +116,8 @@ const versions = new Map();
 function ensureVersion(bin) {
   if (versions.has(bin)) return versions.get(bin);
   const r = spawnSync(bin, ["--version"], {
-    env: { PATH: process.env.PATH || "/usr/bin:/bin", LC_ALL: "C" },
-    encoding: "utf8", timeout: 10_000, killSignal: "SIGKILL", shell: false,
+    env: { PATH: safePath().join(":") || "/usr/bin:/bin", LC_ALL: "C" },
+    encoding: "utf8", timeout: 10_000, killSignal: "SIGKILL", shell: false, cwd: "/",
   });
   if (r.error || r.status !== 0) {
     throw new GitError("git_unavailable", `cannot run ${bin} --version: ${r.error ? r.error.message : r.stderr}`);
@@ -106,8 +141,9 @@ function ensureVersion(bin) {
 export function git(args, opts = {}) {
   const {
     repo, gitDir, input, env, timeoutMs = DEFAULT_TIMEOUT_MS, allowFile = false,
-    config = [], gitBin = "git", maxBuffer = 512 * 1024 * 1024, allowTruncate = false, cwd,
+    config = [], gitBin: gitBinOpt, maxBuffer = 512 * 1024 * 1024, allowTruncate = false,
   } = opts;
+  const gitBin = resolveGit(gitBinOpt);
   if (!Array.isArray(args) || args.some((a) => typeof a !== "string")) {
     throw new GitError("git_forbidden", "args must be an array of strings");
   }
@@ -117,6 +153,12 @@ export function git(args, opts = {}) {
     throw new GitError("git_forbidden", `args[0] must be a subcommand, got ${sub}`);
   }
   if (FORBIDDEN.has(sub)) throw new GitError("git_forbidden", `git ${sub} is never run by drive`);
+  for (const c of config) {
+    const key = typeof c === "string" ? c.slice(0, c.indexOf("=")).toLowerCase() : "";
+    if (!key || PROTECTED_KEYS.has(key) || key.startsWith("protocol.")) {
+      throw new GitError("git_forbidden", `config ${c} would override the hardening`);
+    }
+  }
   ensureVersion(gitBin);
   const argv = [
     ...(repo ? ["-C", repo] : gitDir ? ["--git-dir", gitDir] : []),
@@ -125,10 +167,10 @@ export function git(args, opts = {}) {
     ...config.flatMap((c) => ["-c", c]),
     ...args,
   ];
-  if (spy) spy({ argv, bin: gitBin });
+  if (spy) spy(Object.freeze({ argv: Object.freeze([...argv]), bin: gitBin }));
   const r = spawnSync(gitBin, argv, {
     input, env: hardEnv(env), timeout: timeoutMs, killSignal: "SIGKILL", shell: false,
-    maxBuffer, cwd: cwd || tmpdir(), stdio: ["pipe", "pipe", "pipe"],
+    maxBuffer, cwd: "/", stdio: ["pipe", "pipe", "pipe"],
   });
   let truncated = false;
   if (r.error) {

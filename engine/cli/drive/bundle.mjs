@@ -3,16 +3,17 @@
 // private quarantine, fsck'd and tree-checked before any object reaches the user repo.
 import {
   openSync, closeSync, fstatSync, readSync, writeSync, mkdirSync, existsSync, rmSync,
-  readFileSync, constants,
+  readFileSync, lstatSync, realpathSync, constants,
 } from "node:fs";
 import { createHash } from "node:crypto";
-import { join, isAbsolute } from "node:path";
-import { git, gitOk, GitError, HARD_GIT } from "./gitsafe.mjs";
+import { inflateSync } from "node:zlib";
+import { join, isAbsolute, sep } from "node:path";
+import { git, gitOk, GitError, HARD_GIT, testHooksEnabled } from "./gitsafe.mjs";
 
 const MB = 1024 * 1024;
 export const DEFAULT_CAPS = Object.freeze({
   bundleBytes: 50 * MB, commits: 50, blobBytes: 10 * MB, newBlobTotal: 100 * MB,
-  msgBytes: 8 * 1024, changedPaths: 20_000,
+  msgBytes: 8 * 1024, changedPaths: 20_000, objects: 100_000,
 });
 
 export class BundleReject extends Error {
@@ -44,8 +45,11 @@ function isGitmodulesName(name) {
   return n === ".gitmodules" || /^gitmod~\d+$/.test(n);
 }
 
-function foldName(name) {
-  return name.replace(IGNORABLE, "").normalize("NFD").toUpperCase().toLowerCase();
+// Two folds: lower-only keeps U+00DF apart from "ss" the way some file systems do, upper-then-lower
+// joins U+1E9E with it the way others do. Colliding under either is a collision.
+function foldKeys(name) {
+  const n = name.replace(IGNORABLE, "").normalize("NFD");
+  return [n.toLowerCase(), n.toUpperCase().toLowerCase()];
 }
 
 const oidRe = (fmt) => (fmt === "sha256" ? /^[0-9a-f]{64}$/ : /^[0-9a-f]{40}$/);
@@ -134,17 +138,25 @@ export const SENSITIVE_PATTERNS = Object.freeze([
   { id: "package-manager-config", re: re("(^|/)(\\.npmrc|\\.yarnrc(\\.yml)?|\\.pnpmfile\\.cjs|\\.bundle/config)$|(^|/)\\.cargo(/|$)") },
   { id: "build-scripts", re: re("(^|/)(Makefile|GNUmakefile|justfile|setup\\.py|setup\\.cfg|pyproject\\.toml|tox\\.ini|Cargo\\.toml|build\\.rs|pom\\.xml|gradlew|Gemfile)$|\\.gradle(\\.kts)?$|(^|/)gradle/wrapper(/|$)|\\.mk$") },
   {
+    id: "code-as-config",
+    re: re("(^|/)(binding\\.gyp|conftest\\.py|\\.gitconfig|rust-toolchain(\\.toml)?|CMakeLists\\.txt|GEMINI\\.md|\\.cursorrules|\\.windsurfrules|" +
+      "Dockerfile[^/]*|[^/]*\\.dockerfile|docker-compose[^/]*\\.ya?ml|Vagrantfile|Rakefile|Brewfile)$|" +
+      "(^|/)(eslint|vite|vitest|jest|babel|webpack|rollup|next|nuxt|svelte|astro|tailwind|postcss|prettier|stylelint|" +
+      "playwright|cypress|karma|commitlint|lint-staged|metro|esbuild|tsup|turbo)\\.config\\.[cm]?[jt]s$|" +
+      "(^|/)\\.(eslintrc|babelrc|prettierrc|stylelintrc|lintstagedrc|commitlintrc|huskyrc|mocharc)(\\.[\\w]+)?$|" +
+      "(^|/)(patches|\\.cursor|\\.zed|\\.windsurf|\\.aider[^/]*|\\.continue)(/|$)"),
+  },
+  {
     id: "lockfile-or-dependency-spec",
     re: re("(^|/)(package-lock\\.json|npm-shrinkwrap\\.json|yarn\\.lock|pnpm-lock\\.yaml|bun\\.lockb?|Cargo\\.lock|go\\.sum|go\\.mod|" +
       "poetry\\.lock|uv\\.lock|Pipfile(\\.lock)?|Gemfile\\.lock|composer\\.(json|lock)|gradle\\.lockfile|requirements[^/]*\\.txt)$"),
   },
 ]);
 
-const PKG_SENSITIVE_KEYS = [
-  "scripts", "packageManager", "dependencies", "devDependencies", "optionalDependencies",
-  "peerDependencies", "bundledDependencies", "bundleDependencies", "overrides", "resolutions",
-  "workspaces", "bin", "main", "exports", "imports", "engines", "config", "publishConfig",
-];
+// Allowlist: tools hang their hooks off arbitrary package.json keys, so any other change is sensitive.
+const PKG_BENIGN_KEYS = new Set([
+  "name", "version", "description", "keywords", "license", "author", "repository", "homepage", "bugs", "private",
+]);
 
 function pkgChanged(oldBuf, newBuf) {
   const parse = (b) => {
@@ -159,7 +171,8 @@ function pkgChanged(oldBuf, newBuf) {
   const a = parse(oldBuf);
   const b = parse(newBuf);
   if (a === null || b === null) return ["unparseable"];
-  return PKG_SENSITIVE_KEYS.filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  return [...keys].filter((k) => !PKG_BENIGN_KEYS.has(k) && JSON.stringify(a[k]) !== JSON.stringify(b[k]));
 }
 
 // ---------------------------------------------------------------- git readers
@@ -250,7 +263,8 @@ function checkSymlinkTarget(path, target) {
 function copyOut(src, dest, maxBytes) {
   let fd;
   try {
-    fd = openSync(src, constants.O_RDONLY | constants.O_NOFOLLOW);
+    // O_NONBLOCK so a FIFO cannot hang the open; fstat below then refuses it.
+    fd = openSync(src, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   } catch (e) {
     throw new BundleReject("bad_bundle_file", `${e.code}: cannot open bundle without following links`);
   }
@@ -259,7 +273,11 @@ function copyOut(src, dest, maxBytes) {
     const st = fstatSync(fd);
     if (!st.isFile() || st.nlink !== 1) throw new BundleReject("bad_bundle_file", "not a regular single-link file");
     if (st.size > maxBytes) throw new BundleReject("oversize", `${st.size} > ${maxBytes}`);
-    out = openSync(dest, "wx", 0o600);
+    try {
+      out = openSync(dest, "wx", 0o600);
+    } catch (e) {
+      throw new BundleReject("bad_scratch", `${e.code}: cannot create ${dest}`);
+    }
     const hash = createHash("sha256");
     const chunk = Buffer.allocUnsafe(MB);
     let total = 0;
@@ -278,10 +296,105 @@ function copyOut(src, dest, maxBytes) {
   }
 }
 
+const ALLOWED_GIT_OPTS = new Set(["gitBin", "timeoutMs"]);
+function pickGitOpts(o = {}) {
+  for (const k of Object.keys(o)) {
+    if (!ALLOWED_GIT_OPTS.has(k)) throw new TypeError(`gitOpts.${k} is not allowed`);
+  }
+  if (o.timeoutMs !== undefined && !(o.timeoutMs > 0 && o.timeoutMs <= 600_000)) throw new TypeError("gitOpts.timeoutMs out of range");
+  return { ...o };
+}
+
+// Genuine verifyBundle results and what drive recorded about them; importBundle trusts only these.
+const genuine = new WeakMap();
+
+function prepareScratch(scratch) {
+  let st = lstatSync(scratch, { throwIfNoEntry: false });
+  if (!st) {
+    mkdirSync(scratch, { recursive: true, mode: 0o700 });
+    st = lstatSync(scratch);
+  }
+  if (!st.isDirectory()) throw new BundleReject("bad_scratch", "scratch is not a real directory");
+  if (typeof process.getuid === "function" && st.uid !== process.getuid()) throw new BundleReject("bad_scratch", "scratch is owned by another user");
+  if (st.mode & 0o077) throw new BundleReject("bad_scratch", `scratch mode ${(st.mode & 0o777).toString(8)} is not 0700`);
+  return realpathSync(scratch);
+}
+
+function readVarint(buf, pos) {
+  let v = 0;
+  let mul = 1;
+  for (;;) {
+    if (pos >= buf.length || mul > 2 ** 49) throw new BundleReject("fsck_failed", { stage: "prescan", error: "bad delta header" });
+    const c = buf[pos++];
+    v += (c & 0x7f) * mul;
+    mul *= 128;
+    if (!(c & 0x80)) return { v, pos };
+  }
+}
+
+// Walks every pack entry and bounds sizes before git index-pack allocates anything for a delta.
+function prescanPack(buf, offset, caps, rawLen) {
+  const bad = (error) => new BundleReject("fsck_failed", { stage: "prescan", error });
+  const end = buf.length - rawLen;
+  if (end - offset < 12 || buf.toString("latin1", offset, offset + 4) !== "PACK") throw bad("no pack header");
+  const version = buf.readUInt32BE(offset + 4);
+  const count = buf.readUInt32BE(offset + 8);
+  if (version !== 2 && version !== 3) throw bad(`pack version ${version}`);
+  if (count > caps.objects) throw new BundleReject("bundle_too_large", `${count} objects, cap ${caps.objects}`);
+  let pos = offset + 12;
+  let total = 0;
+  for (let i = 0; i < count; i++) {
+    if (pos >= end) throw bad("truncated pack");
+    let c = buf[pos++];
+    const type = (c >> 4) & 7;
+    let size = c & 15;
+    let mul = 16;
+    while (c & 0x80) {
+      if (pos >= end || mul > 2 ** 49) throw bad("bad object header");
+      c = buf[pos++];
+      size += (c & 0x7f) * mul;
+      mul *= 128;
+    }
+    if (type === 6) {
+      do {
+        if (pos >= end) throw bad("truncated offset");
+        c = buf[pos++];
+      } while (c & 0x80);
+    } else if (type === 7) {
+      pos += rawLen;
+    } else if (type < 1 || type > 4) {
+      throw bad(`object type ${type}`);
+    }
+    if (size > caps.blobBytes) {
+      throw new BundleReject(type >= 6 ? "bundle_too_large" : "blob_too_large", `object of ${size} bytes, cap ${caps.blobBytes}`);
+    }
+    let out;
+    try {
+      out = inflateSync(buf.subarray(pos, end), { info: true, maxOutputLength: Math.max(size, 1) });
+    } catch (e) {
+      throw bad(`inflate failed: ${e.code || e.message}`);
+    }
+    if (out.buffer.length !== size) throw bad("inflated size differs from the declared size");
+    pos += out.engine.bytesWritten;
+    let result = size;
+    if (type >= 6) {
+      const a = readVarint(out.buffer, 0);
+      result = readVarint(out.buffer, a.pos).v;
+      if (result > caps.blobBytes) throw new BundleReject("bundle_too_large", `delta result of ${result} bytes, cap ${caps.blobBytes}`);
+    }
+    total += result;
+    if (total > caps.newBlobTotal) throw new BundleReject("bundle_too_large", `new objects total over ${caps.newBlobTotal} bytes`);
+  }
+  if (pos !== end) throw bad("trailing bytes after the last object");
+  return count;
+}
+
 export function verifyBundle(args) {
   const {
-    bundlePath, repo, base, branch, identity, scratch, step = "step", gitOpts = {}, _afterCopy,
+    bundlePath, repo, base, branch, identity, scratch, step = "step", _afterCopy,
   } = args;
+  const gitOpts = pickGitOpts(args.gitOpts);
+  if (_afterCopy && !testHooksEnabled()) throw new TypeError("_afterCopy is only available under node --test");
   const caps = { ...DEFAULT_CAPS, ...(args.caps || {}) };
   const G = (a, o = {}) => gitOk(a, { ...gitOpts, ...o });
   const R = (a, o = {}) => git(a, { ...gitOpts, ...o });
@@ -295,18 +408,27 @@ export function verifyBundle(args) {
     if (!/^refs\/heads\/[A-Za-z0-9._/-]+$/.test(branch || "") || branch.includes("..")) {
       throw new BundleReject("wrong_ref", `unsafe branch ${branch}`);
     }
-    mkdirSync(scratch, { recursive: true, mode: 0o700 });
+    const scratchReal = prepareScratch(scratch);
     copy = join(scratch, `${step}.bundle`);
     const sha = copyOut(bundlePath, copy, caps.bundleBytes);
     if (_afterCopy) _afterCopy();
 
     const fmt = G(["rev-parse", "--show-object-format"], { repo }).toString().trim();
     if (!oidRe(fmt).test(base)) throw new TypeError("base must be a full oid");
-    const header = parseBundleHeader(readFileSync(copy).subarray(0, 64 * 1024), { branch, base, objectFormat: fmt });
+    const bytes = readFileSync(copy);
+    const header = parseBundleHeader(bytes.subarray(0, 64 * 1024), { branch, base, objectFormat: fmt });
     const headOid = header.refs[0].oid;
     if (headOid === base) throw new BundleReject("no_commits", "bundle head equals base");
+    const packCount = prescanPack(bytes, header.packOffset, caps, fmt === "sha256" ? 32 : 20);
 
-    Q = join(scratch, `${step}.git`);
+    // Non-recursive mkdir fails on an existing path or a planted symlink, so Q is always fresh and ours.
+    const qPath = join(scratch, `${step}.git`);
+    try {
+      mkdirSync(qPath, { mode: 0o700 });
+    } catch (e) {
+      throw new BundleReject("bad_scratch", `${e.code}: ${qPath} already exists or is not creatable`);
+    }
+    Q = qPath;
     G(["init", "--bare", "--quiet", "--template=", Q]);
     const objDir = G(["rev-parse", "--path-format=absolute", "--git-path", "objects"], { repo }).toString().trim();
     mkdirSync(join(Q, "objects", "info"), { recursive: true });
@@ -315,7 +437,7 @@ export function verifyBundle(args) {
     const v = R(["bundle", "verify", copy], { gitDir: Q });
     if (v.status !== 0) throw new BundleReject("bad_prerequisite", { stage: "bundle-verify", output: v.stderr.toString() });
     // index-pack --strict runs fsck over exactly the new objects; a whole-store fsck would walk the user repo too.
-    const pack = readFileSync(copy).subarray(header.packOffset);
+    const pack = bytes.subarray(header.packOffset);
     const ck = R(["index-pack", "--stdin", "--fix-thin", "--strict"], { gitDir: Q, input: pack, timeoutMs: 5 * 60_000 });
     if (ck.status !== 0) {
       throw new BundleReject("fsck_failed", { stage: "fsck", output: (ck.stderr.toString() + ck.stdout.toString()).slice(0, 4000) });
@@ -325,8 +447,14 @@ export function verifyBundle(args) {
     const head = G(["rev-parse", "--verify", `${QUARANTINE_REF}^{commit}`], { gitDir: Q }).toString().trim();
     if (head !== headOid) throw new BundleReject("bad_header", "fetched head differs from the header");
 
+    const reach = G(["rev-list", "--objects", `${base}..${QUARANTINE_REF}`], { gitDir: Q })
+      .toString().split("\n").filter(Boolean).length;
+    if (reach !== packCount) throw new BundleReject("extra_objects", `pack holds ${packCount} objects, the branch reaches ${reach}`);
+
     const result = inspect({ G, Q, base, head, identity, caps, fmt });
-    return { ok: true, step, head, base, bundle_sha256: sha, copy, quarantine: Q, ...result };
+    const verified = { ok: true, step, head, base, bundle_sha256: sha, copy, quarantine: Q, ...result };
+    genuine.set(verified, { step, head, scratchReal, quarantine: Q });
+    return verified;
   } catch (e) {
     if (Q) rmSync(Q, { recursive: true, force: true });
     if (e instanceof BundleReject) return { ok: false, code: e.code, detail: e.detail, copy };
@@ -425,7 +553,9 @@ function checkCommit(sha, body, identity, caps) {
   if (msg.includes(0)) throw new BundleReject("bad_message", `${sha}: NUL byte`);
   let text;
   try { text = utf8.decode(msg); } catch { throw new BundleReject("bad_message", `${sha}: not UTF-8`); }
-  return { sha, subject: text.split("\n")[0] };
+  const subject = text.split("\n")[0];
+  if (/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/.test(subject)) throw new BundleReject("bad_message", `${sha}: control character in the subject`);
+  return { sha, subject };
 }
 
 function checkSymlinks(G, Q, symlinks) {
@@ -455,11 +585,12 @@ function checkCollisions(G, Q, commit, diff, rawLen) {
     const seen = new Map();
     for (const ent of parseTree(t.body, rawLen)) {
       if (ent.name === null) throw new BundleReject("bad_path", `non-UTF-8 name in ${specs[i]}`);
-      const key = foldName(ent.name);
-      if (seen.has(key)) {
-        throw new BundleReject("path_collision", { dir: [...dirs][i], names: [seen.get(key), ent.name] });
+      for (const key of foldKeys(ent.name)) {
+        if (seen.has(key)) {
+          throw new BundleReject("path_collision", { dir: [...dirs][i], names: [seen.get(key), ent.name] });
+        }
       }
-      seen.set(key, ent.name);
+      for (const key of foldKeys(ent.name)) seen.set(key, ent.name);
     }
   });
 }
@@ -488,7 +619,7 @@ function classify(G, Q, net) {
     for (const p of SENSITIVE_PATTERNS) if (p.re.test(e.path)) add(e.path, p.id);
     if (e.dstMode === "120000" || e.srcMode === "120000") add(e.path, "symlink");
     if (e.dstMode === "100755" && e.srcMode !== "100755") add(e.path, "executable");
-    if (/(^|\/)package\.json$/.test(e.path)) pkgs.push(e);
+    if (/(^|\/)package\.json$/i.test(e.path)) pkgs.push(e);
   }
   if (pkgs.length) {
     const zero = /^0+$/;
@@ -508,24 +639,30 @@ function classify(G, Q, net) {
 
 // ---------------------------------------------------------------- import
 
-export function importBundle({ verified, repo, runId, expectOld = null, gitOpts = {} }) {
+export function importBundle({ verified, repo, runId, expectOld = null, gitOpts: rawOpts }) {
+  const gitOpts = pickGitOpts(rawOpts);
   const G = (a, o = {}) => gitOk(a, { repo, ...gitOpts, ...o });
   const R = (a, o = {}) => git(a, { repo, ...gitOpts, ...o });
   if (typeof runId !== "string" || !SAFE_ID.test(runId) || runId.includes("..") || /(\.lock|\.)$/.test(runId)) {
     return { ok: false, code: "bad_run_id", detail: JSON.stringify(runId) };
   }
+  const rec = verified && typeof verified === "object" ? genuine.get(verified) : undefined;
+  if (!rec) return { ok: false, code: "bad_verified", detail: "importBundle only accepts the object verifyBundle returned" };
+  // Everything below uses drive's own record, so edits to the returned object change nothing.
+  const { head, step, quarantine } = rec;
   const target = `refs/heads/detent/${runId}`;
-  const tmp = `refs/detent/import/${runId}/${verified && verified.step}`;
+  const tmp = `refs/detent/import/${runId}/${step}`;
   try {
-    if (!verified || verified.ok !== true || !verified.quarantine || !verified.head) {
-      return { ok: false, code: "bad_verified", detail: "importBundle needs a successful verifyBundle result" };
+    let qReal;
+    try {
+      qReal = realpathSync(quarantine);
+    } catch {
+      return { ok: false, code: "bad_verified", detail: "quarantine no longer exists" };
     }
-    if (!/^[A-Za-z0-9._-]+$/.test(verified.step || "")) return { ok: false, code: "bad_verified", detail: "step" };
+    if (!qReal.startsWith(rec.scratchReal + sep)) return { ok: false, code: "bad_verified", detail: "quarantine is outside the scratch directory" };
     if (git(["check-ref-format", target], gitOpts).status !== 0) return { ok: false, code: "bad_run_id", detail: target };
-    const sha = createHash("sha256").update(readFileSync(verified.copy)).digest("hex");
-    if (sha !== verified.bundle_sha256) return { ok: false, code: "copy_tampered", detail: "bundle copy changed after verification" };
-    const qHead = G(["rev-parse", "--verify", `${QUARANTINE_REF}^{commit}`], { repo: undefined, gitDir: verified.quarantine }).toString().trim();
-    if (qHead !== verified.head) return { ok: false, code: "quarantine_changed", detail: "quarantine head moved" };
+    const qHead = G(["rev-parse", "--verify", `${QUARANTINE_REF}^{commit}`], { repo: undefined, gitDir: qReal }).toString().trim();
+    if (qHead !== head) return { ok: false, code: "quarantine_changed", detail: "quarantine head moved" };
 
     const refs = G(["for-each-ref", "--format=%(refname)", "refs/heads/detent"]).toString().split("\n").filter(Boolean);
     if (refs.includes("refs/heads/detent")) {
@@ -540,14 +677,16 @@ export function importBundle({ verified, repo, runId, expectOld = null, gitOpts 
       return { ok: false, code: "import_conflict", detail: `${target} is ${have}, expected ${expectOld}` };
     }
 
-    G(["fetch", "--no-tags", "--no-write-fetch-head", "--", verified.quarantine, `${QUARANTINE_REF}:${tmp}`], { allowFile: true });
+    G(["fetch", "--no-tags", "--no-write-fetch-head", "--", qReal, `${QUARANTINE_REF}:${tmp}`], { allowFile: true });
     try {
+      const got = G(["rev-parse", "--verify", `${tmp}^{commit}`]).toString().trim();
+      if (got !== head) return { ok: false, code: "bad_verified", detail: "fetched head differs from the verified head" };
       if (expectOld) {
-        const anc = R(["merge-base", "--is-ancestor", expectOld, verified.head]);
+        const anc = R(["merge-base", "--is-ancestor", expectOld, head]);
         if (anc.status !== 0) return { ok: false, code: "import_conflict", detail: "head does not descend from the previous import" };
       }
-      const zero = "0".repeat(verified.head.length);
-      const u = R(["update-ref", "-m", `detent drive import ${verified.step}`, "--no-deref", target, verified.head, expectOld || zero]);
+      const zero = "0".repeat(head.length);
+      const u = R(["update-ref", "-m", `detent drive import ${step}`, "--no-deref", target, head, expectOld || zero]);
       if (u.status !== 0) {
         const err = u.stderr.toString().trim();
         return { ok: false, code: /exists|directory|cannot lock/.test(err) ? "ref_conflict" : "import_conflict", detail: err };
@@ -555,8 +694,8 @@ export function importBundle({ verified, repo, runId, expectOld = null, gitOpts 
     } finally {
       G(["update-ref", "-d", tmp]);
     }
-    rmSync(verified.quarantine, { recursive: true, force: true });
-    return { ok: true, head: verified.head, ref: target };
+    rmSync(qReal, { recursive: true, force: true });
+    return { ok: true, head, ref: target };
   } catch (e) {
     if (e instanceof GitError) return { ok: false, code: e.code === "git_failed" ? "import_failed" : e.code, detail: e.message };
     throw e;
@@ -565,7 +704,8 @@ export function importBundle({ verified, repo, runId, expectOld = null, gitOpts 
 
 // ---------------------------------------------------------------- clone, export, recheck diff
 
-export function makeWorkClone({ repo, sourceRef, dest, identity, maxTreeBytes = 200 * MB, gitOpts = {} }) {
+export function makeWorkClone({ repo, sourceRef, dest, identity, maxTreeBytes = 200 * MB, gitOpts: rawOpts }) {
+  const gitOpts = pickGitOpts(rawOpts);
   const fail = (detail) => new BundleReject("clone_failed", detail);
   const m = /^refs\/heads\/(?:detent|sdlc)\/(.+)$/.exec(sourceRef || "");
   if (!m || !SAFE_ID.test(m[1])) throw fail(`sourceRef must be refs/heads/(detent|sdlc)/<run>, got ${sourceRef}`);
@@ -603,7 +743,8 @@ export function bundleExportArgv({ work, branch, base, out }) {
   return ["-C", work, ...HARD_GIT, "bundle", "create", out, branch, `^${base}`];
 }
 
-export function diffForRecheck({ repo, base, head, cap, gitOpts = {} }) {
+export function diffForRecheck({ repo, base, head, cap, gitOpts: rawOpts }) {
+  const gitOpts = pickGitOpts(rawOpts);
   const oid = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
   if (!oid.test(base || "") || !oid.test(head || "")) throw new TypeError("base and head must be full oids");
   const d = git(["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", base, head], {
