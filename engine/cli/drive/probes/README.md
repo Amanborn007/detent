@@ -37,7 +37,7 @@ alternative run uses your normal `claude` login.
 - `live.pb2` to `live.pb6` and `live.outer.*`: claude behind a plain-http proxy with a fake HOME, Bash
   under the outer sandbox, binary readable with `/Users` otherwise denied, managed settings detection,
   and the isolation checks run from inside Claude's Bash tool.
-- `live.alt_builtin.*`: an unsandboxed `claude -p` using its own sandbox
+- `live.alt_default.*` and `live.alt_hardened.*` (hardened adds `sandbox.filesystem.denyRead` for ~/.claude, ~/.ssh, ~/.aws, ~/.config, ~/.curator, ~/Library/Keychains and the detent root), each run in two claude calls of six checks: an unsandboxed `claude -p` using its own sandbox
   (`enabled`, `failIfUnavailable`, no unsandboxed commands) and OAuth. It checks `~/.ssh/config`, the
   `~/.claude` credentials, the `Claude Code-credentials` keychain item, the parent's environment,
   external network, `kill -0` and `/dev/ttys*`.
@@ -80,4 +80,4 @@ grandparent probe shows it is any same-user process, not only the parent. So for
 `--diagnose` also prints the shim's first stderr line (at most 200 characters) and matches denials by the spawned pid.
 
 `--api-key-file <path>` reads the PB2-PB5 key from a file instead of `ANTHROPIC_API_KEY` and never prints it.
-When `live.alt_builtin.bash_ran` is not `pass`, its note carries claude exit code, is_error, subtype, denial count and the first stderr line.
+When `live.alt_default.bash_ran` or `live.alt_hardened.bash_ran` is not `pass`, its note carries claude exit code, is_error, subtype, denial count and the first stderr line.

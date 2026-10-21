@@ -5,10 +5,11 @@ import http from "node:http";
 import https from "node:https";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { buildProbeProfile, defaultDenyRead } from "./seatbelt-deny-default.mjs";
 import { result } from "./report.mjs";
 import { run, which } from "./exec.mjs";
-import { liveCommands, transcriptPrompt, parseTranscript, explainNoBash } from "./transcript.mjs";
+import { ALT_GROUPS, altSettings, liveCommands, transcriptPrompt, parseTranscript, explainNoBash } from "./transcript.mjs";
 import { ALLOWED_PROXY_PATHS, LIVE_BUDGET_TOTAL_USD, LIVE_MODEL, evalLive, liveCheckScript, parseKv } from "./live-checks.mjs";
 
 const FORWARD_HEADERS = ["content-type", "accept", "anthropic-version", "anthropic-beta", "user-agent"];
@@ -182,26 +183,35 @@ export async function runLive({ T, realHome, canary, nonce, log, apiKeyFile }) {
     } else add("live.pb4_binary_dir_only", "answered", "not_run", "skipped", "budget cap reached");
   } else add("live.pb2_proxy_only", "claude answers", "not_run", "skipped", "budget cap reached");
 
-  if (affordable(0.04)) {
-    const dir = join(T, "live-alt");
+  const detentRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+  for (const variant of ["default", "hardened"]) {
+    const prefix = `live.alt_${variant}`;
+    const dir = join(T, `live-alt-${variant}`);
     stage(dir, { canary, loopbackPort: 0, keychainService: "Claude Code-credentials", writeTest });
     const env = { ...process.env };
     for (const k of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "PROBE_CANARY"]) delete env[k];
-    const settings = { sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false } };
-    const cmds = liveCommands({ realHome, parentPidFile: join(dir, "parent.pid"), canaryFile: join(dir, "canary.txt"), writeTest });
-    const r = await run(claudeReal, ["-p", "--model", LIVE_MODEL, "--max-turns", "20", "--max-budget-usd", "0.04", "--output-format", "stream-json", "--verbose",
-      "--tools", "Bash", "--allowedTools", "Bash", "--permission-mode", "dontAsk", "--settings", JSON.stringify(settings), "--setting-sources", "project",
-      "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"],
-    { env, cwd: join(dir, "work"), timeout: 240000, input: transcriptPrompt(cmds) });
-    const c = parseClaudeJson(r.stdout);
-    spent += c.cost;
-    const t = parseTranscript(r.stdout);
-    const ran = t.bashUses > 0 && t.tokens.bash_ran === 1;
-    add("live.alt_builtin.bash_ran", "Bash ran under claude's own sandbox", ran ? "bash_ran" : `no_bash(${explainNoBash(t)})`, ran ? "pass" : "inconclusive",
-      ran ? explainNoBash(t) : describeRun(r, c).slice(0, 300));
-    if (ran) results.push(...evalLive("live.alt_builtin", t.tokens, controls, { expectLoopback: false }));
+    const settings = altSettings({ hardened: variant === "hardened", realHome, detentRoot });
+    const all = liveCommands({ realHome, parentPidFile: join(dir, "parent.pid"), canaryFile: join(dir, "canary.txt"), writeTest });
+    const tokens = {};
+    const notes = [];
+    for (const [gi, keys] of ALT_GROUPS.entries()) {
+      if (!affordable(0.03)) { notes.push(`group${gi + 1}=skipped_budget`); continue; }
+      const cmds = all.filter(([k]) => keys.includes(k));
+      const r = await run(claudeReal, ["-p", "--model", LIVE_MODEL, "--max-turns", "12", "--max-budget-usd", "0.03", "--output-format", "stream-json", "--verbose",
+        "--tools", "Bash", "--allowedTools", "Bash", "--permission-mode", "dontAsk", "--settings", JSON.stringify(settings), "--setting-sources", "project",
+        "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"],
+      { env, cwd: join(dir, "work"), timeout: 240000, input: transcriptPrompt(cmds) });
+      const c = parseClaudeJson(r.stdout);
+      spent += c.cost;
+      const t = parseTranscript(r.stdout);
+      Object.assign(tokens, t.tokens);
+      notes.push(`group${gi + 1}: ${t.bashUses > 0 ? explainNoBash(t) : describeRun(r, c)}`);
+    }
+    const ran = tokens.bash_ran === 1;
+    add(`${prefix}.bash_ran`, "Bash ran under claude's own sandbox", ran ? "bash_ran" : "no_bash", ran ? "pass" : "inconclusive", notes.join(" | ").slice(0, 300));
+    if (ran) results.push(...evalLive(prefix, tokens, controls, { expectLoopback: false }));
     clean();
-  } else add("live.alt_builtin.bash_ran", "ran", "not_run", "skipped", "budget cap reached");
+  }
 
   add("live.cost", `<= ${LIVE_BUDGET_TOTAL_USD.toFixed(2)} USD`, `${spent.toFixed(4)} USD`, spent <= LIVE_BUDGET_TOTAL_USD ? "pass" : "fail");
   log?.(`live spend ${spent.toFixed(4)} USD`);

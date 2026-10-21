@@ -9,7 +9,7 @@ import { buildReport, result, summarize, validateResult, REPORT_SCHEMA } from ".
 import { classifyPreflight, preflight } from "../drive/probes/exec.mjs";
 import { diagnoseCommand, parseDenials } from "../drive/probes/diagnose.mjs";
 import { describeRun, parseClaudeJson } from "../drive/probes/live.mjs";
-import { explainNoBash, liveCommands, parseTranscript, transcriptPrompt } from "../drive/probes/transcript.mjs";
+import { ALT_GROUPS, altSettings, explainNoBash, liveCommands, parseTranscript, transcriptPrompt } from "../drive/probes/transcript.mjs";
 import { evalLive,liveCheckScript, parseKv } from "../drive/probes/live-checks.mjs";
 
 const PROBES = join(dirname(fileURLToPath(import.meta.url)), "..", "drive", "probes");
@@ -280,4 +280,25 @@ test("live commands are single Bash calls that each print one token, and quote t
   const p = transcriptPrompt(cmds);
   assert.match(p, /own separate Bash call/);
   assert.match(p, /^1\. echo bash_ran=1$/m);
+});
+
+test("alt groups cover every check in at most six commands each", () => {
+  const all = liveCommands({ realHome: "/h", parentPidFile: "/p", canaryFile: "/c", writeTest: "/w" }).map(([k]) => k);
+  for (const g of ALT_GROUPS) { assert.ok(g.length <= 6); for (const k of g) assert.ok(all.includes(k), k); }
+  for (const k of all) assert.ok(ALT_GROUPS.flat().includes(k), k);
+  assert.ok(ALT_GROUPS.every((g) => g[0] === "bash_ran"));
+});
+
+test("altSettings keeps the default variant plain and denies reads of secret dirs in the hardened one", () => {
+  const d = altSettings({ hardened: false, realHome: "/Users/u", detentRoot: "/d" });
+  assert.deepEqual(d, { sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false } });
+  const h = altSettings({ hardened: true, realHome: "/Users/u", detentRoot: "/d" });
+  assert.deepEqual(h.sandbox.filesystem.denyRead, ["/Users/u/.claude", "/Users/u/.ssh", "/Users/u/.aws", "/Users/u/.config", "/Users/u/.curator", "/Users/u/Library/Keychains", "/d"]);
+  assert.equal(h.sandbox.allowUnsandboxedCommands, false);
+});
+
+test("the keychain check prints only an exit code", () => {
+  const c = liveCommands({ realHome: "/h", parentPidFile: "/p", canaryFile: "/c", writeTest: "/w" }).find(([k]) => k === "keychain_rc")[1];
+  assert.match(c, />\/dev\/null 2>&1; echo keychain_rc=\$\?$/);
+  assert.ok(!/ -[wg]\b/.test(c));
 });
