@@ -18,7 +18,7 @@
 
 import {
   readFileSync, writeFileSync, appendFileSync, renameSync, existsSync,
-  mkdirSync, readdirSync, statSync, accessSync, constants, rmSync, realpathSync, writeSync, mkdtempSync,
+  mkdirSync, readdirSync, statSync, accessSync, constants, rmSync, realpathSync, writeSync, mkdtempSync, readSync,
 } from "node:fs";
 import { join, resolve, dirname, delimiter, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -80,7 +80,7 @@ const STAGE_END_GATES = {
 
 // There is no `engine` binary on PATH; under the detent wrapper, name the one that exists.
 function forCaller(text) {
-  return process.env.DETENT_CLI === "1" ? text.replace(/\bengine (?=(?:setup|run|stage|gate|drive|socket|next|dashboard|live|bench|eval|pack|respond|step|advisor|handoff|attempt|env|decide-why|spend|help)\b)/g, "detent ") : text;
+  return process.env.DETENT_CLI === "1" ? text.replace(/\bengine (?=(?:setup|run|stage|gate|drive|socket|next|dashboard|live|bench|eval|pack|respond|step|advisor|handoff|attempt|env|decide-why|spend|start|status|continue|decide|approve|revise|doctor|help)\b)/g, "detent ") : text;
 }
 
 // process.exit() drops a buffered stream write, and a pipe truncates past ~8KB.
@@ -353,8 +353,8 @@ function runRepoOf(runDir) {
 }
 
 const RUN_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
-// A ref (ticket key or id fragment) never carries a path separator or a leading dot.
-const RUN_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+// Refs may be ticket keys like owner/repo#12, so only path-escaping shapes are refused.
+const UNSAFE_REF_RE = /^[./]|\.\./;
 
 function sameDir(a, b) {
   if (!a || !b) return false;
@@ -390,7 +390,7 @@ function runIsActive(runDir) {
 function findRun(repo, flags) {
   const sdlc = sdlcHome();
   if (flags.run) {
-    if (flags.run === true || !RUN_REF_RE.test(flags.run)) {
+    if (flags.run === true || UNSAFE_REF_RE.test(String(flags.run))) {
       refuse(`invalid run id ${JSON.stringify(flags.run)}: a run id matches ${RUN_ID_RE}`, "pass the run id exactly as `engine dashboard` lists it");
     }
     const ref = String(flags.run);
@@ -1386,15 +1386,21 @@ function cmdGateCollect(flags) {
 // The orchestration lives in its own module; it gets the engine's internals by injection.
 // ---------------------------------------------------------------------------
 
-async function cmdDriveEntry(flags) {
-  const { cmdDrive } = await import("./drive/drive.mjs");
-  const E = {
+const ENGINE_FILE = fileURLToPath(import.meta.url);
+const ENGINE_ROOT = resolve(dirname(ENGINE_FILE), "..");
+
+function driveInjection() {
+  return {
     STAGES, STAGE_ARTIFACTS, STAGE_END_GATES, out, refuse, fail, nowIso, readJson, appendEvent, detentRoot, repoOf, findRun,
     loadStatus, loadDecisions, saveDecisions, nextDecisionId, pendingBlockers, syncGateAnsweredEvents, beginStage, endStage,
     raiseEndGate, renderGateArtifact, drainCuratorFor, collectResult, curatorOnPath, escapeHtml, parseYamlSubset, runExec,
-    engineFile: fileURLToPath(import.meta.url),
+    engineFile: ENGINE_FILE,
   };
-  return cmdDrive(flags, E);
+}
+
+async function cmdDriveEntry(flags) {
+  const { cmdDrive } = await import("./drive/drive.mjs");
+  return cmdDrive(flags, driveInjection());
 }
 
 // ---------------------------------------------------------------------------
@@ -1705,15 +1711,16 @@ function socketFanOut(name, entry, payload, stackPath) {
 // next command. No orchestrator prompt.
 // ---------------------------------------------------------------------------
 
-function cmdNext(flags) {
+function cmdNext(flags, { withStages = false } = {}) {
   const repo = repoOf(flags);
   const { runId, runDir } = findRun(repo, flags);
   const status = loadStatus(runDir);
+  const emit = (o) => out(withStages ? { ...o, stages: status.stages } : o);
   const decisions = loadDecisions(runDir);
   syncGateAnsweredEvents(runDir, decisions);
   const current = STAGES.find((s) => !["done", "skipped"].includes(status.stages[s].status));
   if (!current) {
-    out({ ok: true, run_id: runId, stage: null, status: "done",
+    emit({ ok: true, run_id: runId, stage: null, status: "done",
       next_step: "run complete — all stages done" });
   }
   const entry = status.stages[current];
@@ -1724,11 +1731,11 @@ function cmdNext(flags) {
   if (entry.status === "pending") {
     const blockers = pendingBlockers(decisions, current);
     if (blockers.length > 0) {
-      out({ ...base,
+      emit({ ...base,
         entry_state: `blocked by pending decision(s): ${blockers.map((d) => d.id).join(", ")}`,
         next_step: `engine gate open ${blockers[0].gate || blockers[0].id} ${suffix}` });
     }
-    out({ ...base,
+    emit({ ...base,
       entry_state: "all prior stages done, no blocking decisions",
       exit_state: artifact ? `will require ${artifact}` : "no required artifact",
       next_step: `engine stage begin ${current} ${suffix}` });
@@ -1736,13 +1743,13 @@ function cmdNext(flags) {
   if (entry.status === "blocked") {
     const ids = entry.blocked_on || [];
     const first = decisions.find((d) => ids.includes(d.id));
-    out({ ...base,
+    emit({ ...base,
       entry_state: `blocked on: ${ids.join(", ")}`,
       next_step: `engine gate open ${(first && first.gate) || ids[0] || "?"} ${suffix}` });
   }
   // in_progress
   if (artifact && !existsSync(join(runDir, artifact))) {
-    out({ ...base,
+    emit({ ...base,
       exit_state: `required artifact missing: ${artifact}`,
       next_step: `produce ${artifact} in ${runDir}, then: engine stage end ${current} ${suffix}` });
   }
@@ -1750,12 +1757,12 @@ function cmdNext(flags) {
   if (gateDef) {
     const gate = decisions.find((d) => d.gate === gateDef.name);
     if (gate && gate.status === "pending") {
-      out({ ...base,
+      emit({ ...base,
         exit_state: `artifact present; ${gateDef.name} gate pending (${gate.id})`,
         next_step: `engine gate open ${gateDef.name} ${suffix}` });
     }
   }
-  out({ ...base,
+  emit({ ...base,
     exit_state: artifact ? `artifact present: ${artifact}` : "no required artifact",
     next_step: `engine stage end ${current} ${suffix}` });
 }
@@ -2269,7 +2276,297 @@ function cmdAdvisorConsult(flags) {
 // Dispatch.
 // ---------------------------------------------------------------------------
 
-const USAGE = "engine <setup|run new|stage begin|stage end|gate open|gate collect|drive|socket call|next|dashboard|live|bench|eval|pack validate|respond|step|advisor consult|handoff|attempt|env|decide-why|spend|help> — see engine/cli/README.md";
+// ---------------------------------------------------------------------------
+// Friendly verbs: start, status, continue, decide, approve, revise, doctor.
+// Each is built on the machine-layer commands above, which stay unchanged.
+// ---------------------------------------------------------------------------
+
+/** Run one of our own commands and parse its JSON line. */
+function selfJson(args, { stdio } = {}) {
+  const r = spawnSync(process.execPath, [ENGINE_FILE, ...args, "--json"], { encoding: "utf8", env: process.env, ...(stdio ? { stdio } : {}) });
+  if (r.error) throw new Error(`could not run ${args.join(" ")}: ${r.error.message}`);
+  const line = (r.stdout || "").trim().split("\n").pop();
+  let json;
+  try { json = JSON.parse(line); } catch { throw new Error(`${args.join(" ")} printed no JSON (exit ${r.status}): ${(r.stdout + r.stderr).trim().slice(-300)}`); }
+  return { json, code: r.status };
+}
+
+/** Hand a failed child command's result straight to our caller. */
+function relay(child) {
+  out(child.json, child.code || 1);
+}
+
+function ticketOf(runDir) {
+  return readJson(join(runDir, "run.json")).ticket_ref;
+}
+
+function readLineSync() {
+  const buf = Buffer.alloc(1);
+  let line = "";
+  for (;;) {
+    let n;
+    try { n = readSync(0, buf, 0, 1, null); } catch (e) { if (e.code === "EAGAIN") continue; if (e.code === "EOF") break; throw e; }
+    if (n === 0 || buf[0] === 10) break;
+    line += String.fromCharCode(buf[0]);
+  }
+  return line.trim();
+}
+
+/** Spending or answering is for a person at a terminal. DETENT_FORCE_TTY exists only for tests. */
+function requireHumanTerminal(verb) {
+  if (process.env.CLAUDECODE) {
+    refuse(`${verb} is for a person at a terminal, and this is a Claude Code session`,
+      "ask the person to run it in their own terminal");
+  }
+  if (process.env.DETENT_DRIVE_CHILD === "1") {
+    refuse(`${verb} cannot run inside a drive child`, "a person answers gates, in their own terminal");
+  }
+  const forced = process.env.DETENT_FORCE_TTY === "1";
+  if (!forced && !(process.stdin.isTTY && process.stdout.isTTY)) {
+    refuse(`${verb} needs a terminal for its confirmation prompt`, "run it in a terminal, not through a pipe");
+  }
+}
+
+function confirm(question) {
+  process.stderr.write(`${question} [y/N] `);
+  const line = readLineSync();
+  process.stderr.write("\n");
+  return /^y(es)?$/i.test(line);
+}
+
+// ---- start ----
+
+function parseTicketRef(ref) {
+  const m = /^([^/\s#]+)\/([^/\s#]+)#(\d+)$/.exec(String(ref));
+  return m ? { owner: m[1], repo: m[2], number: m[3] } : null;
+}
+
+function originOf(repo) {
+  const r = spawnSync("git", ["-C", repo, "remote", "get-url", "origin"], { encoding: "utf8" });
+  if (r.status !== 0) return null;
+  const m = /github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(r.stdout.trim());
+  return m ? { owner: m[1], repo: m[2] } : { raw: r.stdout.trim() };
+}
+
+/** Hook for the indexing lane: runs after setup and before the run is created. */
+function prepareContextIndex(_repo, _ticket) {}
+
+function cmdStart(ticket, flags) {
+  const parsed = parseTicketRef(ticket);
+  if (!parsed) refuse(`start needs a ticket as owner/repo#N, got '${ticket ?? ""}'`, "detent start <owner/repo#N> [--repo .] [--slug s]");
+  const repo = repoOf(flags);
+  const origin = originOf(repo);
+  if (!origin) refuse(`${repo} has no origin remote, so it cannot be matched to ${ticket}`, "git remote add origin <url>, then re-run");
+  if (!origin.owner) refuse(`origin of ${repo} is not a github.com remote (${origin.raw})`, "point origin at the GitHub repo the ticket belongs to");
+  if (origin.owner.toLowerCase() !== parsed.owner.toLowerCase() || origin.repo.toLowerCase() !== parsed.repo.toLowerCase()) {
+    refuse(`the ticket is for ${parsed.owner}/${parsed.repo} but origin of ${repo} is ${origin.owner}/${origin.repo}`,
+      `run it from a clone of ${parsed.owner}/${parsed.repo}, or pass --repo <that clone>`);
+  }
+  const hasStack = existsSync(join(repo, "stack.yaml")) || existsSync(join(repo, "engine", "stack.yaml"));
+  if (!hasStack) {
+    const s = selfJson(["setup", "--repo", repo]);
+    if (!s.json.ok) relay(s);
+  }
+  prepareContextIndex(repo, ticket);
+  const created = selfJson(["run", "new", "--ticket", ticket, "--repo", repo, ...(flags.slug && flags.slug !== true ? ["--slug", String(flags.slug)] : [])]);
+  if (!created.json.ok) relay(created);
+  out({
+    ok: true,
+    run_id: created.json.run_id,
+    ticket,
+    setup: hasStack ? "present" : "ran",
+    worktree: created.json.worktree,
+    stage: "intake",
+    next_step: "detent continue — an agent writes the brief for the intake stage. Use detent status any time to see where the run stands.",
+  });
+}
+
+// ---- status ----
+
+function cmdStatus(flags) {
+  return cmdNext(flags, { withStages: true });
+}
+
+// ---- continue ----
+
+async function cmdContinue(flags) {
+  const { nextAction, positiveFlag, DEFAULT_MODEL, DEFAULT_BUDGET_USD } = await import("./drive/drive.mjs");
+  const E = driveInjection();
+  const repo = repoOf(flags);
+  const { runId, runDir } = findRun(repo, flags);
+  const ticket = ticketOf(runDir);
+  const decisions = loadDecisions(runDir);
+  syncGateAnsweredEvents(runDir, decisions);
+  const next = nextAction(E, loadStatus(runDir), decisions, runDir);
+  const base = { ok: true, run_id: runId, ticket };
+  if (next.action === "done") out({ ...base, stage: null, next_step: "run complete — all stages done" });
+  if (next.action === "needs_human") {
+    out({ ...base, stage: next.stage, waiting: next.blockers.map((d) => d.id),
+      next_step: "a human answer is needed first: detent decide (or detent approve / detent revise at your own terminal)" });
+  }
+  const stage = next.stage;
+  const skill = join(ENGINE_ROOT, "stages", stage, "SKILL.md");
+  if (process.env.CLAUDECODE) {
+    out({ ...base, stage, skill,
+      next_step: `run the ${stage} stage in this session: read ${skill} and follow it for run ${runId}; do not start another claude` });
+  }
+  const budget = positiveFlag(E, flags, "budget", DEFAULT_BUDGET_USD, false);
+  const model = flags.model && flags.model !== true ? flags.model : DEFAULT_MODEL;
+  process.stderr.write(`continue: run ${runId} (${ticket}), one step (${stage}), budget up to ${budget} USD, model ${model}\n`);
+  if (flags.yes !== true) {
+    const forced = process.env.DETENT_FORCE_TTY === "1";
+    if (!forced && !(process.stdin.isTTY && process.stdout.isTTY)) {
+      refuse("continue spends Claude credit and has no terminal to ask on", "re-run with --yes to accept the budget above");
+    }
+    if (!confirm("Run this step?")) refuse("not confirmed", "re-run when ready, or use --yes");
+  }
+  const passthrough = ["claude-bin", "model", "budget", "profile", "stack", "child-timeout-sec"].flatMap((k) => (flags[k] && flags[k] !== true ? [`--${k}`, String(flags[k])] : []));
+  const r = spawnSync(process.execPath, [ENGINE_FILE, "drive", "--run", runId, "--max-steps", "1", ...passthrough, ...(WANT_JSON ? ["--json"] : [])],
+    { stdio: "inherit", env: process.env });
+  process.exit(r.status ?? 1);
+}
+
+// ---- decide ----
+
+function waitingDecision(runDir) {
+  const decisions = loadDecisions(runDir);
+  const status = loadStatus(runDir);
+  const stage = STAGES.find((s) => !["done", "skipped"].includes(status.stages[s].status));
+  const blockers = stage ? pendingBlockers(decisions, stage) : [];
+  const blocked = stage ? decisions.filter((d) => (status.stages[stage].blocked_on || []).includes(d.id) && d.status === "pending") : [];
+  return blockers[0] || blocked[0] || decisions.find((d) => d.status === "pending") || null;
+}
+
+const hasApproveRevise = (d) => Array.isArray(d.options) && d.options.includes("approve") && d.options.includes("revise");
+
+function cmdDecide(flags) {
+  const repo = repoOf(flags);
+  const { runId, runDir } = findRun(repo, flags);
+  const ticket = ticketOf(runDir);
+  const waiting = waitingDecision(runDir);
+  if (!waiting) refuse(`no pending decision on run ${runId} (${ticket})`, "detent status shows where the run stands");
+  const gate = waiting.gate || waiting.id;
+  const opened = selfJson(["gate", "open", gate, "--run", runId, "--repo", repo]);
+  if (!opened.json.ok) relay(opened);
+  const info = { run_id: runId, ticket, decision_id: waiting.id };
+  if (opened.json.mode !== "curator") {
+    const hint = hasApproveRevise(waiting) ? ' If you are at your own terminal you can run: detent approve  or  detent revise --note "<why>".' : "";
+    out({ ...opened.json, ...info, next_step: `${opened.json.next_step}${hint}` });
+  }
+  const curator = curatorOnPath();
+  if (!curator) fail("curator was on PATH for gate open but not now", "check `which curator`");
+  const html = opened.json.html;
+  const o = spawnSync(curator, ["open", html], { encoding: "utf8" });
+  if (o.error || o.status !== 0) fail(`curator open failed: ${(o.error?.message || o.stdout + o.stderr).trim().slice(-300)}`, `curator open ${html}`);
+  process.stderr.write(`decide: ${waiting.id} on run ${runId} (${ticket}) is open in curator; waiting for your answer\n`);
+  const p = spawnSync(curator, ["poll", html], { encoding: "utf8", stdio: ["inherit", "pipe", "inherit"] });
+  if (p.error || p.status !== 0) fail(`curator poll failed: ${(p.error?.message || p.stdout).trim().slice(-300)}`, `curator poll ${html}, then detent gate collect`);
+  const feedback = join(mkdtempSync(join(tmpdir(), "detent-decide-")), "feedback.json");
+  writeFileSync(feedback, p.stdout.trim().split("\n").pop());
+  const collected = selfJson(["gate", "collect", "--run", runId, "--repo", repo, "--file", feedback]);
+  if (!collected.json.ok) relay(collected);
+  const stillPending = loadDecisions(runDir).filter((d) => d.status === "pending").map((d) => d.id);
+  out({
+    ok: true, ...info, answered: collected.json.answered, unresolved: collected.json.unresolved, pending: stillPending,
+    next_step: stillPending.length
+      ? `still waiting on ${stillPending.join(", ")}: detent decide`
+      : "all answered: detent continue",
+  });
+}
+
+// ---- approve / revise ----
+
+function cmdAnswer(verb, id, flags) {
+  requireHumanTerminal(verb);
+  const repo = repoOf(flags);
+  const { runId, runDir } = findRun(repo, flags);
+  const ticket = ticketOf(runDir);
+  const decisions = loadDecisions(runDir);
+  const d = id ? decisions.find((x) => x.id === id) : decisions.find((x) => x.gate === "intent" && x.status === "pending");
+  if (!d) {
+    refuse(id ? `no decision ${id} on run ${runId} (${ticket})` : `no pending intent gate on run ${runId} (${ticket})`,
+      "detent status shows what the run is waiting for");
+  }
+  if (d.status !== "pending") refuse(`${d.id} is already ${d.status}`, "detent status shows what the run is waiting for");
+  if (!hasApproveRevise(d)) {
+    refuse(`${d.id} offers ${JSON.stringify(d.options || [])}, not approve/revise`, "detent decide answers any decision");
+  }
+  if (!confirm(`Answer ${d.id} on run ${runId} (${ticket}) with "${verb}"?`)) {
+    refuse("not confirmed, nothing was recorded", `re-run detent ${verb} when ready`);
+  }
+  const note = flags.note && flags.note !== true ? String(flags.note) : null;
+  Object.assign(d, {
+    status: "answered", answer: verb, answered_by: "human", answered_via: "terminal",
+    answered_at: new Date().toISOString(), ...(note ? { note } : {}),
+  });
+  saveDecisions(runDir, decisions);
+  appendEvent(runDir, { event: "decision_answered", decision_id: d.id, answer: verb, answered_by: "human", answered_via: "terminal" });
+  syncGateAnsweredEvents(runDir, decisions);
+  out({
+    ok: true, run_id: runId, ticket, decision_id: d.id, answer: verb,
+    next_step: verb === "approve"
+      ? "detent continue — the run moves on to the next stage"
+      : "detent continue — the plan stage picks up your note and revises",
+  });
+}
+
+// ---- doctor ----
+
+function cmdDoctor(flags) {
+  const repo = repoOf(flags);
+  const checks = [];
+  const add = (name, ok, detail) => checks.push({ name, status: ok ? "PASS" : "FAIL", detail });
+  const major = Number(process.versions.node.split(".")[0]);
+  add("node", major >= 20, `v${process.versions.node}${major >= 20 ? "" : " (need 20 or newer)"}`);
+  const git = spawnSync("git", ["--version"], { encoding: "utf8" });
+  add("git", git.status === 0, git.status === 0 ? git.stdout.trim() : "git is not installed or not on PATH");
+
+  const ghCmd = process.env.DETENT_GH_CMD || "gh";
+  const auth = spawnSync(ghCmd, ["auth", "status"], { encoding: "utf8", timeout: 15000 });
+  const authed = !auth.error && auth.status === 0;
+  add("gh auth", authed, authed ? (auth.stdout + auth.stderr).trim().split("\n")[0] : "run `gh auth login`");
+  const origin = originOf(repo);
+  if (!authed) add("gh push access", false, "needs gh auth first");
+  else if (!origin?.owner) add("gh push access", false, `${repo} has no github.com origin remote to check`);
+  else {
+    const api = spawnSync(ghCmd, ["api", `repos/${origin.owner}/${origin.repo}`, "--jq", ".permissions.push"], { encoding: "utf8", timeout: 15000 });
+    const can = !api.error && api.status === 0 && api.stdout.trim() === "true";
+    add("gh push access", can, can ? `the active account can push to ${origin.owner}/${origin.repo}`
+      : `the active account cannot push to ${origin.owner}/${origin.repo}; switch with gh auth switch (doctor never switches for you)`);
+  }
+  const curator = curatorOnPath();
+  add("curator", !!curator, curator || "curator is not on PATH, so review pages cannot open");
+
+  const stackPath = [join(repo, "stack.yaml"), join(repo, "engine", "stack.yaml")].find((p) => existsSync(p));
+  let stack = null;
+  if (!stackPath) add("stack.yaml", false, `none in ${repo}; run detent setup --repo ${repo}`);
+  else {
+    try { stack = parseYamlSubset(readFileSync(stackPath, "utf8"), stackPath); add("stack.yaml", true, stackPath); } catch (e) { add("stack.yaml", false, e.message); }
+  }
+  if (!stack) add("sockets", false, "cannot check without a readable stack.yaml");
+  else {
+    const commands = [];
+    for (const entry of Object.values(stack.sockets || {})) {
+      for (const e of Array.isArray(entry.providers) ? entry.providers : [entry]) {
+        if (e && kindOf(e) === "exec") commands.push(resolveCommand(e.command, stackPath));
+      }
+    }
+    const runnable = (c) => {
+      const dirs = c.includes("/") ? [""] : (process.env.PATH || "").split(delimiter);
+      return dirs.some((dir) => { try { const p = dir ? join(dir, c) : c; accessSync(p, constants.X_OK); return statSync(p).isFile(); } catch { return false; } });
+    };
+    const missing = commands.filter((c) => !runnable(c));
+    add("sockets", missing.length === 0, missing.length ? `not found or not executable: ${missing.join(", ")}` : `${commands.length} exec socket command(s) found`);
+  }
+  add("DETENT_ROOT", !!process.env.DETENT_ROOT, process.env.DETENT_ROOT || "not set; export DETENT_ROOT=<your detent clone>");
+  const failed = checks.filter((c) => c.status === "FAIL");
+  out({
+    ok: failed.length === 0, checks,
+    next_step: failed.length ? `fix: ${failed.map((c) => c.name).join(", ")}` : "everything checks out: detent start <owner/repo#N>",
+  }, failed.length ? 1 : 0);
+}
+
+const USAGE = "engine <start|status|continue|decide|approve|revise|doctor|setup|run new|stage begin|stage end|gate open|gate collect|drive|socket call|next|dashboard|live|bench|eval|pack validate|respond|step|advisor consult|handoff|attempt|env|decide-why|spend|help> — see engine/cli/README.md";
 
 /**
  * cmdEval — wraps engine/eval/eval.mjs's runEval() for `engine eval`. An
@@ -2866,6 +3163,13 @@ function cmdHelp() {
   out({
     ok: true,
     usage: {
+      "start": "engine start <owner/repo#N> [--repo .] [--slug s] — the friendly way in: refuses unless the repo's origin is that owner/repo, runs setup when stack.yaml is missing, then run new. Machine layer: setup, run new",
+      "status": "engine status [--run <ref>] — readable view of the run (stages, pending gates, next step). With --json it is `next` plus a `stages` map",
+      "continue": "engine continue [--yes] [--run <ref>] — run exactly one drive step (--max-steps 1) after printing the budget. Inside Claude Code it spawns nothing and names the stage SKILL.md for this session to run. Machine layer: drive",
+      "decide": "engine decide [--run <ref>] — answer the waiting gate: gate open, curator open, block on curator poll, gate collect. Without curator it prints the terminal fallback. Machine layer: gate open, gate collect",
+      "approve": "engine approve [D-xxx] [--note \"...\"] — answer the pending intent gate with approve. A person at a terminal only: refuses (exit 2) under Claude Code, in a drive child, or without a TTY; asks for y/N and records answered_by human, answered_via terminal",
+      "revise": "engine revise [D-xxx] [--note \"...\"] — as approve, with the answer revise. A named decision must offer approve and revise; any other decision goes through detent decide",
+      "doctor": "engine doctor — one line per check (node >= 20, git, gh auth and push access to the origin repo, curator, stack.yaml, exec socket commands, DETENT_ROOT); exit 1 if any FAIL",
       "setup": "engine setup --repo <path> [--force] — first run: create <DETENT_ROOT>/detent.user.yaml and fill empty user.name/email/github_login from git and gh (never overwrites a set value), and write a starter stack.yaml in the work repo wired to the built-in adapters by absolute path. Refuses (exit 2) if --repo is missing or not a git repo, or if stack.yaml exists without --force. Values it cannot detect are listed in `unresolved`",
       "run new": "engine run new --ticket <ref> [--repo <path>] [--slug <slug>] [--no-worktree] — create a run under the centralized <DETENT_ROOT>/.sdlc/ with a dedicated git worktree (the default flow)",
       "stage begin": "engine stage begin <stage> [--run <id>] [--repo <path>] — enter a stage (refuses illegal transitions)",
@@ -2928,6 +3232,12 @@ function main() {
   if (a === "attempt") return cmdAttempt(b, flags);
   if (a === "env") return cmdEnv(flags);
   if (a === "decide-why") return cmdDecideWhy(flags);
+  if (a === "start") return cmdStart(b, flags);
+  if (a === "status") return cmdStatus(flags);
+  if (a === "continue") return cmdContinue(flags);
+  if (a === "decide") return cmdDecide(flags);
+  if (a === "approve" || a === "revise") return cmdAnswer(a, b, flags);
+  if (a === "doctor") return cmdDoctor(flags);
   refuse(`unknown command: ${positional.join(" ") || "(none)"}`, USAGE);
 }
 

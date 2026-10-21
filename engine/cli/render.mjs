@@ -24,7 +24,9 @@ function stageLines(stages) {
 
 export function renderText(obj, ctx = {}) {
   const lines = [];
-  if (obj.ok === false) lines.push(`Refused: ${obj.reason}`);
+  if (obj.checks) {
+    for (const c of obj.checks) lines.push(`${c.status} ${c.name}: ${c.detail}`);
+  } else if (obj.ok === false) lines.push(`Refused: ${obj.reason}`);
   if (obj.run_id) lines.push(`Run ${obj.run_id}${ctx.ticket ? ` (${ctx.ticket})` : ""}`);
   if (ctx.stages) lines.push(...stageLines(ctx.stages));
   else if (obj.stage) lines.push(`  stage ${obj.stage}: ${obj.status}`);
@@ -35,7 +37,7 @@ export function renderText(obj, ctx = {}) {
       if (g.options?.length) lines.push(`    options: ${g.options.join(" | ")}`);
     }
   }
-  if (obj.ok !== false && !obj.run_id) {
+  if (obj.ok !== false && !obj.run_id && !obj.checks) {
     for (const [k, v] of Object.entries(obj)) {
       if (k === "ok" || k === "next_step") continue;
       if (["string", "number", "boolean"].includes(typeof v)) lines.push(`${k}: ${v}`);
