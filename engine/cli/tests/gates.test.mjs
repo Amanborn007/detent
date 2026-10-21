@@ -191,3 +191,17 @@ test("full tail: implement -> recheck -> ship -> respond transitions, events rec
   const gateEvents = eventsOf(ctx.runDir).filter((e) => e.event === "gate_raised");
   assert.equal(gateEvents.length, 1);
 });
+
+test("stage end refuses while a decision blocking that stage is pending", () => {
+  const ctx = mkRun();
+  let r = engine(["stage", "begin", "intake", "--repo", ctx.repo, "--run", ctx.runId]);
+  assert.equal(r.code, 0, r.stdout);
+  writeJson(join(ctx.runDir, "decisions.json"), [
+    { id: "D-001", raised_by: "agent", blocks: ["intake"], question: "which?", options: ["a", "b"], status: "pending" },
+  ]);
+  r = engine(["stage", "end", "intake", "--repo", ctx.repo, "--run", ctx.runId]);
+  assert.equal(r.code, 2, r.stdout);
+  assert.equal(r.json.ok, false);
+  assert.match(r.json.reason, /D-001/);
+  assert.match(r.json.next_step, /engine gate open/);
+});
