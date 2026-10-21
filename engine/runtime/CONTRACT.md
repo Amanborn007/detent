@@ -82,7 +82,7 @@ Sends the prompt to any server that speaks `POST {base}/chat/completions` (OpenA
 | `DETENT_OPENAI_MODEL` | model name, used when the request has no `model`. With neither, the call is refused. |
 | `DETENT_OPENAI_API_KEY_ENV` | the NAME of the variable that holds the key, not the key. If set, that variable must be non-empty. The key goes out as `Authorization: Bearer` and never appears in argv, the request JSON or the response. With none set, no header is sent, which is what Ollama wants. |
 
-`request.auth: "api_key"` also requires `DETENT_OPENAI_API_KEY_ENV`. Plain `http:` to a host other than `localhost`, `127.x.x.x` or `[::1]` is refused when a key is configured. Every refusal is a `RuntimeConfigError` whose `setting` names what to set, and the verb prints `set <setting>; see engine/runtime/CONTRACT.md (openai-compatible)` and exits 2.
+`request.auth: "api_key"` also requires `DETENT_OPENAI_API_KEY_ENV`. Plain `http:` to a host other than `localhost`, `127.x.x.x` or `[::1]` is refused when a key is configured. A base URL with a username or password is always refused, and the message does not repeat it. Every refusal is a `RuntimeConfigError` whose `setting` names what to set, and the verb prints `set <setting>; see engine/runtime/CONTRACT.md (openai-compatible)` and exits 2.
 
 Capabilities: `output` text and json (both return the message content as `text`; `response_format` is not sent), `tools` none, `mcp` none, `settings_sources` none, `auth` api_key, `model`, `persist_session` (only `false` is accepted, and nothing is persisted either way) and `timeout`. `reports` is empty, so `cost_usd` and `turns` are always `null`. Token usage stays in `raw.stdout`.
 
