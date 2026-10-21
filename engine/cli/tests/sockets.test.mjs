@@ -204,3 +204,11 @@ test("exec exit 1 with non-JSON stdout is still retried once", () => {
   assert.equal(r.json.response, undefined);
   assert.equal(readFileSync(counter, "utf8").trim().split("\n").length, 2);
 });
+
+test("exec exit 2 with a JSON body keeps the body, so the refusal says why", () => {
+  const repo = mkStackRepo(countingStack("exit2-json.mjs"));
+  const r = engine(["socket", "call", "flaky", "--repo", repo]);
+  assert.equal(r.code, 2, r.stdout + r.stderr);
+  assert.deepEqual(r.json.response, { error: "envelope has no string .result" });
+  assert.match(r.json.reason, /envelope has no string \.result/);
+});
