@@ -18,6 +18,10 @@ on stdin, one JSON response on stdout.
 Exit codes: `0` success (zero findings is a valid, happy outcome) ·
 `1` provider failure · `2` contract violation.
 
+The built-in `claude-reviewer` runs under `DETENT_RUNTIME`: `claude-code` by
+default, or `openai-compatible` with `DETENT_OPENAI_BASE_URL` and a model
+(`--model` or `DETENT_OPENAI_MODEL`). A missing runtime setting exits `2`.
+
 ## Request schema
 ```json
 {

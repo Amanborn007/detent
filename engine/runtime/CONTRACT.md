@@ -28,7 +28,7 @@ One rule governs the schema: **every request field maps to a capability.** A run
 | `persist_session` | `false` only | `persist_session: true` |
 | `timeout_ms` | positive integer | `timeout: true` |
 
-Reserved. They are known keys, so they are not a request error, and the claude-code runtime refuses all of them: `tools: { allow: [...] }` (`tools_allow`), `deny_tools`, `add_dirs`, `budget: { usd, turns }`, `env`, `containment`. Any other key is `RuntimeRequestError`. Nothing is defaulted: an absent optional field means the adapter adds no flag for it.
+Reserved. They are known keys, so they are not a request error, and both runtimes refuse all of them: `tools: { allow: [...] }` (`tools_allow`), `deny_tools`, `add_dirs`, `budget: { usd, turns }`, `env`, `containment`. Any other key is `RuntimeRequestError`. Nothing is defaulted: an absent optional field means the adapter adds no flag for it.
 
 ## Capabilities
 
@@ -52,6 +52,7 @@ Reserved. They are known keys, so they are not a request error, and the claude-c
 | class | `code` | extra fields |
 |---|---|---|
 | `UnknownRuntimeError` | `unknown_runtime` | `requested`, `known` |
+| `RuntimeConfigError` | `bad_config` | `setting` |
 | `RuntimeRequestError` | `bad_request` | `field` |
 | `CapabilityError` | `capability_missing` | `runtime`, `capability`, `requested` |
 
@@ -63,10 +64,46 @@ Reserved. They are known keys, so they are not a request error, and the claude-c
 |---|---|---|
 | 0 | `stop` is `ok`, `budget` or `turns` | `{ ok: true, ...response, next_step }` |
 | 1 | `stop` is `error` or `timeout` | `{ ok: false, reason, next_step, response }` |
-| 2 | bad stdin JSON, `RuntimeRequestError`, `UnknownRuntimeError`, `CapabilityError` | `{ ok: false, reason, next_step }` |
+| 2 | bad stdin JSON, `RuntimeRequestError`, `UnknownRuntimeError`, `CapabilityError`, `RuntimeConfigError` | `{ ok: false, reason, next_step }` |
 
 `engine runtime capabilities [--runtime <name>]` prints `{ ok: true, runtime, capabilities, next_step }`.
 
 ## Adding a runtime
 
-Write `adapters/<name>.mjs` exporting `{ name, capabilities(), plan(req), parse(native, req) }`, all pure, register it in `runtime.mjs`, and call `conformanceSuite({ name, makeFake })` from a test. `plan` returns `{ bin, args, cwd }`. `parse` receives the raw `spawnSync` result and returns the response. The fake binary your `makeFake` returns must create `<dir>/spawned` when it starts, so the suite can prove a refused request spawned nothing.
+Write `adapters/<name>.mjs` exporting `{ name, capabilities(), plan(req, env), parse(native, req) }`, all pure, register it in `runtime.mjs`, and call `conformanceSuite({ name, makeFake })` from a test. `plan` returns `{ bin, args, cwd }`, plus optionally `env` (the child's whole environment, used instead of the parent's) and `echo_stderr: true` (the port copies the child's stderr to its own after the child exits; `raw.stderr` is unchanged). `env` defaults to `process.env`, and `getRuntime({ env })` and `createRuntime(adapter, { env })` pass another one. `plan` throws `RuntimeConfigError` when the environment is missing or unsafe, before anything spawns. `parse` receives the raw `spawnSync` result and returns the response. The fake binary your `makeFake` returns must create `<dir>/spawned` when it starts, so the suite can prove a refused request spawned nothing.
+
+## openai-compatible
+
+Sends the prompt to any server that speaks `POST {base}/chat/completions` (OpenAI, Ollama, vLLM, LM Studio). There is no default endpoint and no default model. Select it with `--runtime openai-compatible` or `DETENT_RUNTIME=openai-compatible`. Scores from the judge are not comparable across runtimes, so do not mix them in one benchmark.
+
+| env var | meaning |
+|---|---|
+| `DETENT_OPENAI_BASE_URL` (required) | `http:` or `https:` endpoint root, such as `http://127.0.0.1:11434/v1`. A trailing `/` is trimmed. `OPENAI_BASE_URL` is not read. |
+| `DETENT_OPENAI_MODEL` | model name, used when the request has no `model`. With neither, the call is refused. |
+| `DETENT_OPENAI_API_KEY_ENV` | the NAME of the variable that holds the key, not the key. If set, that variable must be non-empty. The key goes out as `Authorization: Bearer` and never appears in argv, the request JSON or the response. With none set, no header is sent, which is what Ollama wants. |
+
+`request.auth: "api_key"` also requires `DETENT_OPENAI_API_KEY_ENV`. Plain `http:` to a host other than `localhost`, `127.x.x.x` or `[::1]` is refused when a key is configured. Every refusal is a `RuntimeConfigError` whose `setting` names what to set, and the verb prints `set <setting>; see engine/runtime/CONTRACT.md (openai-compatible)` and exits 2.
+
+Capabilities: `output` text and json (both return the message content as `text`; `response_format` is not sent), `tools` none, `mcp` none, `settings_sources` none, `auth` api_key, `model`, `persist_session` (only `false` is accepted, and nothing is persisted either way) and `timeout`. `reports` is empty, so `cost_usd` and `turns` are always `null`. Token usage stays in `raw.stdout`.
+
+The plan runs `node adapters/openai-compatible-call.mjs --base-url <url> --model <m> [--api-key-env <NAME>]` with the prompt on stdin. `--bin` replaces `node`, which is how the tests substitute a fake. The helper sends `{ model, messages: [{ role: "user", content: prompt }], stream: false }` and prints one line, exit 0 whenever it classified the outcome:
+
+```
+{"protocol":"detent-openai-call-v1","ok":true,"http_status":200,"attempts":n,"body":{...}}
+{"protocol":"detent-openai-call-v1","ok":false,"class":"http"|"network"|"bad_body","http_status"?,"attempts":n,"message":"..."}
+```
+
+A nonzero helper exit is a crash and maps to kind `exit`. The key value is replaced by `[redacted]` in every field it emits.
+
+| outcome | `stop` | `error.kind` |
+|---|---|---|
+| `finish_reason` `stop` with string content | `ok` | none, `text` is the content |
+| `finish_reason` `length` | `error` | `runtime_error`, "output truncated (finish_reason length)" |
+| `content_filter`, any other or a missing `finish_reason` | `error` | `runtime_error` naming it |
+| no `choices`, non-string content, a 200 that is not JSON, stdout that is not the protocol | `error` | `bad_output` |
+| HTTP error or network failure after the retries | `error` | `runtime_error` with the status or cause and the attempt count |
+| `timeout_ms` reached | `timeout` | `timeout` |
+| node missing | `error` | `spawn` |
+| helper crash | `error` | `exit` |
+
+Retries: network errors and HTTP 408, 429, 500, 502, 503 and 504 get three attempts in all, with 500 ms then 1000 ms between them. A `Retry-After` in seconds replaces the wait, capped at 10 s. Other 4xx statuses and unparseable 200 bodies are not retried. Each retry writes `openai-compatible: attempt i/3 failed (<HTTP 503 | ECONNREFUSED>); retrying in Nms` to stderr, which the port echoes. There are no knobs. `timeout_ms` bounds the whole call, retries included, and without it there is no timeout.
