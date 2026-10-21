@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { engine, mkRepo, detentHome } from "./helpers.mjs";
+import { engine, mkCuratorClone, mkRepo, detentHome } from "./helpers.mjs";
 import { HUMAN, scratch, stubBin, setOrigin } from "./verbs-helpers.mjs";
 
 function healthy() {
@@ -66,7 +66,9 @@ esac`);
 
 test("doctor without curator on PATH fails that line", () => {
   const { repo, env } = healthy();
-  const r = engine(["doctor"], { cwd: repo, env: { ...env, PATH: "/usr/bin:/bin" } });
+  const noCurator = scratch();
+  mkCuratorClone(noCurator, null);
+  const r = engine(["doctor"], { cwd: repo, env: { ...env, PATH: "/usr/bin:/bin", TEST_CLONE: noCurator } });
   assert.equal(byName(r, "curator").status, "FAIL");
   assert.equal(r.code, 1);
 });

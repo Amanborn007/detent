@@ -1,6 +1,6 @@
 // Shared test helpers for the engine CLI test suite. Zero dependencies.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, cpSync, rmSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,11 +21,14 @@ const GIT_ENV = {
 
 /** Run the engine CLI; returns {code, json, stdout, stderr}. json = last stdout line parsed. */
 export function engine(args, opts = {}) {
-  const r = spawnSync(process.execPath, [ENGINE, ...args], {
+  // TEST_CLONE (a helper-only key, never passed on) runs the engine from a copied clone whose bundled curator is a stub.
+  const { TEST_CLONE, ...extra } = opts.env || {};
+  const bin = TEST_CLONE ? join(TEST_CLONE, "clone", "engine", "cli", "engine.mjs") : ENGINE;
+  const r = spawnSync(process.execPath, [bin, ...args], {
     encoding: "utf8",
     cwd: opts.cwd,
     input: opts.input,
-    env: { ...process.env, ...(HOME ? { DETENT_ROOT: HOME } : {}), ...(opts.env || {}) },
+    env: { ...process.env, ...(HOME ? { DETENT_ROOT: HOME } : {}), ...extra },
   });
   let json = null;
   const out = (r.stdout || "").trim();
@@ -34,6 +37,22 @@ export function engine(args, opts = {}) {
     try { json = JSON.parse(last); } catch { /* leave null; tests assert */ }
   }
   return { code: r.status, json, stdout: r.stdout, stderr: r.stderr };
+}
+
+/** Copy the engine into <dir>/clone/engine and put `stubSource` where the bundled curator CLI lives (null removes it). */
+export function mkCuratorClone(dir, stubSource) {
+  const dest = join(dir, "clone", "engine");
+  cpSync(join(dirname(ENGINE), ".."), dest, {
+    recursive: true,
+    filter: (p) => !/\/(tests?|node_modules)$/.test(p),
+  });
+  const cli = join(dest, "curator", "cli.mjs");
+  rmSync(cli, { force: true });
+  if (stubSource !== null) {
+    writeFileSync(cli, stubSource);
+    chmodSync(cli, 0o755);
+  }
+  return cli;
 }
 
 /** Make a scratch work repo (git-init'd, one commit so the default run

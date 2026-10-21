@@ -326,7 +326,7 @@ A **provider pack** in the sense of `packs/example/stack.yaml` is a different fi
 
 **Drive (experimental).** `detent drive --run <id>` runs intake, research and plan for you with one headless `claude -p --restricted` child per stage, then stops at the plan gate, at any decision, or at `before_implement`. It never implements or ships: you run those stages yourself, interactively. Each child gets file tools only (no Bash, no MCP, no web) on a read-only copy of your repo, with a scrubbed environment, and hands its work back through an outbox that drive validates before it writes any run state. The budget is `--budget` USD per invocation (default 5), enforced per child with `--max-budget-usd`; claude can overshoot by one turn. macOS and Linux, Claude Code 2.1.306 or newer. What it contains and what it does not are in `engine/cli/README.md` and [SECURITY.md](SECURITY.md).
 
-**Curator.** Serves self-contained HTML pages on `127.0.0.1` and records annotations and decisions. State is in `~/.curator`. A page may not load external scripts, fonts or images. The curator skill writes the page and runs the feedback loop in a subagent so poll output stays out of the main conversation.
+**Curator.** Serves self-contained HTML pages on `127.0.0.1` and records annotations and decisions. State and the server secret are in `.local/curator` in the clone (mode 0700). A page may not load external scripts, fonts or images. The curator skill writes the page and runs the feedback loop in a subagent so poll output stays out of the main conversation.
 
 **Sentinel.** Reads PR issue comments and review threads through `gh`, matches the author to a bot entry in the config, parses severity with the bot's patterns, and applies the bot's policy. It tracks which comments it has seen in `~/.sentinel`. It never posts.
 
@@ -395,7 +395,8 @@ In CI the `leak-gate` workflow writes the list from a repository secret named `L
 | `detent.user.yaml` | Your personal values, gitignored. |
 | `stack.yaml` | Your socket bindings, in the work repo or passed with `--stack`. |
 | `.owl/` in a work repo | Owl logs, notes and lock. Never committed by the loop. |
-| `~/.curator`, `~/.sentinel` | Curator sessions and sentinel's seen-comment list. |
+| `.local/curator/` in the clone | Curator sessions and the server secret, mode 0700. Set `CURATOR_STATE_DIR` to move it. |
+| `~/.sentinel` | Sentinel's seen-comment list. |
 
 `DETENT_ROOT` sets where `.sdlc/` and `.plans/` live. When it is unset, the engine uses the clone it runs from. Override paths with `DETENT_INBOX_DIR`, `DETENT_COURIER_DIR` and `DETENT_TEAM_PROFILES`. Run `scripts/migrate-local-state.sh` once if you have state from an older `~/.detent` layout. It copies and never deletes.
 

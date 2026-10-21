@@ -210,7 +210,9 @@ Worked BAD→GOOD example: see "Writing style (mandatory)" in
 node "${CLAUDE_PLUGIN_ROOT:-${DETENT_ROOT:-.}}/engine/curator/cli.mjs" open .plans/<slug>.html
 ```
 
-It prints `{url, next_step}` and opens the browser. Then poll — as a
+It prints `{url, next_step}` and opens the browser. The `url` ends in `#c=...&r=...`,
+which are access keys: hand the link to the user, but do not paste it into a
+ticket, a PR or a comment. Then poll — as a
 BACKGROUND task, because the harness may kill long-running foreground
 commands:
 

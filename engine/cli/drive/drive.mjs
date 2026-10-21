@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { readOutbox, validateDecisions, secretScan } from "./outbox.mjs";
 import { createStateTracker } from "./integrity.mjs";
+import { resolveStateDir } from "../../curator/auth.mjs";
 import { optionKey } from "../../handoff/handoff.mjs";
 import {
   validateDriveProfile, buildChildSettings, buildChildArgs, buildChildEnv, versionAtLeast, MIN_CLAUDE_VERSION,
@@ -478,6 +479,18 @@ function envPanel(E, runDir) {
   return `<h2>Proposed by the child (not run, not trusted)</h2>\n<p class="sub">Nothing downstream reads this. Promote a command yourself with engine env if you want it used.</p>\n<pre>${lines.map((l) => E.escapeHtml(l)).join("\n")}</pre>`;
 }
 
+// The server secret lives here, so the child gets deny rules for it, resolved through any symlinks in the path.
+function curatorStateDirFor(E) {
+  const dir = resolve(resolveStateDir({ ...process.env, DETENT_ROOT: E.detentRoot() }));
+  let existing = dir;
+  const tail = [];
+  while (!existsSync(existing) && dirname(existing) !== existing) {
+    tail.unshift(existing.slice(dirname(existing).length + 1));
+    existing = dirname(existing);
+  }
+  return join(realpathSync(existing), ...tail);
+}
+
 function stopForHuman(E, ctx, stage, blockers, collectError) {
   const { runId, runDir } = ctx;
   const noteHtml = `<p class="sub">${E.escapeHtml(INTENT_NOTE)}</p>\n${accessPanel(E, runDir)}\n${envPanel(E, runDir)}`;
@@ -485,9 +498,9 @@ function stopForHuman(E, ctx, stage, blockers, collectError) {
     name: blockers[0].gate || blockers[0].id, stage, decisions: blockers, noteHtml,
   });
   let url;
-  const curator = E.curatorOnPath();
+  const curator = E.siblingCurator();
   if (curator) {
-    const r = spawnSync(curator, ["open", html], { encoding: "utf8", timeout: 30000 });
+    const r = spawnSync(process.execPath, [curator, "open", html], { encoding: "utf8", timeout: 30000 });
     if (r.status === 0) {
       try { url = JSON.parse(r.stdout.trim().split("\n").pop()).url; } catch { /* the page still exists on disk */ }
     } else {
@@ -763,7 +776,9 @@ export async function cmdDrive(flags, E) {
     const io = prepareInputs(E, ctx, stage, ctx.steps);
     const settingsFile = join(runDir, ".drive", `settings-${ctx.steps}.json`);
     if (apiKey) writeFileSync(ST.keyFile, apiKey, { mode: 0o600 });
-    const settings = buildChildSettings(base, { inputs: io.inputs, outbox: io.outbox, apiKeyFile: apiKey ? ST.keyFile : null });
+    const settings = buildChildSettings(base, {
+      inputs: io.inputs, outbox: io.outbox, apiKeyFile: apiKey ? ST.keyFile : null, curatorStateDir: curatorStateDirFor(E),
+    });
     writeAtomic(settingsFile, JSON.stringify(settings, null, 2) + "\n");
     const { env, literals } = buildChildEnv(process.env, { tmpdir: io.tmp, sandboxRoot: sandboxTop });
     const args = buildChildArgs({

@@ -15,8 +15,8 @@ Design decisions it implements (from the wiring blueprint):
   command. No orchestrator prompt.
 - **D7** — curator is integrated **by contract, never vendored**: `gate open`
   writes a gate-request artifact and a gate page, and prints `curator open` and
-  `engine gate collect` when a `curator` executable is on PATH, else a terminal
-  fallback.
+  `engine gate collect` when the curator CLI bundled in the same clone exists (a
+  `curator` found on PATH is never used), else a terminal fallback.
 - **D8** — `socket call` dispatches three kinds: `exec` (argv spawn, JSON on
   stdin), `skill`, `mcp_tool`. The CLI cannot invoke skills or MCP tools — for
   those it prints a structured instruction block for the invoking agent.
@@ -144,7 +144,7 @@ the gate-request artifact `.sdlc/<run>/gates/<gate-id>.json`
 (`{run_id, gate_id, stage, playbook, artifact_path, context_paths[], decision}`),
 then:
 
-- **curator on PATH** → writes `<DETENT_ROOT>/.plans/<run>-<gate>.html` and
+- **bundled curator CLI present** → writes `<DETENT_ROOT>/.plans/<run>-<gate>.html` and
   prints `curator open <html>`, then `engine gate collect --run <id>`, as
   `next_step`. The page has one `data-plan-question` block per pending decision
   that blocks the same stages, with each option as a `data-plan-option`, and the

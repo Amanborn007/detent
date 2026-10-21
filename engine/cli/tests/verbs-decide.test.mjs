@@ -3,13 +3,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { engine, mkRun } from "./helpers.mjs";
+import { engine, mkCuratorClone, mkRun } from "./helpers.mjs";
 import { HUMAN, scratch, stubBin, toIntentGate, decisionsOf, BARE_PATH } from "./verbs-helpers.mjs";
 
 test("decide without curator prints the terminal fallback the gate already has", () => {
   const ctx = mkRun();
   toIntentGate(ctx);
-  const r = engine(["decide"], { cwd: ctx.repo, env: { ...HUMAN, PATH: BARE_PATH } });
+  const noCurator = scratch();
+  mkCuratorClone(noCurator, null);
+  const r = engine(["decide"], { cwd: ctx.repo, env: { ...HUMAN, PATH: BARE_PATH, TEST_CLONE: noCurator } });
   assert.equal(r.code, 0, r.stdout + r.stderr);
   assert.equal(r.json.mode, "terminal_fallback");
   assert.equal(r.json.run_id, ctx.runId);
@@ -23,12 +25,14 @@ test("decide opens curator, blocks on poll, collects the answer, prints the next
   const bin = scratch();
   const log = join(scratch(), "curator.log");
   const answer = JSON.stringify({ status: "feedback", prompts: [{ type: "decision", question: gate.id, answer: "approve" }] });
-  stubBin(bin, "curator", `echo "$@" >> "${log}"
-case "$1" in
-  open) echo '{"url":"http://127.0.0.1:9/s","key":"'"$2"'"}' ;;
-  poll) echo '${answer}' ;;
-esac`);
-  const r = engine(["decide"], { cwd: ctx.repo, env: { ...HUMAN, PATH: `${bin}:${BARE_PATH}` } });
+  mkCuratorClone(bin, `#!${process.execPath}
+import { appendFileSync } from "node:fs";
+const a = process.argv.slice(2);
+appendFileSync(${JSON.stringify(log)}, a.join(" ") + "\\n");
+if (a[0] === "open") console.log(JSON.stringify({ url: "http://127.0.0.1:9/s", key: a[1] }));
+if (a[0] === "poll") console.log(${JSON.stringify(answer)});
+`);
+  const r = engine(["decide"], { cwd: ctx.repo, env: { ...HUMAN, PATH: BARE_PATH, TEST_CLONE: bin } });
   assert.equal(r.code, 0, r.stdout + r.stderr);
   const calls = readFileSync(log, "utf8").trim().split("\n");
   assert.match(calls[0], /^open .*intent\.html$/);

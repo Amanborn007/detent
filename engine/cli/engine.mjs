@@ -1054,21 +1054,16 @@ function cmdStep(label, flags) {
 // ---------------------------------------------------------------------------
 // engine gate open <gate-id>
 // Renders a pending gate. Curator is integrated BY CONTRACT (blueprint D7):
-// if a `curator` executable is on PATH we write/refresh the gate artifact and
-// print the curator open+poll commands; otherwise we print a terminal
-// fallback. This CLI never answers a decision — only a human does.
+// if the curator CLI bundled in this clone exists we write/refresh the gate artifact and
+// print the curator open+poll commands; otherwise we print a terminal fallback. This CLI never answers a decision — only a human does.
 // ---------------------------------------------------------------------------
 
-function curatorOnPath() {
-  for (const dir of (process.env.PATH || "").split(delimiter)) {
-    if (!dir) continue;
-    const candidate = join(dir, "curator");
-    try {
-      accessSync(candidate, constants.X_OK);
-      if (statSync(candidate).isFile()) return candidate;
-    } catch { /* not here */ }
-  }
-  return null;
+// Only the curator beside this engine is ever used for gates: a `curator` found elsewhere on PATH
+// could hold a different secret or be a stand-in that answers for a human.
+const CURATOR_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "curator", "cli.mjs");
+
+function siblingCurator() {
+  return existsSync(CURATOR_CLI) ? resolve(CURATOR_CLI) : null;
 }
 
 function cmdGateOpen(gateId, flags) {
@@ -1163,7 +1158,7 @@ function cmdGateOpen(gateId, flags) {
     });
   }
 
-  const curator = curatorOnPath();
+  const curator = siblingCurator();
   if (curator) {
     const html = renderGateArtifact({ runId, runDir }, {
       name: decision.gate || decision.id,
@@ -1179,7 +1174,7 @@ function cmdGateOpen(gateId, flags) {
       html,
       ...(parkHandoff || {}),
       next_step:
-        `curator open ${html} ; once the human has answered there, run: engine gate collect --run ${runId}` +
+        `curator open ${html} (run this clone's CLI: node ${curator} open ${html}) ; once the human has answered there, run: engine gate collect --run ${runId}` +
         ` — it maps the curator answer into decisions.json; then re-run the refused engine command`,
     });
   }
@@ -1191,7 +1186,7 @@ function cmdGateOpen(gateId, flags) {
     gate_artifact: gateArtifact,
     ...(parkHandoff || {}),
     next_step:
-      `curator is not on PATH. A HUMAN must answer decision ${decision.id} by editing ` +
+      `the curator CLI is missing from this clone. A HUMAN must answer decision ${decision.id} by editing ` +
       `${join(runDir, "decisions.json")}: set status:"answered", answer:<one of ${JSON.stringify(decision.options || [])}>, ` +
       `answered_by:"human", answered_at:<ISO-8601>. Agents never write answers. Then re-run the refused engine command.`,
   });
@@ -1338,11 +1333,11 @@ function parseFeedbackText(text, label) {
 
 /** Run `curator drain` and return the prompts addressed to this run's gate pages. */
 function drainCuratorFor(runId, runDir) {
-  const curator = curatorOnPath();
-  if (!curator) return { items: [], note: "curator not on PATH" };
+  const curator = siblingCurator();
+  if (!curator) return { items: [], note: "curator CLI missing from this clone" };
   const htmls = gateHtmlsOf(runId, runDir);
   if (htmls.size === 0) return { items: [], note: "no gate page rendered for this run yet" };
-  const r = spawnSync(curator, ["drain", ...htmls], { encoding: "utf8", timeout: 30000 });
+  const r = spawnSync(process.execPath, [curator, "drain", ...htmls], { encoding: "utf8", timeout: 30000 });
   if (r.error) throw new Error(`curator drain could not run: ${r.error.message}`);
   if (r.status !== 0) throw new Error(`curator drain exited ${r.status}: ${(r.stdout + r.stderr).trim().slice(-400)}`);
   const items = [];
@@ -1442,7 +1437,7 @@ function driveInjection() {
   return {
     STAGES, STAGE_ARTIFACTS, STAGE_END_GATES, out, refuse, fail, nowIso, readJson, appendEvent, detentRoot, repoOf, findRun,
     loadStatus, loadDecisions, saveDecisions, nextDecisionId, pendingBlockers, syncGateAnsweredEvents, beginStage, endStage,
-    raiseEndGate, renderGateArtifact, drainCuratorFor, collectResult, curatorOnPath, escapeHtml, parseYamlSubset, runExec,
+    raiseEndGate, renderGateArtifact, drainCuratorFor, collectResult, siblingCurator, escapeHtml, parseYamlSubset, runExec,
     engineFile: ENGINE_FILE,
   };
 }
@@ -1990,10 +1985,8 @@ function cmdDashboard() {
   let openHint;
   if (existsSync(curatorCli)) {
     openHint = `node ${curatorCli} open ${artifact} — review all runs in curator (delegate the open/poll loop to a subagent)`;
-  } else if (curatorOnPath()) {
-    openHint = `curator open ${artifact} — review all runs in curator (delegate the open/poll loop to a subagent)`;
   } else {
-    openHint = `open ${artifact} in a browser (curator CLI not found at ${curatorCli} and not on PATH)`;
+    openHint = `open ${artifact} in a browser (curator CLI not found at ${curatorCli})`;
   }
   out({
     ok: true,
@@ -2034,9 +2027,7 @@ function cmdLive(runId, flags) {
   const curatorCli = join(root, "engine", "curator", "cli.mjs");
   const openHint = existsSync(curatorCli)
     ? `node ${curatorCli} open ${artifact} — watch this run live (delegate the open/poll loop to a subagent)`
-    : curatorOnPath()
-      ? `curator open ${artifact} — watch this run live`
-      : `open ${artifact} in a browser (curator CLI not found at ${curatorCli} and not on PATH)`;
+    : `open ${artifact} in a browser (curator CLI not found at ${curatorCli})`;
 
   const eventsPath = join(runDir, "events.jsonl");
   const statusPath = join(runDir, "stage-status.json");
@@ -2528,13 +2519,13 @@ function cmdDecide(flags) {
     const hint = hasApproveRevise(waiting) ? ' If you are at your own terminal you can run: detent approve  or  detent revise --note "<why>".' : "";
     out({ ...opened.json, ...info, next_step: `${opened.json.next_step}${hint}` });
   }
-  const curator = curatorOnPath();
-  if (!curator) fail("curator was on PATH for gate open but not now", "check `which curator`");
+  const curator = siblingCurator();
+  if (!curator) fail("the bundled curator CLI disappeared after gate open", "check engine/curator/cli.mjs in this clone");
   const html = opened.json.html;
-  const o = spawnSync(curator, ["open", html], { encoding: "utf8" });
+  const o = spawnSync(process.execPath, [curator, "open", html], { encoding: "utf8" });
   if (o.error || o.status !== 0) fail(`curator open failed: ${(o.error?.message || o.stdout + o.stderr).trim().slice(-300)}`, `curator open ${html}`);
   process.stderr.write(`decide: ${waiting.id} on run ${runId} (${ticket}) is open in curator; waiting for your answer\n`);
-  const p = spawnSync(curator, ["poll", html], { encoding: "utf8", stdio: ["inherit", "pipe", "inherit"] });
+  const p = spawnSync(process.execPath, [curator, "poll", html], { encoding: "utf8", stdio: ["inherit", "pipe", "inherit"] });
   if (p.error || p.status !== 0) fail(`curator poll failed: ${(p.error?.message || p.stdout).trim().slice(-300)}`, `curator poll ${html}, then detent gate collect`);
   const feedback = join(mkdtempSync(join(tmpdir(), "detent-decide-")), "feedback.json");
   writeFileSync(feedback, p.stdout.trim().split("\n").pop());
@@ -2610,8 +2601,8 @@ function cmdDoctor(flags) {
     add("gh push access", can, can ? `the active account can push to ${origin.owner}/${origin.repo}`
       : `the active account cannot push to ${origin.owner}/${origin.repo}; switch with gh auth switch (doctor never switches for you)`);
   }
-  const curator = curatorOnPath();
-  add("curator", !!curator, curator || "curator is not on PATH, so review pages cannot open");
+  const curator = siblingCurator();
+  add("curator", !!curator, curator || "the curator CLI bundled in this clone is missing, so review pages cannot open");
 
   const stackPath = [join(repo, "stack.yaml"), join(repo, "engine", "stack.yaml")].find((p) => existsSync(p));
   let stack = null;
@@ -3257,7 +3248,7 @@ function cmdHelp() {
       "run new": "engine run new --ticket <ref> [--repo <path>] [--slug <slug>] [--no-worktree] — create a run under the centralized <DETENT_ROOT>/.sdlc/ with a dedicated git worktree (the default flow)",
       "stage begin": "engine stage begin <stage> [--run <id>] [--repo <path>] — enter a stage (refuses illegal transitions)",
       "stage end": "engine stage end <stage> [--run <id>] [--repo <path>] — finish a stage (checks artifact + gates). implement: [--tdd-test <name> --tdd-red <sha> --tdd-green <sha> | --tdd-exempt <reason>] records the tdd block (implement records, never judges). recheck: asserts red_sha is an ancestor of green_sha via git cat-file/merge-base, proving ORDER only, never that the test was observed failing.",
-      "gate open": "engine gate open <gate-name-or-decision-id> [--run <id>] [--repo <path>] — render a pending human gate; with curator on PATH it writes <DETENT_ROOT>/.plans/<run>-<gate>.html (one data-plan-question block per pending decision, stage artifacts embedded) and prints `curator open` then `engine gate collect`",
+      "gate open": "engine gate open <gate-name-or-decision-id> [--run <id>] [--repo <path>] — render a pending human gate; with the bundled curator CLI present it writes <DETENT_ROOT>/.plans/<run>-<gate>.html (one data-plan-question block per pending decision, stage artifacts embedded) and prints `curator open` then `engine gate collect`",
       "gate collect": "engine gate collect --run <id> [--file <feedback.json>] — non-blocking: map curator answers into decisions.json (only an exact decision option resolves one; null/other answers stay pending and are listed under `unresolved`); selection/prompt feedback is appended to <run>/review-feedback.jsonl. Without --file it runs `curator drain` for the run's gate pages only.",
       "drive": "engine drive --run <id> [--stack <path>] [--budget 5] [--model claude-sonnet-5-5] [--max-steps 12] [--child-timeout-sec 3600] [--profile <file>] [--claude-bin <b>] — experimental (macOS/Linux, spends Claude credit): runs intake, research and plan with one contained `claude -p --restricted` child per stage (file tools only, no Bash, allowlisted env, read-only repo export, outbox validated by drive), then always stops: at the plan gate or a decision (stopped:needs_human), at before_implement, at --max-steps, at --budget, or on a failure (state_tampered, outbox_rejected, secret_detected, child_*). Child text goes to <run>/drive-last.json, never stdout. --allow-ship is refused; implement and ship stay interactive.",
       "runtime run": "engine runtime run [--runtime <name>] [--bin <path>] — run one prompt through a model runtime (default claude-code; --runtime beats DETENT_RUNTIME). Request JSON on stdin (prompt, cwd, output, tools, mcp, settings are required; schema in engine/runtime/CONTRACT.md). Prints one JSON line {ok:true, ...response} and exits 0 for stop ok|budget|turns, exits 1 {ok:false, reason, next_step, response} for stop error|timeout, and exits 2 for bad JSON, an unknown field, an unknown runtime, or a field the runtime does not declare",
