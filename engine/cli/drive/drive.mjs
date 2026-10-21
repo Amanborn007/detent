@@ -294,16 +294,16 @@ function prepareInputs(E, ctx, stage, stepN) {
   ST.stepDir = stepDir;
   ST.outbox = dirs.outbox;
   const nonce = randomBytes(16).toString("hex");
-  const put = (name, data) => writeFileSync(join(dirs.inputs, name), data);
-  const copyIf = (src, name) => { if (existsSync(src)) copyFileSync(src, join(dirs.inputs, name)); };
+  const written = [];
+  const put = (name, data) => { writeFileSync(join(dirs.inputs, name), data); written.push(name); };
+  const copyIf = (src, name) => { if (existsSync(src)) { copyFileSync(src, join(dirs.inputs, name)); written.push(name); } };
+  const copyRequired = (src, name) => {
+    if (!existsSync(src)) stopFail(E, ctx, "inputs_artifact_missing", `${name} is missing from the run directory; re-run the stage that writes it`, { stage, detail: src });
+    copyIf(src, name);
+  };
   const stagesDir = join(dirname(E.engineFile), "..", "stages");
   put("SKILL.md", readFileSync(join(stagesDir, stage, "SKILL.md")));
   put("DRIVEN.md", readFileSync(join(stagesDir, "DRIVEN.md")));
-  put("step.json", JSON.stringify({
-    schema: "detent-drive-step-v1", run_id: runId, stage, step: stepN, nonce,
-    outputs: STAGE_OUTPUTS[stage],
-    required_headings: Object.fromEntries(STAGE_OUTPUTS[stage].filter((f) => REQUIRED_HEADINGS[f]).map((f) => [f, REQUIRED_HEADINGS[f]])),
-  }, null, 2));
   const run = E.readJson(join(runDir, "run.json"));
   put("run.json", JSON.stringify({ run_id: runId, ticket_ref: run.ticket_ref, created_at: run.created_at }, null, 2));
   put("decisions.json", JSON.stringify(E.loadDecisions(runDir), null, 2));
@@ -319,19 +319,25 @@ function prepareInputs(E, ctx, stage, stepN) {
     if (!t.ok) stopFail(E, ctx, "ticket_fetch_failed", "fix the ticket provider in stack.yaml, then re-run", { stage, detail: t.stderr });
     put("ticket.json", JSON.stringify(t.response, null, 2));
   }
-  if (stage !== "intake") copyIf(join(runDir, "brief.md"), "brief.md");
+  if (stage !== "intake") copyRequired(join(runDir, "brief.md"), "brief.md");
   if (stage === "research") {
     const brief = readFileSync(join(runDir, "brief.md"), "utf8");
     const query = section(brief, "## Goal").split("\n")[0] || String(run.ticket_ref);
     put("knowledge.json", JSON.stringify(runKnowledge(E, stack, query, String(run.ticket_ref)), null, 2));
   }
   if (stage === "plan") {
-    copyIf(join(runDir, "research.md"), "research.md");
-    copyIf(join(runDir, "access-report.json"), "access-report.json");
+    copyRequired(join(runDir, "research.md"), "research.md");
+    copyRequired(join(runDir, "access-report.json"), "access-report.json");
   }
+  const inputs = [...written, "step.json"].sort();
+  put("step.json", JSON.stringify({
+    schema: "detent-drive-step-v1", run_id: runId, stage, step: stepN, nonce, inputs,
+    outputs: STAGE_OUTPUTS[stage],
+    required_headings: Object.fromEntries(STAGE_OUTPUTS[stage].filter((f) => REQUIRED_HEADINGS[f]).map((f) => [f, REQUIRED_HEADINGS[f]])),
+  }, null, 2));
   lockedDown(dirs.inputs);
   chmodSync(dirs.cwd, 0o555);
-  return { ...dirs, nonce, stepDir };
+  return { ...dirs, nonce, stepDir, inputFiles: inputs };
 }
 
 // ---------------------------------------------------------------------------
@@ -791,7 +797,9 @@ export async function cmdDrive(flags, E) {
       `Inputs directory: ${io.inputs}`,
       `Outbox directory: ${io.outbox}`,
       "",
-      `Read ${join(io.inputs, "DRIVEN.md")} first, then ${join(io.inputs, "SKILL.md")}, then the other files in the inputs directory.`,
+      `Read ${join(io.inputs, "DRIVEN.md")} first, then ${join(io.inputs, "SKILL.md")}, then each of these files by path:`,
+      ...io.inputFiles.filter((f) => f !== "DRIVEN.md" && f !== "SKILL.md").map((f) => `- ${join(io.inputs, f)}`),
+      `Search ${join(io.inputs, "repo")} only for code.`,
       "DRIVEN.md overrides every engine, curator and gh step in the skill. Write only into the outbox directory.",
       `Finish by writing ${join(io.outbox, "manifest.json")} as DRIVEN.md describes.`,
     ].join("\n");
