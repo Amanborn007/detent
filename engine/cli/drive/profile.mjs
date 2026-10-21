@@ -6,7 +6,7 @@ export const CHILD_TOOLS = "Read,Glob,Grep,Write,Edit,TodoWrite";
 export const STATIC_DENY = ["WebFetch", "WebSearch", "Task", "Agent", "Skill", "NotebookEdit"];
 
 const ENV_ALLOW = new Set(["PATH", "HOME", "USER", "LANG", "TERM", "SHELL", "TMPDIR"]);
-const SECRET_NAME = /TOKEN|KEY|SECRET|PASS|CRED|AUTH|COOKIE|SESSION/i;
+export const SECRET_NAME =/TOKEN|KEY|SECRET|PASS|CRED|AUTH|COOKIE|SESSION/i;
 const OUTBOX_RULE = /^(Write|Edit)\(\/\/[^()]+\/\*\*\)$/;
 
 export function parseVersion(text) {
