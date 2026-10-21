@@ -39,6 +39,7 @@ if (mode === "fenced") console.log(env("\`\`\`json\\n" + JSON.stringify({ findin
 if (mode === "badenum") console.log(env(JSON.stringify({ findings: [{ ...good, action: "yolo" }] })));
 if (mode === "badrisk") console.log(env(JSON.stringify({ findings: [{ ...good, risk_level: "meh" }] })));
 if (mode === "badloc") console.log(env(JSON.stringify({ findings: [{ ...good, location: "somewhere" }] })));
+if (mode === "array") console.log(JSON.stringify([{ type: "system", subtype: "init" }, { type: "assistant" }, JSON.parse(env(JSON.stringify({ findings: [good] })))]));
 if (mode === "nonjson") console.log(env("looks fine to me"));
 if (mode === "noenvelope") console.log("not an envelope");
 `);
@@ -80,6 +81,13 @@ test("fenced JSON result is accepted", () => {
   const r = run(req(mkRepo()), { mode: "fenced" });
   assert.equal(r.code, 0, r.stderr);
   assert.deepEqual(r.json.findings, [GOOD]);
+});
+
+test("the message-array envelope that claude 2.1 prints is accepted", () => {
+  const r = run(req(mkRepo()), { mode: "array" });
+  assert.equal(r.code, 0, r.stderr + JSON.stringify(r.json));
+  assert.deepEqual(r.json.findings, [GOOD]);
+  assert.match(r.stderr, /0\.0123/);
 });
 
 test("envelope cost is logged to stderr", () => {
