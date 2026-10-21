@@ -150,7 +150,7 @@ Type them as `/detent:<skill>`.
 
 ## Status
 
-Early, v0.11.0. Most of it waits for you, but a few hooks run on their own, for example a review prompt after `git push`. [What runs without asking](docs/REFERENCE.md#what-runs-without-asking-you) lists every one and its kill switch. The stages have not yet run end to end on a public project, and a worked example is coming.
+Early, v0.11.0. Most of it waits for you, but a few hooks run on their own, for example a review prompt after `git push`. [What runs without asking](docs/REFERENCE.md#what-runs-without-asking-you) lists every one and its kill switch. One run of all seven stages is committed as a [worked example](docs/examples/2026-10-20-amanborn007-detent-demo-1/), and it produced [this demo PR](https://github.com/Amanborn007/detent-demo/pull/2).
 
 ## Read more
 

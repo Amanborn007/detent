@@ -297,10 +297,10 @@ This is early software. Here is what is and is not checked.
 - **Not in CI:** the engine CLI tests, sentinel tests, hook tests, adapter smoke tests and the owl tests. They exist in the repo and are listed in [CONTRIBUTING.md](../CONTRIBUTING.md). Run them before you push.
 - **Owl** is tested against a stub `claude` binary, not the real one.
 - **The autoscan hook** is tested with stubbed `gh` output, not against a live PR in this repo.
-- **The stages** are prompts plus a state machine. They have not been run end to end on a public project.
+- **The stages** are prompts plus a state machine. They have been run once end to end on [Amanborn007/detent-demo#1](examples/2026-10-20-amanborn007-detent-demo-1/).
 - **Known gaps.** The stage prompts in `engine/stages/` are not registered as plugin skills, so you point Claude at them by path. Two hook files, `hooks/cold-resume-warn.mjs` and `hooks/session-cost-statusline.mjs`, are on disk but not wired in `hooks.json`, and eval case S1-11 fails because of it.
 
-A worked example is planned: a full run on a small public repo, with the run directory committed.
+A worked example is committed: a full run on a small public repo, with the run directory in [docs/examples/2026-10-20-amanborn007-detent-demo-1/](examples/2026-10-20-amanborn007-detent-demo-1/) and the resulting [demo PR](https://github.com/Amanborn007/detent-demo/pull/2).
 
 ## Credits
 

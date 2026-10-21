@@ -1,0 +1,38 @@
+C1 result is at most maxLength characters
+  maxLength 5
+  => "hello (length 5)"
+  maxLength 11
+  => "hello-brave (length 11)"
+  maxLength 12
+  => "hello-brave (length 11)"
+  maxLength 13
+  => "hello-brave (length 11)"
+C2 cut lands on a separator
+  maxLength 13
+  => "hello-brave"
+  separator "--", maxLength 7, "ab cd ef"
+  => "ab--cd"
+C3 first word longer than maxLength is cut
+  maxLength 5, "Supercalifragilistic expialidocious"
+  => "super"
+C4 never ends in the separator
+  maxLength 12
+  => "hello-brave"
+  separator "--", maxLength 3, "ab cd"
+  => "ab"
+C5 RangeError below 1 or not an integer
+  maxLength 0
+  => RangeError: maxLength must be an integer of at least 1
+  maxLength -1
+  => RangeError: maxLength must be an integer of at least 1
+  maxLength 2.5
+  => RangeError: maxLength must be an integer of at least 1
+  maxLength "10"
+  => RangeError: maxLength must be an integer of at least 1
+  maxLength NaN
+  => RangeError: maxLength must be an integer of at least 1
+C6 unchanged without maxLength, and with null per D-001
+  no options
+  => "hello-brave-new-world"
+  maxLength null
+  => "hello-brave-new-world"
