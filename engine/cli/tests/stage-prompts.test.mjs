@@ -91,3 +91,16 @@ test("plan asks why rejected options lost and implement records dead ends and en
   assert.match(impl, /detent env --run <id> --verify "<cmd>"/);
   assert.match(impl, /incomplete/i);
 });
+
+test("respond names which sentinel config to use and never touches the personal one", () => {
+  const respond = read("respond/SKILL.md");
+  assert.ok(!respond.includes("--config <config.json>"), "respond still has the --config <config.json> placeholder");
+  assert.match(respond, /config\/sentinel\/default\.json/);
+  assert.match(respond, /SENTINEL_CONFIG/);
+  assert.match(respond, /~\/\.sentinel/);
+});
+
+test("respond runs engine subcommands as detent in shell commands", () => {
+  const respond = read("respond/SKILL.md");
+  assert.ok(!/`engine (bench|respond)\b/.test(respond), "respond still tells the shell to run `engine <cmd>`");
+});
