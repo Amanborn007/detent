@@ -36,3 +36,12 @@ test("plan uses the engine's intent gate instead of filing a second approval", (
 test("plan does not ask for status badges, which curator's check refuses", () => {
   assert.ok(!/badge/i.test(read("plan/SKILL.md")));
 });
+
+test("run state is placed in DETENT_ROOT/.sdlc, not the work repo's main checkout", () => {
+  for (const f of docs) {
+    const s = read(f);
+    assert.ok(!/main checkout/i.test(s), `${f} still puts run state in the main checkout`);
+    assert.ok(!s.includes("--git-common-dir` → its parent"), `${f} derives the run dir from git`);
+  }
+  assert.match(read("implement/SKILL.md"), /\$\{DETENT_ROOT\}\/\.sdlc\//);
+});
