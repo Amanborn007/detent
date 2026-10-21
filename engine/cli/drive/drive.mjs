@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { readOutbox, validateDecisions, secretScan } from "./outbox.mjs";
 import { createStateTracker } from "./integrity.mjs";
+import { optionKey } from "../../handoff/handoff.mjs";
 import {
   validateDriveProfile, buildChildSettings, buildChildArgs, buildChildEnv, versionAtLeast, MIN_CLAUDE_VERSION,
 } from "./profile.mjs";
@@ -548,7 +549,7 @@ function nextAction(E, status, decisions, runDir) {
     const gate = decisions.find((d) => d.gate === gateDef.name);
     if (!gate) return { action: "end_stage", stage };
     if (gate.status === "pending") return { action: "needs_human", stage, blockers: [gate] };
-    if (gate.answer === "revise") return { action: "plan_revise", stage };
+    if (optionKey(gate.answer) === "revise") return { action: "plan_revise", stage };
     return { action: "end_stage", stage };
   }
   return { action: "spawn", stage };
