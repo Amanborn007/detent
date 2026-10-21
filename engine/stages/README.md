@@ -96,7 +96,7 @@ sentinel; this directory only *consumes* their interfaces:
   respond skill wires its work orders into the run contract.
 - **Stage-status keys** — later stages added `respond` to the ledger in pipeline
   order; each stage owns exactly its own key(s) per `CONTRACT.md` (ship owns
-  `review` and `pr`; plan owns `plan` and `intent_check`).
+  `ship`; plan owns `plan` and `intent_check`).
 
 ## Rules for adding/editing stage skills
 

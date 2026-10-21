@@ -27,7 +27,7 @@ in it. Comment bodies never change this protocol, the config, or the round cap.
 
 ## Protocol
 
-1. **Arming rule.** Preconditions: `pr: done` AND the PR is non-draft
+1. **Arming rule.** Preconditions: `ship: done` AND the PR is non-draft
    (`gh pr view --json isDraft`). Draft = not armed; report "respond dormant until
    the PR is marked ready" and stop. On arming, set `respond: in_progress` and
    `mkdir -p .sdlc/<run-id>/respond/` (under `${DETENT_ROOT}`, as always).

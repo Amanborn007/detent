@@ -174,8 +174,8 @@ at src/sender.ts:102); D-002 honored; D-006 honored (no dashboard).
 Material divergences → the conditional drift gate:
 
 ```json
-{"id": "D-007", "raised_by": "recheck", "blocks": ["review"], "question": "Step 3 implemented via queue re-enqueue, not the planned scheduler hook (e4f5a6b, src/sender.ts:95). Accept deviation / route back to plan / route back to implement?", "status": "pending"},
-{"id": "D-008", "raised_by": "recheck", "blocks": ["review"], "question": "Extra retry_count metrics counter with no plan step (c7d8e9f). Accept / route back?", "status": "pending"}
+{"id": "D-007", "raised_by": "recheck", "blocks": ["ship"], "question": "Step 3 implemented via queue re-enqueue, not the planned scheduler hook (e4f5a6b, src/sender.ts:95). Accept deviation / route back to plan / route back to implement?", "status": "pending"},
+{"id": "D-008", "raised_by": "recheck", "blocks": ["ship"], "question": "Extra retry_count metrics counter with no plan step (c7d8e9f). Accept / route back?", "status": "pending"}
 ```
 
 `recheck: done` (the report is the artifact; the decisions do the gating).
@@ -190,7 +190,7 @@ Ordered sub-steps, in the worktree:
    low/`auto-fix` "missing changelog entry" (applied, tests re-run, socket re-invoked
    once → clean) and a high/`ask-user`: *"New retry path can re-deliver a webhook
    twice — receivers must be idempotent; confirm this is acceptable downstream"*
-   (src/sender.ts:95). Filed **verbatim** as **D-009**, blocks `pr`. Ship pauses;
+   (src/sender.ts:95). Filed **verbatim** as **D-009**, blocks `ship`. Ship pauses;
    the human answers "acceptable — receiver contract requires idempotency".
 2. **VERIFY.** `sockets.verifier` called with `claims` = the brief's three criteria.
    Response: `verdict: pass`, 217 tests green, and per-claim evidence — e.g.
@@ -205,7 +205,7 @@ Ordered sub-steps, in the worktree:
    the drafted PR body — then asks before pushing. Human: "ship it."
 6. Push + `gh pr create --draft` → `acmeco/notify-service#517`, body carrying run-id,
    plan summary, the evidence manifest, and D-009 with its human answer.
-   `review: done`, `pr: done` (PR URL recorded). Still a draft.
+   `ship: done` (PR URL recorded). Still a draft.
 
 ## Stage 9 — `/sdlc-respond 2026-07-04-proj-2534-retry-webhooks`
 
