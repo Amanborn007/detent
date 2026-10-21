@@ -1,11 +1,11 @@
-# Render from the repo root:  vhs docs/demo/demo.tape
+# Render from the repo root:  vhs docs/demo/demo.tape   (or: node docs/demo/render-fallback.mjs)
 # Offline and deterministic: no LLM, no network, no credentials. Runs the real engine on a throwaway repo.
 Output docs/demo/demo.gif
 
 Set Shell "bash"
-Set FontSize 20
+Set FontSize 18
 Set Width 1100
-Set Height 640
+Set Height 540
 Set Padding 24
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 35ms
@@ -16,28 +16,14 @@ Type "source docs/demo/demo-env.sh" Enter
 Sleep 2s
 Show
 
-Type "# detent walks a ticket through gated stages. The engine is the state machine." Enter
+Type "# one ticket, setup to plan gate. A stub stands in for the tracker, so this is offline." Enter
 Sleep 2s
-Type "detent run new --ticket DEMO-42 --slug banner --no-worktree | pj" Enter
+Type "detent setup --repo . | say setup" Enter
+Sleep 2s
+Type "detent run new --ticket acme/widgets#1 --repo . | say run" Enter
+Sleep 2s
+Type "# Claude writes each stage's file. Canned files stand in. The engine checks are real." Enter
+Type "stages" Enter
 Sleep 4s
-
-Type "detent next | pj" Enter
-Sleep 4s
-
-Type "# try to skip ahead to plan" Enter
-Type "detent stage begin plan | pj" Enter
+Type "detent gate open intent | say gate" Enter
 Sleep 5s
-
-Type "# do intake properly. Ending it without brief.md is refused too" Enter
-Type "detent stage begin intake | pj >/dev/null; detent stage end intake | pj" Enter
-Sleep 5s
-
-Type "brief DEMO-42; detent stage end intake | pj" Enter
-Sleep 5s
-
-Type "# sockets: your tracker, knowledge and reviewers plug in via YAML. ON/OFF is explicit" Enter
-Type "detent pack validate --pack packs/example/stack.yaml | packs" Enter
-Sleep 6s
-
-Type "# every stage ends at a gate you answer in curator. Detent never merges." Enter
-Sleep 3s
