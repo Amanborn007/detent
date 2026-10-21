@@ -134,6 +134,8 @@ function violation(reason) {
 
 let envelope;
 try { envelope = JSON.parse(r.stdout); } catch (e) { violation("claude stdout is not a JSON envelope: " + e.message); }
+// Newer claude versions print every message as an array; the answer is the result entry.
+if (Array.isArray(envelope)) envelope = envelope.findLast((m) => m && m.type === "result") || {};
 if (envelope.total_cost_usd !== undefined) process.stderr.write(`claude-reviewer: cost $${envelope.total_cost_usd}\n`);
 if (envelope.is_error) emit({ error: "claude reported an error: " + String(envelope.result).slice(0, 2000), next_step: "check `claude` auth and re-invoke" }, 1);
 if (typeof envelope.result !== "string") violation("envelope has no string .result");
