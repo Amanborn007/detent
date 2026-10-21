@@ -30,6 +30,7 @@ import { loadRoutingConfig, tierOf, advisorConsultEvent } from "../routing/routi
 import { readSteps, renderLiveHtml, isRunComplete, STEP_KINDS, STEP_STATUSES } from "./liveview.mjs";
 import { loadRunState, buildNote, checkSufficiency, currentStage, optionKey } from "../handoff/handoff.mjs";
 import { analyzeSpend, trackingLine, compareTracking } from "../spend/spend.mjs";
+import { renderMarkdown } from "./markdown.mjs";
 import { homedir, tmpdir } from "node:os";
 import { resolvePackPath, validatePackFile, PackPathError } from "../pack/pack.mjs";
 
@@ -1131,9 +1132,11 @@ function renderGateArtifact({ runId, runDir }, gate) {
   const primary = (gate.stage && STAGE_ARTIFACTS[gate.stage]) || [];
   const docs = [...new Set([...primary, ...Object.values(STAGE_ARTIFACTS).flat()])]
     .filter((rel) => existsSync(join(runDir, rel)));
-  const docHtml = docs.map((rel, i) =>
-    `<details${i === 0 ? " open" : ""}><summary>${escapeHtml(rel)}</summary><p><strong>${i === 0 ? "The artifact this gate reviews" : "Earlier run artifact, for context"}: ${escapeHtml(rel)}</strong></p><pre>${escapeHtml(readFileSync(join(runDir, rel), "utf8"))}</pre></details>`,
-  ).join("\n");
+  const docHtml = docs.map((rel, i) => {
+    const src = readFileSync(join(runDir, rel), "utf8");
+    const body = rel.endsWith(".md") ? `<article class="doc">${renderMarkdown(src)}</article>` : `<pre>${escapeHtml(src)}</pre>`;
+    return `<details${i === 0 ? " open" : ""}><summary>${escapeHtml(rel)}</summary><p><strong>${i === 0 ? "The artifact this gate reviews" : "Earlier run artifact, for context"}: ${escapeHtml(rel)}</strong></p>${body}</details>`;
+  }).join("\n");
   const blocks = gate.decisions.map((d) => {
     const options = (d.options || []).map((o) =>
       `<div class="option" data-plan-option="${escapeHtml(o)}"><strong>${escapeHtml(o)}</strong></div>`,
@@ -1172,6 +1175,21 @@ ${options}
   pre { background: var(--paper-2); border: 1px solid var(--rule); padding: 1rem; overflow-x: auto;
         white-space: pre-wrap; font-family: var(--mono); font-size: .85rem; }
   summary { cursor: pointer; font-family: var(--mono); font-size: .85rem; }
+  .doc { border-left: 3px solid var(--rule); padding: .2rem 0 .2rem 1.2rem; margin: .5rem 0 1.5rem; }
+  .doc h3 { font-size: 1.15rem; margin: 1.2rem 0 .4rem; }
+  .doc h4 { font-size: 1rem; margin: 1.4rem 0 .4rem; }
+  .doc h5, .doc h6 { font-size: .95rem; margin: 1rem 0 .3rem; }
+  .doc p, .doc ul, .doc ol, .doc blockquote, .doc table { margin: .5rem 0; }
+  .doc ul, .doc ol { padding-left: 1.4rem; }
+  .doc li { margin: .25rem 0; }
+  .doc code { font-family: var(--mono); font-size: .85em; background: var(--paper-2); padding: .05rem .3rem; border-radius: .25rem; }
+  .doc pre code { background: none; padding: 0; }
+  .doc blockquote { border-left: 3px solid var(--accent); margin-left: 0; padding-left: 1rem; color: var(--muted); }
+  .doc table { border-collapse: collapse; display: block; overflow-x: auto; font-size: .9rem; }
+  .doc th, .doc td { border: 1px solid var(--rule); padding: .35rem .6rem; text-align: left; vertical-align: top; }
+  .doc th { background: var(--paper-2); }
+  .doc a { color: var(--accent); }
+  .doc hr { border: 0; border-top: 1px solid var(--rule); }
   .q-label { font-weight: 600; }
   .options { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .6rem; }
   .option { border: 1px solid var(--rule); border-radius: .4rem; padding: .6rem 1rem; cursor: pointer; background: var(--paper-2); }
