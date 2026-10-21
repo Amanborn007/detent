@@ -2,9 +2,31 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { realpathSync } from "node:fs";
+import { realpathSync, mkdtempSync, writeFileSync, chmodSync, existsSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { buildChildSettings, buildChildEnv } from "../drive/profile.mjs";
 import { setup, drive, throughStage, scratch } from "./drive-kit.mjs";
+import { engine, mkRun, throughResearch, writeArtifact } from "./helpers.mjs";
+
+test("gate open and collect run the sibling curator CLI, never a curator found on PATH", () => {
+  const ctx = mkRun();
+  throughResearch(ctx);
+  assert.equal(engine(["stage", "begin", "plan", "--repo", ctx.repo, "--run", ctx.runId]).code, 0);
+  writeArtifact(ctx.runDir, "plan/plan.md", "# plan\n");
+  assert.equal(engine(["stage", "end", "plan", "--repo", ctx.repo, "--run", ctx.runId]).code, 2);
+  const bin = mkdtempSync(join(tmpdir(), "foreign-curator-"));
+  const log = join(bin, "calls.log");
+  writeFileSync(join(bin, "curator"), `#!/bin/sh\necho "$@" >> "${log}"\n`);
+  chmodSync(join(bin, "curator"), 0o755);
+  const env = { PATH: `${bin}:/usr/bin:/bin`, CURATOR_STATE_DIR: join(bin, "state") };
+  const open = engine(["gate", "open", "intent", "--repo", ctx.repo, "--run", ctx.runId], { env });
+  assert.equal(open.code, 0, open.stdout + open.stderr);
+  assert.equal(open.json.mode, "curator");
+  assert.match(open.json.next_step, /engine\/curator\/cli\.mjs open /, "the printed command is the sibling CLI");
+  const collect = engine(["gate", "collect", "--run", ctx.runId], { env });
+  assert.equal(collect.code, 0, collect.stdout + collect.stderr);
+  assert.ok(!existsSync(log), `the PATH curator was run: ${existsSync(log) ? readFileSync(log, "utf8") : ""}`);
+});
 
 const rules = (dir) => ["Read", "Edit", "Write"].map((t) => `${t}(//${dir.replace(/^\/+/, "")}/**)`);
 
