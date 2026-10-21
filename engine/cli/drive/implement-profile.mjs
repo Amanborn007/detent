@@ -298,10 +298,10 @@ const under = (p, root) => p === root || p.startsWith(root + "/");
 
 export function buildImplementEnv(parentEnv, ctx) {
   if (!ctx.tmp || !ctx.claudeTmp) throw new Error("implement env: tmp and claudeTmp are required");
+  checkClaudeTmp(ctx);
   if (under(ctx.claudeTmp, ctx.tmp) || under(ctx.tmp, ctx.claudeTmp)) {
     throw new Error("implement env: the child's TMPDIR and claude's CLAUDE_CODE_TMPDIR must be separate, non-nested dirs");
   }
-  checkClaudeTmp(ctx);
   const pathEntries = implementPathEntries(parentEnv.PATH);
   if (!pathEntries.length) throw new Error("implement env: parent PATH has no absolute entries");
   for (const e of pathEntries) {
@@ -327,7 +327,11 @@ export function buildImplementEnv(parentEnv, ctx) {
     DISABLE_TELEMETRY: "1",
     DISABLE_AUTOUPDATER: "1",
   };
-  for (const k of ["USER", "LANG"]) if (parentEnv[k]) env[k] = parentEnv[k];
+  // Claude's keychain lookup is keyed by $USER, so it must be the parent's value, not userInfo().
+  if (!parentEnv.USER) throw new Error("implement env: USER is unset in the parent environment; claude cannot find its login without it");
+  env.USER = parentEnv.USER;
+  if (parentEnv.LOGNAME) env.LOGNAME = parentEnv.LOGNAME;
+  if (parentEnv.LANG) env.LANG = parentEnv.LANG;
   for (const [k, v] of Object.entries(parentEnv)) if (/^LC_[A-Z_]+$/.test(k) && v) env[k] = v;
   const secret = Object.keys(env).filter((k) => /TOKEN|SECRET|KEY|PASS|CRED|AUTH|COOKIE|SESSION|^OTEL_/i.test(k));
   if (secret.length) throw new Error(`implement env: secret-looking names built: ${secret.join(", ")}`);
