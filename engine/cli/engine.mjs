@@ -1201,7 +1201,7 @@ function runExec(entry, payload, stackPath, providerName) {
     return { ok: false, code: 1, stderr: `spawn failed: ${r.error.message}` };
   }
   if (r.status !== 0) {
-    const body = r.status === 1 ? jsonBody(r) : undefined;
+    const body = r.status === 1 || r.status === 2 ? jsonBody(r) : undefined;
     return {
       ok: false,
       code: r.status === 2 ? 2 : 1,
@@ -1264,10 +1264,11 @@ function cmdSocketCall(name, flags) {
   if (kind === "exec") {
     const r = runExec(entry, payload, stackPath, name);
     if (!r.ok) {
-      const msg = `socket '${name}' exec provider failed (exit ${r.code}): ${r.stderr}`;
-      if (r.code === 2) refuse(msg, "the provider rejected the request as a contract violation — fix the payload or the provider");
-      fail(msg, "check the provider command in stack.yaml, then re-invoke",
-        r.response !== undefined ? { response: r.response } : {});
+      const why = r.stderr || (r.response && typeof r.response.error === "string" ? r.response.error : "");
+      const msg = `socket '${name}' exec provider failed (exit ${r.code}): ${why}`;
+      const extra = r.response !== undefined ? { response: r.response } : {};
+      if (r.code === 2) refuse(msg, "the provider rejected the request as a contract violation — fix the payload or the provider", extra);
+      fail(msg, "check the provider command in stack.yaml, then re-invoke", extra);
     }
     out({
       ok: true,
