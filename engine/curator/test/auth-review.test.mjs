@@ -140,7 +140,7 @@ test('the browser is launched on a local file, never on a url carrying the keys'
   const r = await runCli(['open', file], env);
   assert.equal(r.code, 0, r.stdout + r.stderr);
   toKill.add(JSON.parse(readFileSync(join(stateDir, 'state.json'), 'utf8')).pid);
-  for (let i = 0; i < 40 && !existsSync(seen); i++) await sleep(100);
+  for (let i = 0; i < 40 && !(existsSync(seen) && readFileSync(seen, 'utf8').includes('</script>')); i++) await sleep(100);
   if (!existsSync(log)) return t.skip(`no browser launcher on ${process.platform}`);
   const argv = readFileSync(log, 'utf8');
   assert.doesNotMatch(argv, /[#&?]?[cr]=[0-9a-f]{16}/, `keys in argv: ${argv}`);

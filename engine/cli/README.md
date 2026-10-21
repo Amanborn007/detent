@@ -43,6 +43,10 @@ with a `next_step`. Exit codes: `0` ok · `1` provider/environment failure ·
 `2` refusal (illegal transition, missing artifact, pending gate, contract
 violation) with a structured `reason`.
 
+## Friendly verbs
+
+`start`, `status`, `continue`, `decide`, `approve`, `revise` and `doctor` sit on top of the commands below, which stay as the machine layer. `--run` is optional everywhere: an exact id, then a unique ticket key or non-date substring, then the newest unfinished run for the cwd repo. At a TTY (or with `DETENT_FORCE_TTY=1`) output is text; `--json`, or a pipe, gives the one JSON line. `approve` and `revise` refuse under `CLAUDECODE`, with `DETENT_DRIVE_CHILD=1` (set on every drive child), or without a terminal. See GUIDE.md section 4.7.
+
 ## Commands
 
 ### `engine setup --repo <path> [--force]`
