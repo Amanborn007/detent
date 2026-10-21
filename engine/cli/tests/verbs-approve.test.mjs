@@ -53,7 +53,7 @@ test("an agent session, a drive child, or a pipe cannot approve", () => {
     ["no TTY", { ...HUMAN }],
   ];
   for (const [name, env] of cases) {
-    const r = engine(["approve"], { cwd: ctx.repo, env, input: "y\n" });
+    const r = engine(["approve", "--json"], { cwd: ctx.repo, env, input: "y\n" });
     assert.equal(r.code, 2, `${name}: ${r.stdout}`);
     assert.equal(r.json.ok, false, name);
   }
@@ -65,14 +65,14 @@ test("a named decision without approve/revise options points to decide", () => {
   const p = join(ctx.runDir, "decisions.json");
   writeJson(p, [...readJson(p), { id: "D-050", raised_by: "plan", blocks: ["implement"],
     question: "Reuse or rewrite?", options: ["reuse", "rewrite"], status: "pending" }]);
-  const r = engine(["approve", "D-050"], { cwd: ctx.repo, env: TTY, input: "y\n" });
+  const r = engine(["approve", "D-050", "--json"], { cwd: ctx.repo, env: TTY, input: "y\n" });
   assert.equal(r.code, 2, r.stdout);
   assert.match(r.json.next_step, /detent decide/);
 });
 
 test("approve with no pending intent gate refuses", () => {
   const ctx = mkRun();
-  const r = engine(["approve"], { cwd: ctx.repo, env: TTY, input: "y\n" });
+  const r = engine(["approve", "--json"], { cwd: ctx.repo, env: TTY, input: "y\n" });
   assert.equal(r.code, 2, r.stdout);
   assert.match(r.json.reason, /no pending/);
 });

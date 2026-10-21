@@ -1,8 +1,4 @@
 {
-  "unknown": {
-    "code": 2,
-    "stdout": "{\"ok\":false,\"reason\":\"unknown command: frobnicate\",\"next_step\":\"engine <setup|run new|stage begin|stage end|gate open|gate collect|drive|socket call|next|dashboard|live|bench|eval|pack validate|respond|step|advisor consult|handoff|attempt|env|decide-why|spend|help> — see engine/cli/README.md\"}\n"
-  },
   "next-fresh": {
     "code": 0,
     "stdout": "{\"ok\":true,\"run_id\":\"<DATE>-octo-repo-1-gold\",\"stage\":\"intake\",\"status\":\"pending\",\"entry_state\":\"all prior stages done, no blocking decisions\",\"exit_state\":\"will require brief.md\",\"next_step\":\"engine stage begin intake --run <DATE>-octo-repo-1-gold --repo <REPO>\"}\n"

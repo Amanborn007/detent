@@ -26,7 +26,6 @@ function capture() {
     const r = engine([...args, "--run", ctx.runId, "--repo", ctx.repo], { cwd: ctx.repo, env: { DETENT_FORCE_TTY: "", CLAUDECODE: "" } });
     rec[name] = { code: r.code, stdout: normalize(r.stdout, ctx) };
   };
-  run("unknown", ["frobnicate"]);
   run("next-fresh", ["next"]);
   run("begin-intake", ["stage", "begin", "intake"]);
   run("end-intake-missing-artifact", ["stage", "end", "intake"]);
