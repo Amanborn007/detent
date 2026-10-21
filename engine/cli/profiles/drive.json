@@ -1,9 +1,5 @@
 {
   "$comment": "Base for the settings file every drive child gets (--settings). drive adds the Write/Edit rules for the child's own outbox and the deny rules for its inputs; --profile <file> replaces this base and is validated the same way. Never Bash, never a bypass mode.",
-  "env": {
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-    "DISABLE_TELEMETRY": "1"
-  },
   "permissions": {
     "defaultMode": "dontAsk",
     "deny": []

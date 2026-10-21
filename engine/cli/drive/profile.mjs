@@ -45,6 +45,17 @@ export function validateDriveProfile(settings, label) {
   };
   walk(settings, "$");
   if (settings.hooks !== undefined) bad(label, "defines hooks");
+  if (settings.env !== undefined) bad(label, "defines an env block; the child env is built by drive");
+  if (settings.statusLine !== undefined) bad(label, "defines a statusLine command");
+  const noKeys = (v, path) => {
+    if (!v || typeof v !== "object") return;
+    for (const [k, x] of Object.entries(v)) {
+      if (/Helper$/.test(k) || k === "awsAuthRefresh" || k === "awsCredentialExport") bad(label, `sets ${path}.${k}, a key that runs a command`);
+      if (k === "additionalDirectories") bad(label, `sets ${path}.${k}; the child's directories are fixed by drive`);
+      noKeys(x, `${path}.${k}`);
+    }
+  };
+  noKeys(settings, "$");
   if (settings.disableAllHooks !== undefined && settings.disableAllHooks !== true) bad(label, "must keep disableAllHooks true");
   if (settings.enableAllProjectMcpServers === true) bad(label, "enables project MCP servers");
   const perms = settings.permissions;
@@ -63,6 +74,8 @@ export function validateDriveProfile(settings, label) {
     }
   }
 }
+
+const shellQuote = (p) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(p) ? p : `'${p.replace(/'/g, "'\\''")}'`);
 
 const ab = (p) => `//${p.replace(/^\/+/, "")}`;
 
@@ -85,8 +98,9 @@ export function buildChildSettings(base, { inputs, outbox, apiKeyFile }) {
     disableAllHooks: true,
     enableAllProjectMcpServers: false,
   };
-  if (apiKeyFile) settings.apiKeyHelper = `cat ${apiKeyFile}`;
+  settings.autoMemoryEnabled = false;
   validateDriveProfile(settings, "settings");
+  if (apiKeyFile) settings.apiKeyHelper = `cat ${shellQuote(apiKeyFile)}`;
   return settings;
 }
 
@@ -114,5 +128,8 @@ export function buildChildEnv(parent, { tmpdir, sandboxRoot }) {
   const under = (p) => p === sandboxRoot || p.startsWith(`${sandboxRoot}/`);
   env.PATH = (parent.PATH || "").split(":").filter((p) => p.startsWith("/") && !under(p)).join(":");
   env.TMPDIR = tmpdir;
+  env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
+  env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
+  env.DISABLE_TELEMETRY = "1";
   return { env, literals };
 }

@@ -31,6 +31,8 @@ const DEFAULT_MODEL = "claude-sonnet-5-5";
 const DEFAULT_BUDGET_USD = 5;
 const BUDGET_FLOOR_USD = 0.1;
 const MAX_REPO_ARCHIVE_BYTES = 200 * 1024 * 1024;
+const MANIFEST_CAP = 256 * 1024;
+const ARTIFACT_CAP = 1024 * 1024;
 const INTENT_NOTE = "intent check: skipped in drive mode";
 
 const ST = {
@@ -94,7 +96,18 @@ function cleanupSync() {
   killGroup("SIGKILL");
   try { if (ST.lockFile && readFileSync(ST.lockFile, "utf8") === String(process.pid)) rmSync(ST.lockFile); } catch { /* lock already gone */ }
   try { if (ST.keyFile) rmSync(ST.keyFile, { force: true }); } catch { /* key file already gone */ }
-  try { if (ST.stepDir) forceRemove(ST.stepDir); } catch { /* step dir already gone */ }
+  try { if (ST.sroot) forceRemove(ST.sroot); } catch { /* sandbox root already gone */ }
+}
+
+// The sandbox lives in a shared temp dir, so every component must be ours, a real directory, and private.
+function ensurePrivateDir(E, p) {
+  try { mkdirSync(p, { mode: 0o700 }); } catch (e) { if (e.code !== "EEXIST") throw e; }
+  const st = lstatSync(p);
+  if (!st.isDirectory()) E.refuse(`sandbox path ${p} is a symlink or not a directory`, "remove it and re-run; drive will not use it");
+  if (st.uid !== process.getuid()) E.refuse(`sandbox path ${p} is owned by uid ${st.uid}, not you`, "remove it and re-run; drive will not use it");
+  if ((st.mode & 0o777) !== 0o700) {
+    E.refuse(`sandbox path ${p} has mode ${(st.mode & 0o777).toString(8)}, expected 0700`, "remove it or chmod 700 it, then re-run");
+  }
 }
 
 function acquireLock(E, runDir) {
@@ -206,34 +219,56 @@ function runKnowledge(E, stack, query, ticketId) {
 // Inputs: everything the child may read, prepared by drive.
 // ---------------------------------------------------------------------------
 
-const HARD_GIT = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"];
+// The work repo's own config is hostile: nothing in it may run a program (hooks, fsmonitor, gpg, filters, textconv).
+const HARD_GIT = [
+  "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.attributesFile=/dev/null",
+  "-c", "log.showSignature=false", "-c", "gpg.program=/usr/bin/false",
+];
 
 function hardenedGit(args, repo, extra = {}) {
   return spawnSync("git", ["-C", repo, ...HARD_GIT, ...args], {
     encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
-    env: { PATH: process.env.PATH, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" },
+    env: { PATH: process.env.PATH, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_ATTR_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" },
     ...extra,
   });
 }
 
-function removeSymlinks(dir) {
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const p = join(dir, e.name);
-    if (e.isSymbolicLink()) unlinkSync(p);
-    else if (e.isDirectory()) removeSymlinks(p);
-  }
-}
-
+// ls-tree plus cat-file reads blobs as stored, so no attribute, filter or export-subst ever applies. Symlinks and submodules are skipped.
 function exportRepo(E, ctx, repo, dest) {
-  const tar = `${dest}.tar`;
-  const a = hardenedGit(["archive", "--format=tar", "-o", tar, "HEAD"], repo);
-  if (a.status !== 0) stopFail(E, ctx, "repo_export_failed", "the work repo needs at least one commit", { detail: a.stderr });
-  if (statSync(tar).size > MAX_REPO_ARCHIVE_BYTES) stopFail(E, ctx, "repo_too_large", "the repo export exceeds the 200 MB cap");
+  const ls = hardenedGit(["ls-tree", "-r", "-l", "-z", "--full-tree", "HEAD"], repo);
+  if (ls.status !== 0) stopFail(E, ctx, "repo_export_failed", "the work repo needs at least one commit", { detail: ls.stderr });
+  const entries = [];
+  let total = 0;
+  for (const rec of ls.stdout.split("\0").filter(Boolean)) {
+    const m = /^(\d+) (\w+) ([0-9a-f]+) +(\d+|-)\t([\s\S]+)$/.exec(rec);
+    if (!m) throw new Error(`unparsable ls-tree record: ${rec.slice(0, 80)}`);
+    const [, mode, type, sha, size, path] = m;
+    if (type !== "blob" || (mode !== "100644" && mode !== "100755")) continue;
+    if (path.split("/").some((p) => p === ".." || p === ".git" || p === "")) continue;
+    total += Number(size);
+    entries.push({ mode, sha, path });
+  }
+  if (total > MAX_REPO_ARCHIVE_BYTES) stopFail(E, ctx, "repo_too_large", "the repo export exceeds the 200 MB cap");
   mkdirSync(dest, { recursive: true });
-  const x = spawnSync("tar", ["-xf", tar, "-C", dest], { encoding: "utf8" });
-  if (x.status !== 0) throw new Error(`tar failed: ${x.stderr}`);
-  rmSync(tar);
-  removeSymlinks(dest);
+  if (entries.length === 0) return;
+  const cat = spawnSync("git", ["-C", repo, ...HARD_GIT, "cat-file", "--batch"], {
+    input: entries.map((e) => e.sha).join("\n") + "\n", maxBuffer: MAX_REPO_ARCHIVE_BYTES + 64 * 1024 * 1024,
+    env: { PATH: process.env.PATH, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_ATTR_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" },
+  });
+  if (cat.status !== 0) throw new Error(`git cat-file failed: ${String(cat.stderr).slice(0, 200)}`);
+  const buf = cat.stdout;
+  let off = 0;
+  for (const e of entries) {
+    const nl = buf.indexOf(10, off);
+    const head = buf.subarray(off, nl).toString("utf8").split(" ");
+    if (head[1] !== "blob") throw new Error(`cat-file returned ${head[1]} for ${e.path}`);
+    const size = Number(head[2]);
+    const start = nl + 1;
+    const target = join(dest, e.path);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, buf.subarray(start, start + size), { mode: e.mode === "100755" ? 0o755 : 0o644 });
+    off = start + size + 1;
+  }
 }
 
 function section(text, heading) {
@@ -272,7 +307,7 @@ function prepareInputs(E, ctx, stage, stepN) {
   put("decisions.json", JSON.stringify(E.loadDecisions(runDir), null, 2));
   copyIf(join(runDir, "env.json"), "env.json");
 
-  const log = hardenedGit(["log", "-n", "50", "--stat", "--no-ext-diff", "--no-textconv"], repo);
+  const log = hardenedGit(["log", "--no-show-signature", "-n", "50", "--stat", "--no-ext-diff", "--no-textconv"], repo);
   if (log.status !== 0) stopFail(E, ctx, "git_log_failed", "the work repo needs at least one commit", { detail: log.stderr });
   put("git-log.txt", log.stdout);
   exportRepo(E, ctx, repo, join(dirs.inputs, "repo"));
@@ -339,25 +374,35 @@ function runChild(bin, args, { cwd, input, timeoutMs, env }) {
 
 // The child has no shell to hash with, so drive adds a missing sha256 once the child is dead.
 // Anything odd (a symlink, a missing file, bad JSON) is left alone for readOutbox to reject by name.
-function fillArtifactDigests(outbox) {
+function readSmallRegular(path, cap) {
+  let fd;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.size > cap) return null;
+    const buf = Buffer.alloc(st.size);
+    readSync(fd, buf, 0, buf.length, 0);
+    return buf;
+  } catch { return null; } finally { if (fd !== undefined) closeSync(fd); }
+}
+
+function fillArtifactDigests(outbox, stage) {
   const manifestPath = join(outbox, "manifest.json");
+  const raw = readSmallRegular(manifestPath, MANIFEST_CAP);
+  if (!raw) return;
   let manifest;
-  try { manifest = JSON.parse(readFileSync(manifestPath, "utf8")); } catch { return; }
+  try { manifest = JSON.parse(raw.toString("utf8")); } catch { return; }
   if (!manifest || !Array.isArray(manifest.artifacts)) return;
   let changed = false;
   for (const a of manifest.artifacts) {
     if (!a || typeof a !== "object" || typeof a.path !== "string" || Object.hasOwn(a, "sha256")) continue;
-    let fd;
-    try {
-      fd = openSync(join(outbox, a.path), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-      if (!fstatSync(fd).isFile()) continue;
-      const buf = Buffer.alloc(fstatSync(fd).size);
-      readSync(fd, buf, 0, buf.length, 0);
-      a.sha256 = sha256(buf);
-      changed = true;
-    } catch { continue; } finally { if (fd !== undefined) closeSync(fd); }
+    if (!STAGE_OUTPUTS[stage].includes(a.path)) continue;
+    const buf = readSmallRegular(join(outbox, a.path), ARTIFACT_CAP);
+    if (!buf) continue;
+    a.sha256 = sha256(buf);
+    changed = true;
   }
-  if (changed) writeFileSync(manifestPath, JSON.stringify(manifest));
+  if (changed) writeAtomic(manifestPath, JSON.stringify(manifest));
 }
 
 function parseResult(stdout) {
@@ -419,13 +464,17 @@ function accessPanel(E, runDir) {
 }
 
 function envPanel(E, runDir) {
-  const p = join(runDir, "env.json");
+  const p = join(runDir, "env.proposed.json");
   if (!existsSync(p)) return "";
   let env;
   try { env = JSON.parse(readFileSync(p, "utf8")); } catch { return ""; }
-  const cmds = Object.entries(env.commands || {});
-  if (cmds.length === 0) return "";
-  return `<h2>Proposed commands (not run by drive)</h2>\n<pre>${cmds.map(([k, v]) => E.escapeHtml(`${k}: ${v}`)).join("\n")}</pre>`;
+  const lines = [
+    ...Object.entries(env.commands || {}).map(([k, v]) => `command ${k}: ${v}`),
+    ...(env.gotchas || []).map((g) => `gotcha: ${g}`),
+    ...(env.attempts || []).map((a) => `attempt (${a.outcome}): ${a.approach}${a.evidence ? ` — ${a.evidence}` : ""}`),
+  ];
+  if (lines.length === 0) return "";
+  return `<h2>Proposed by the child (not run, not trusted)</h2>\n<p class="sub">Nothing downstream reads this. Promote a command yourself with engine env if you want it used.</p>\n<pre>${lines.map((l) => E.escapeHtml(l)).join("\n")}</pre>`;
 }
 
 function stopForHuman(E, ctx, stage, blockers, collectError) {
@@ -513,9 +562,16 @@ function validAccessReport(buf) {
   let rows;
   try { rows = JSON.parse(buf.toString("utf8")); } catch { return "access-report.json is not JSON"; }
   if (!Array.isArray(rows)) return "access-report.json is not an array";
+  if (rows.length > 50) return "access-report.json has more than 50 records";
   for (const r of rows) {
     if (!r || typeof r !== "object" || typeof r.source !== "string" || !["reachable", "blocked", "partial"].includes(r.status)) {
       return "access-report.json has a record without a source or a valid status";
+    }
+    if (r.source.length > 200) return "access-report.json has a source over 200 characters";
+    for (const k of ["binding", "needed_for", "criticality", "detail", "blocked_reason", "enable_action"]) {
+      if (r[k] !== undefined && r[k] !== null && (typeof r[k] !== "string" || r[k].length > 1000)) {
+        return `access-report.json has a ${k} that is not a string of at most 1000 characters`;
+      }
     }
   }
   return null;
@@ -555,16 +611,14 @@ function applyOutbox(E, ctx, stage, ro, normalized) {
   }
   E.saveDecisions(runDir, decisions);
   const m = ro.manifest;
-  if (m.env) {
-    const envPath = join(runDir, "env.json");
-    const cur = existsSync(envPath) ? JSON.parse(readFileSync(envPath, "utf8")) : { commands: {}, gotchas: [] };
-    cur.commands = { ...(cur.commands || {}), ...(m.env.commands || {}) };
-    cur.gotchas = [...new Set([...(cur.gotchas || []), ...(m.env.gotchas || [])])];
-    writeAtomic(envPath, JSON.stringify(cur, null, 2) + "\n");
-  }
-  for (const a of m.attempts || []) {
-    const row = { ts: E.nowIso(), stage, approach: a.approach, outcome: a.outcome, ...(a.evidence ? { evidence: a.evidence } : {}) };
-    writeFileSync(join(runDir, "attempts.jsonl"), JSON.stringify(row) + "\n", { flag: "a" });
+  // env.json and attempts.jsonl feed the handoff that the Bash-capable implement stage trusts, so a child only ever proposes.
+  if (m.env || (m.attempts && m.attempts.length)) {
+    const propPath = join(runDir, "env.proposed.json");
+    const cur = existsSync(propPath) ? JSON.parse(readFileSync(propPath, "utf8")) : { commands: {}, gotchas: [], attempts: [] };
+    cur.commands = { ...cur.commands, ...((m.env && m.env.commands) || {}) };
+    cur.gotchas = [...new Set([...cur.gotchas, ...((m.env && m.env.gotchas) || [])])];
+    cur.attempts = [...cur.attempts, ...(m.attempts || []).map((a) => ({ stage, ...a }))];
+    writeAtomic(propPath, JSON.stringify(cur, null, 2) + "\n");
   }
   for (const s of m.steps || []) E.appendEvent(runDir, { event: "step", stage, kind: "tool", label: String(s.label), status: "done" });
   E.appendEvent(runDir, { event: "drive_applied", stage, status: m.status, artifacts: [...ro.files.keys()], decisions: raised });
@@ -597,9 +651,13 @@ export async function cmdDrive(flags, E) {
   const intakeOpen = !["done", "skipped"].includes(status0.stages.intake.status);
   const stack = resolveStack(E, flags, intakeOpen);
 
-  ST.sroot = join(realpathSync(tmpdir()), "detent-drive", runId);
-  mkdirSync(join(ST.sroot, "tmp"), { recursive: true, mode: 0o700 });
-  const sandboxTop = dirname(ST.sroot);
+  const sandboxTop = join(realpathSync(tmpdir()), "detent-drive");
+  ensurePrivateDir(E, sandboxTop);
+  ST.sroot = join(sandboxTop, `${runId}-${randomBytes(6).toString("hex")}`);
+  process.on("exit", cleanupSync);
+  ensurePrivateDir(E, ST.sroot);
+  ensurePrivateDir(E, join(ST.sroot, "tmp"));
+  ensurePrivateDir(E, join(ST.sroot, "steps"));
   const probe = buildChildEnv(process.env, { tmpdir: join(ST.sroot, "tmp"), sandboxRoot: sandboxTop });
   const ver = claudeVersion(claudeBin, probe.env);
   if (ver.error) E.refuse(`cannot run ${claudeBin}: ${ver.error}`, "install claude or pass --claude-bin / ENGINE_CLAUDE_BIN");
@@ -610,7 +668,6 @@ export async function cmdDrive(flags, E) {
   acquireLock(E, runDir);
   ST.runDir = runDir;
   ST.runId = runId;
-  process.on("exit", cleanupSync);
   const ctx = { E, runId, runDir, repo, stack, budget, spent: 0, turns: 0, steps: 0 };
 
   const onSignal = (sig, code) => async () => {
@@ -774,7 +831,7 @@ export async function cmdDrive(flags, E) {
     }
     if (cost === null) return stopFail(E, ctx, "child_no_cost", "the child result lacks total_cost_usd/num_turns, so --budget cannot be enforced; check the claude version", { stage });
 
-    fillArtifactDigests(io.outbox);
+    fillArtifactDigests(io.outbox, stage);
     const ro = readOutbox(io.outbox, {
       runId, stage, nonce: io.nonce, allowedArtifacts: STAGE_OUTPUTS[stage], requiredHeadings: REQUIRED_HEADINGS,
     });
