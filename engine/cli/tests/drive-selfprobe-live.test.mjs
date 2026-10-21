@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { tmpdir, homedir, userInfo } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { buildSelfProbe, collectControls, evaluateSelfProbe, installShim, pathWithShim, readShimReport, uninstallShim } from "../drive/selfprobe.mjs";
+import { buildSelfProbe, collectControls, evaluateSelfProbe, installShim, pathWithShim, readShimReport, startCanaryListener, uninstallShim } from "../drive/selfprobe.mjs";
 import { parseTranscript } from "../drive/probes/transcript.mjs";
 
 const CLAUDE = process.env.DETENT_CLAUDE_BIN || "claude";
@@ -63,7 +63,9 @@ function settingsFor(fx, { weak = false } = {}) {
   };
 }
 
-function runStep(fx, { name, weak = false, prompt }) {
+// mode "shell": CLAUDE_CODE_SHELL points at the shim shell (probes run inside the sandbox).
+// mode "env": the `env` shim is first on PATH. mode "diag": env shim on PATH, no shell shim, and a diagnostic command.
+async function runStep(fx, { name, weak = false, prompt, mode = "shell" }) {
   const probe = buildSelfProbe({
     platform: "darwin", clone: fx.dirs.clone, drivePid: process.pid,
     denyTargets: fx.existingDeny,
@@ -73,62 +75,96 @@ function runStep(fx, { name, weak = false, prompt }) {
     toolchain: ["node", "git"],
   });
   const controls = collectControls(probe.controlScript);
+  const canary = await startCanaryListener({ socketPath: join(fx.root, `canary-${name}.sock`) });
   const shimDir = join(fx.root, `shim-${name}`);
   const inst = installShim(shimDir, {
     validate: { home: fx.home, readDeny: fx.denyRead, writeAllow: [fx.dirs.clone, fx.dirs.outbox, fx.dirs.tmp], writeDenyRequired: [join(fx.dirs.clone, ".git", "config"), ...fx.denyWrite] },
     probe: { script: probe.script, expect: probe.expect, controls },
+    shell: { realShell: "/bin/bash", canaryPort: canary.port, canarySocket: canary.socketPath },
   });
+  const settings = settingsFor(fx, { weak });
+  if (mode === "shell") settings.sandbox.filesystem.allowWrite.push(inst.callLogPath);
   const settingsFile = join(fx.root, `settings-${name}.json`);
-  writeFileSync(settingsFile, JSON.stringify(settingsFor(fx, { weak }), null, 2), { mode: 0o400 });
+  writeFileSync(settingsFile, JSON.stringify(settings, null, 2), { mode: 0o400 });
   const env = {
-    PATH: pathWithShim(inst.binDir, process.env.PATH), HOME: fx.home, USER: userInfo().username, LANG: process.env.LANG || "en_US.UTF-8", TERM: "dumb", SHELL: "/bin/sh",
+    PATH: mode === "shell" ? process.env.PATH : pathWithShim(inst.binDir, process.env.PATH), HOME: fx.home, USER: userInfo().username, LANG: process.env.LANG || "en_US.UTF-8", TERM: "dumb", SHELL: "/bin/sh",
     TMPDIR: fx.dirs.tmp, CLAUDE_CODE_TMPDIR: fx.dirs.tmp, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0",
     CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", DISABLE_TELEMETRY: "1", DISABLE_AUTOUPDATER: "1",
   };
+  if (mode === "shell") env.CLAUDE_CODE_SHELL = inst.shellPath;
   const args = ["-p", "--restricted", "--tools", "Bash", "--permission-mode", "dontAsk", "--settings", settingsFile, "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
     "--disable-slash-commands", "--no-session-persistence", "--output-format", "stream-json", "--verbose", "--model", MODEL, "--max-budget-usd", BUDGET_USD, "--max-turns", "4", prompt];
-  return new Promise((resolve, reject) => {
+  const done = await new Promise((resolve, reject) => {
     const child = spawn(CLAUDE, args, { cwd: fx.dirs.clone, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
     let out = "", err = "";
     const t = setTimeout(() => { try { process.kill(-child.pid, "SIGKILL"); } catch { /* exited */ } }, 150000);
     child.stdout.on("data", (d) => { out += d; });
     child.stderr.on("data", (d) => { err += d; });
     child.on("error", reject);
-    child.on("close", (code) => {
-      clearTimeout(t);
-      const transcript = parseTranscript(out);
-      const report = { ...readShimReport(shimDir), toolUses: transcript.bashUses, platform: "darwin" };
-      resolve({ code, out, err, transcript, report, evaluation: evaluateSelfProbe(report), shimDir });
-    });
+    child.on("close", (code) => { clearTimeout(t); resolve({ code, out, err }); });
   });
+  await new Promise((r) => setTimeout(r, 200));
+  const canaryHits = canary.hits();
+  await canary.close();
+  const transcript = parseTranscript(done.out);
+  const report = { ...readShimReport(shimDir, { mode: mode === "shell" ? "shell" : "env" }), canaryHits, toolUses: transcript.bashUses, platform: "darwin" };
+  return { ...done, transcript, report, evaluation: evaluateSelfProbe(report), shimDir, results: bashResults(done.out) };
 }
 
-const dump = (r) => JSON.stringify({ code: r.code, bashUses: r.transcript.bashUses, report: { ...r.report, expect: undefined, controls: r.report.controls }, evaluation: r.evaluation, stderr: r.err.slice(0, 600) }, null, 1);
+// Text and error flag of each Bash tool_result, for diagnostics only.
+function bashResults(out) {
+  const res = [];
+  for (const line of out.split("\n")) {
+    let m;
+    try { m = JSON.parse(line); } catch { continue; }
+    for (const b of Array.isArray(m?.message?.content) ? m.message.content : []) {
+      if (m.type === "user" && b?.type === "tool_result") {
+        const c = b.content;
+        res.push({ is_error: b.is_error === true, text: (typeof c === "string" ? c : Array.isArray(c) ? c.map((p) => p?.text ?? "").join("\n") : "").slice(0, 2000) });
+      }
+    }
+  }
+  return res;
+}
 
-test("live: hardened settings are captured, validated, replayed and every command is counted", { skip: skipReason(), timeout: 200000 }, async () => {
+const dump = (r) => JSON.stringify({ code: r.code, bashUses: r.transcript.bashUses, results: r.results, report: { ...r.report, expect: undefined }, evaluation: r.evaluation, stderr: r.err.slice(0, 600) }, null, 1);
+
+const DIAG_CMD = 'echo PATH=$PATH; echo ENV_AT=$(command -v env); echo SHELL=$SHELL; echo CCSHELL=${CLAUDE_CODE_SHELL:-unset}; echo ZERO=$0; echo SANDBOX_RUNTIME=${SANDBOX_RUNTIME:-unset}; ( : > "$HOME/.detent-diag" ) 2>/dev/null; echo write_home_rc=$?; ls -ld /usr/bin/env';
+
+test("live diagnostic: how Claude resolves env and the shell, and whether Bash is sandboxed", { skip: skipReason() || (process.env.DETENT_LIVE_DIAG === "1" ? false : "set DETENT_LIVE_DIAG=1 as well"), timeout: 200000 }, async () => {
+  const fx = fixture();
+  const r = await runStep(fx, { name: "diag", mode: "diag", prompt: `Use the Bash tool exactly once to run this exact command, then reply DONE:\n${DIAG_CMD}` });
+  try {
+    console.log(`DIAG env-shim calls=${r.report.calls} bashUses=${r.transcript.bashUses} captured=${r.report.captured}`);
+    console.log(`DIAG results=${JSON.stringify(r.results, null, 1)}`);
+    console.log(`DIAG stderr=${r.err.slice(0, 400)}`);
+    assert.ok(r.transcript.bashUses >= 1, dump(r));
+  } finally { uninstallShim(r.shimDir); }
+});
+
+test("live: the shim shell probes inside the real sandbox and every command is counted", { skip: skipReason(), timeout: 200000 }, async () => {
   const fx = fixture();
   const r = await runStep(fx, { name: "ok", prompt: "Use the Bash tool exactly once to run: echo detent-live-ok\nThen reply with the single word DONE." });
   try {
-    assert.equal(r.report.captured, true, `the shim captured no profile (is it first on the child's PATH?)\n${dump(r)}`);
-    assert.deepEqual(r.report.violations, [], dump(r));
-    assert.ok(Object.keys(r.report.tokens).length > 10, `the replayed probe printed too few tokens\n${dump(r)}`);
+    assert.ok(r.report.calls >= 1, `the shim shell was never run inside the sandbox\n${dump(r)}`);
+    assert.deepEqual(r.report.callFailures, [], dump(r));
+    assert.ok(Object.keys(r.report.tokens).length > 10, `the probe printed too few tokens\n${dump(r)}`);
     assert.deepEqual(r.evaluation.failures, [], dump(r));
     assert.deepEqual(r.evaluation.inconclusive, [], dump(r));
     assert.equal(r.report.calls, r.transcript.bashUses, `shim calls vs Bash tool_use\n${dump(r)}`);
-    assert.ok(r.transcript.bashUses >= 1, dump(r));
     assert.equal(r.evaluation.ok, true, dump(r));
     assert.ok(r.out.includes("detent-live-ok"), "the real command should have run after the probe");
   } finally { uninstallShim(r.shimDir); }
 });
 
-test("live: a weakened settings file (allowLocalBinding true) is refused and its command never runs", { skip: skipReason(), timeout: 200000 }, async () => {
+test("live: a weakened settings file (allowLocalBinding true) is refused from inside and its command never runs", { skip: skipReason(), timeout: 200000 }, async () => {
   const fx = fixture();
   const ran = join(fx.dirs.outbox, "ran");
   const r = await runStep(fx, { name: "weak", weak: true, prompt: `Use the Bash tool exactly once to run: touch ${ran}\nThen reply with the single word DONE.` });
   try {
-    assert.equal(r.report.captured, true, `the shim captured no profile\n${dump(r)}`);
+    assert.ok(r.report.calls >= 1, `the shim shell was never run inside the sandbox\n${dump(r)}`);
     assert.equal(r.evaluation.ok, false, dump(r));
-    assert.ok(r.report.violations.some((v) => /network/.test(v)), `expected a network violation\n${dump(r)}`);
+    assert.ok(r.report.refused >= 1, dump(r));
     assert.equal(existsSync(ran), false, "the refused command must not have run");
     assert.match(r.out + r.err, /DETENT_SELFPROBE_REFUSED/, dump(r));
   } finally { uninstallShim(r.shimDir); }

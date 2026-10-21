@@ -9,6 +9,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SHIM_SRC = join(dirname(fileURLToPath(import.meta.url)), "sandbox-shim", "shim.cjs");
+const SHELL_SRC = join(dirname(fileURLToPath(import.meta.url)), "sandbox-shim", "shell.cjs");
 const shim = createRequire(import.meta.url)(SHIM_SRC);
 
 export const validateCapturedProfile = shim.validateProfile;
@@ -56,10 +57,8 @@ export function buildSelfProbe(opts) {
     count(`read_canary_${i}`, `cat -- ${sq(c.path)} 2>/dev/null | ${grep}`, E.zero());
     if (firm(c.path)) count(`read_canary_fl_${i}`, `cat -- ${sq(firm(c.path))} 2>/dev/null | ${grep}`, E.zero());
     if (c.volPath) count(`vol_read_${i}`, `cat -- ${sq(c.volPath)} 2>/dev/null | ${grep}`, E.zero());
-    const hl = `.detent-hl-${nonce}-${i}`;
-    L.push(`( cd ${sq(clone)} && ln -- ${sq(c.path)} ./${hl} ) >/dev/null 2>&1; r hardlink_${i} $?`);
+    L.push(`HL=${sq(clone)}/.detent-hl-${nonce}-${i}-$$; ln -- ${sq(c.path)} "$HL" >/dev/null 2>&1; r hardlink_${i} $?; N=$(cat -- "$HL" 2>/dev/null | ${grep}); r hardlink_read_${i} "$N"; rm -f "$HL" >/dev/null 2>&1`);
     expect[`hardlink_${i}`] = E.rcNot0();
-    L.push(`N=$(cat -- ${sq(`${clone}/${hl}`)} 2>/dev/null | ${grep}); r hardlink_read_${i} "$N"; rm -f ${sq(`${clone}/${hl}`)} >/dev/null 2>&1`);
     expect[`hardlink_read_${i}`] = E.zero();
   });
   add("keychain", `security find-generic-password -s ${sq(KEYCHAIN_SERVICE)} >/dev/null 2>&1; r keychain $?`, E.rcNot0({ control: "keychain_rc", controlWant: 0 }));
@@ -74,8 +73,7 @@ export function buildSelfProbe(opts) {
   });
 
   const G = `cd ${sq(clone)}`;
-  add("git_commit", `H=$(${G} && git rev-parse -q --verify HEAD 2>/dev/null); if [ -n "$H" ]; then ( ${G} && git commit -q --allow-empty -m probe ) >/dev/null 2>&1; rc=$?; r git_commit $rc; ( ${G} && git reset -q --soft "$H" ) >/dev/null 2>&1; r git_restore $?; else r git_commit 99; r git_restore 99; fi`, E.rc0());
-  expect.git_restore = E.rc0();
+  add("git_commit", `T=$(${G} && git write-tree 2>/dev/null); H=$(${G} && git rev-parse -q --verify HEAD 2>/dev/null); if [ -n "$T" ] && [ -n "$H" ]; then ( ${G} && git commit-tree "$T" -p "$H" -m probe ) >/dev/null 2>&1; r git_commit $?; else r git_commit 99; fi`, E.rc0());
   add("git_config_write", `( ${G} && git config detent.selfprobe 1 ) >/dev/null 2>&1; rc=$?; [ $rc -eq 0 ] && ( ${G} && git config --unset detent.selfprobe ) >/dev/null 2>&1; r git_config_write $rc`, E.rcNot0());
   for (const [key, rel] of [["git_commondir_write", ".git/commondir"], ["git_alternates_write", ".git/objects/info/alternates"], ["git_config_worktree_write", ".git/config.worktree"]]) {
     add(key, `( ${G} && mkdir -p .git/objects/info && : > ${sq(rel)} ) >/dev/null 2>&1; rc=$?; rm -f ${sq(`${clone}/${rel}`)} >/dev/null 2>&1; r ${key} $rc`, E.rcNot0());
@@ -141,12 +139,20 @@ export function installShim(dir, exps) {
     validate,
     probe: { script: probe.script, expect: probe.expect, controls: probe.controls ?? {} },
   };
+  const callLogPath = join(logDir, "shell-calls.jsonl");
+  const sentinelPath = join(logDir, "sentinel");
+  writeFileSync(callLogPath, "", { mode: 0o600 });
+  writeFileSync(sentinelPath, "", { mode: 0o600 });
+  config.shell = { realShell: exps.shell?.realShell ?? "/bin/bash", canaryPort: exps.shell?.canaryPort ?? 0, canarySocket: exps.shell?.canarySocket ?? "", callLog: callLogPath, sentinel: sentinelPath };
   const configPath = join(root, "config.json");
   writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o444 });
-  writeFileSync(join(binDir, "env"), `#!${nodeBin}\n${readFileSync(SHIM_SRC, "utf8")}`, { mode: 0o555 });
+  const lib = readFileSync(SHIM_SRC, "utf8");
+  writeFileSync(join(binDir, "env"), `#!${nodeBin}\n${lib}`, { mode: 0o555 });
+  writeFileSync(join(binDir, "lib.cjs"), lib, { mode: 0o444 });
+  writeFileSync(join(binDir, "bash"), `#!${nodeBin}\n${readFileSync(SHELL_SRC, "utf8")}`, { mode: 0o555 });
   chmodSync(binDir, 0o555);
   chmodSync(root, 0o555);
-  return { dir: root, binDir, logDir, configPath };
+  return { dir: root, binDir, logDir, configPath, shellPath: join(binDir, "bash"), callLogPath, sentinelPath };
 }
 
 export function uninstallShim(dir) {
@@ -157,21 +163,28 @@ export function uninstallShim(dir) {
 
 export const pathWithShim = (binDir, pathVar) => `${binDir}:${pathVar}`;
 
-export function readShimReport(dir) {
+// mode "env" reads the env shim's log, "shell" the shim shell's.
+export function readShimReport(dir, { mode = "env" } = {}) {
   const log = join(dir, "log");
-  const rep = { captured: false, ok: false, violations: [], tokens: {}, failures: [], inconclusive: [], canaryHits: 0, calls: 0, refused: 0, hashMismatches: 0 };
+  const rep = { captured: false, ok: false, violations: [], tokens: {}, failures: [], inconclusive: [], canaryHits: 0, calls: 0, refused: 0, hashMismatches: 0, callFailures: [] };
   const stateFile = join(log, "state.json");
-  if (existsSync(stateFile)) Object.assign(rep, JSON.parse(readFileSync(stateFile, "utf8")), { captured: true });
-  const calls = join(log, "calls.jsonl");
+  if (mode === "env" && existsSync(stateFile)) Object.assign(rep, JSON.parse(readFileSync(stateFile, "utf8")), { captured: true });
+  const calls = join(log, mode === "shell" ? "shell-calls.jsonl" : "calls.jsonl");
   if (existsSync(calls)) {
     for (const line of readFileSync(calls, "utf8").split("\n")) {
       if (!line.trim()) continue;
       const ev = JSON.parse(line);
       if (ev.ev !== "call") continue;
+      if (mode === "shell" && rep.calls === 0) Object.assign(rep, { captured: true, tokens: ev.tokens });
       rep.calls++;
       if (!ev.ok) rep.refused++;
       if (ev.reason === "profile_changed") rep.hashMismatches++;
+      for (const f of [...(ev.failures || []), ...(ev.inconclusive || [])]) if (!rep.callFailures.includes(f)) rep.callFailures.push(f);
     }
+  }
+  if (mode === "shell") {
+    const cfg = JSON.parse(readFileSync(join(dir, "config.json"), "utf8"));
+    Object.assign(rep, { expect: cfg.probe.expect, controls: cfg.probe.controls, ok: rep.captured && rep.refused === 0 });
   }
   return rep;
 }
@@ -192,6 +205,7 @@ export function evaluateSelfProbe(report) {
   }
   for (const v of report.violations || []) failures.push(`profile: ${v}`);
   if ((report.hashMismatches ?? 0) > 0) failures.push(`profile_changed: ${report.hashMismatches} command(s) ran with a different sandbox profile from the probed one`);
+  for (const f of report.callFailures || []) failures.push(`call: ${f}`);
   const ev = evaluateTokens(report.tokens || {}, report.expect || {}, report.controls || {}, { canaryHits: report.canaryHits ?? 0 });
   failures.push(...ev.failures);
   inconclusive.push(...ev.inconclusive);
