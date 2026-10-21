@@ -17,6 +17,7 @@ const BUDGET_USD = "0.025";
 
 function skipReason() {
   if (process.env.DETENT_LIVE_CLAUDE !== "1") return "set DETENT_LIVE_CLAUDE=1 to run";
+  if (!process.env.USER) return "$USER is unset; claude looks its keychain credential up by $USER, so the child needs the parent's value verbatim";
   if (process.platform !== "darwin") return `the capture-and-replay gate is macOS only (platform is ${process.platform})`;
   const nest = spawnSync("/usr/bin/sandbox-exec", ["-p", "(version 1)(allow default)", "/usr/bin/true"]);
   if (nest.status === 71) return "this shell is already inside a Seatbelt sandbox (sandbox-exec exit 71), and Seatbelt cannot nest: run from an unsandboxed terminal";
@@ -87,7 +88,7 @@ async function runStep(fx, { name, weak = false, prompt, mode = "shell" }) {
   const settingsFile = join(fx.root, `settings-${name}.json`);
   writeFileSync(settingsFile, JSON.stringify(settings, null, 2), { mode: 0o400 });
   const env = {
-    PATH: mode === "shell" ? process.env.PATH : pathWithShim(inst.binDir, process.env.PATH), HOME: fx.home, USER: userInfo().username, LOGNAME: userInfo().username, LANG: process.env.LANG || "en_US.UTF-8", TERM: "dumb", SHELL: "/bin/sh",
+    PATH: mode === "shell" ? process.env.PATH : pathWithShim(inst.binDir, process.env.PATH), HOME: fx.home, USER: process.env.USER, LOGNAME: process.env.USER, LANG: process.env.LANG || "en_US.UTF-8", TERM: "dumb", SHELL: "/bin/sh",
     TMPDIR: fx.dirs.tmp, CLAUDE_CODE_TMPDIR: fx.dirs.tmp, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0",
     CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", DISABLE_TELEMETRY: "1", DISABLE_AUTOUPDATER: "1",
   };
