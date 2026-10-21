@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Offline stand-in for gh in the terminal demo: signed in, and the account can push.
+case "$1" in
+  auth) echo "Logged in to github.com account demo-user" ;;
+  api) case "$2" in user) echo demo-user ;; *) echo true ;; esac ;;
+esac
