@@ -178,4 +178,4 @@ async function main() {
   }, 0);
 }
 
-main();
+main().catch((e) => emit({ error: "claude-reviewer crashed: " + e.message, next_step: "check the detent install (engine/runtime) and re-invoke" }, 1));
