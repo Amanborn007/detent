@@ -72,7 +72,8 @@ export function serve(mode, { logdir } = {}) {
   });
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+// A mode is required so `node --test <dir>`, which runs every file in it, does not start a server.
+if (import.meta.url === pathToFileURL(process.argv[1]).href && process.argv[2]) {
   const [mode, logdir] = process.argv.slice(2);
   const { url } = await serve(mode, { logdir });
   process.stdout.write(url + "\n");
