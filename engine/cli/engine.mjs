@@ -18,7 +18,7 @@
 
 import {
   readFileSync, writeFileSync, appendFileSync, renameSync, existsSync,
-  mkdirSync, readdirSync, statSync, accessSync, constants, rmSync,
+  mkdirSync, readdirSync, statSync, accessSync, constants, rmSync, realpathSync, writeSync,
 } from "node:fs";
 import { join, resolve, dirname, delimiter, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,6 +56,10 @@ function primaryArtifact(stage) {
   return a ? a[0] : null;
 }
 
+// The answer a human records to accept a degraded state (CONTRACT.md,
+// "The proceed-degraded answer").
+const PROCEED_DEGRADED_ANSWER = "proceed degraded (accept degraded confidence)";
+
 // Named gates that block a stage's `end`. v0 ships one: the intent gate on plan.
 const STAGE_END_GATES = {
   plan: {
@@ -75,12 +79,26 @@ const STAGE_END_GATES = {
 
 // There is no `engine` binary on PATH; under the detent wrapper, name the one that exists.
 function forCaller(text) {
-  return process.env.DETENT_CLI === "1" ? text.replace(/\bengine (?=(?:run|stage|gate|socket|next|dashboard|live|bench|eval|pack|respond|step|advisor|handoff|attempt|env|decide-why|spend|help)\b)/g, "detent ") : text;
+  return process.env.DETENT_CLI === "1" ? text.replace(/\bengine (?=(?:setup|run|stage|gate|socket|next|dashboard|live|bench|eval|pack|respond|step|advisor|handoff|attempt|env|decide-why|spend|help)\b)/g, "detent ") : text;
+}
+
+// process.exit() drops a buffered stream write, and a pipe truncates past ~8KB.
+// Write synchronously and retry the EAGAIN a non-blocking pipe returns.
+function writeLineSync(line) {
+  const buf = Buffer.from(line, "utf8");
+  let off = 0;
+  while (off < buf.length) {
+    try {
+      off += writeSync(1, buf, off, buf.length - off);
+    } catch (e) {
+      if (e.code !== "EAGAIN") throw e;
+    }
+  }
 }
 
 function out(obj, code = 0) {
   if (typeof obj.next_step === "string") obj.next_step = forCaller(obj.next_step);
-  process.stdout.write(JSON.stringify(obj) + "\n");
+  writeLineSync(JSON.stringify(obj) + "\n");
   process.exit(code);
 }
 
@@ -370,8 +388,18 @@ function nextDecisionId(decisions) {
   return "D-" + String(max + 1).padStart(3, "0");
 }
 
+// A judgment decision answered with the degraded-proceed string is not
+// resolved: that answer is legal only for an external/infra/capability/data
+// unblock, never a bypass of the owner's own call.
+function isUnresolvedJudgment(d) {
+  return d.cause === "judgment" && typeof d.answer === "string" &&
+    d.answer.trim().toLowerCase() === PROCEED_DEGRADED_ANSWER;
+}
+
 function pendingBlockers(decisions, stage) {
-  return decisions.filter((d) => d.status === "pending" && Array.isArray(d.blocks) && d.blocks.includes(stage));
+  return decisions.filter((d) =>
+    Array.isArray(d.blocks) && d.blocks.includes(stage) &&
+    (d.status === "pending" || isUnresolvedJudgment(d)));
 }
 
 // ---------------------------------------------------------------------------
@@ -977,7 +1005,8 @@ function cmdGateOpen(gateId, flags) {
   // us without a recorded benchmark (skipped automatically if the gate is
   // already answered, i.e. no real wait).
   let parkHandoff = null;
-  if (decision.status !== "answered") {
+  const resolved = decision.status === "answered" && !isUnresolvedJudgment(decision);
+  if (!resolved) {
     checkpointOnPark(runDir, `gate-open:${decision.gate || decision.id}`, decision.id);
     // The human now owns the next move, so this session has nothing left to do:
     // write the handoff and let it end rather than idle into a cold cache.
@@ -1002,7 +1031,7 @@ function cmdGateOpen(gateId, flags) {
     };
   }
 
-  if (decision.status === "answered") {
+  if (resolved) {
     out({
       ok: true,
       run_id: runId,
@@ -1017,20 +1046,22 @@ function cmdGateOpen(gateId, flags) {
 
   const curator = curatorOnPath();
   if (curator) {
-    // curator open takes only a self-contained .html; the gate-request .json is not openable.
-    const html = join(detentRoot(), ".plans", `${runId}-${stage || "gate"}.html`);
+    const html = renderGateArtifact({ runId, runDir }, {
+      name: decision.gate || decision.id,
+      stage,
+      decisions: pendingFor(decisions, decision),
+    });
     out({
       ok: true,
       run_id: runId,
       mode: "curator",
       decision,
       gate_artifact: gateArtifact,
+      html,
       ...(parkHandoff || {}),
       next_step:
-        `author ${html} with a data-plan-question="${decision.id}" block (stage SKILL), then ` +
-        `curator open ${html} && curator poll ${html}` +
-        ` — poll does not touch decisions.json: transcribe each {type:"decision", question:"${decision.id}", answer}` +
-        ` it returns into ${join(runDir, "decisions.json")} verbatim with answered_by:"human"; then re-run the refused engine command`,
+        `curator open ${html} ; once the human has answered there, run: engine gate collect --run ${runId}` +
+        ` — it maps the curator answer into decisions.json; then re-run the refused engine command`,
     });
   }
   out({
@@ -1045,6 +1076,220 @@ function cmdGateOpen(gateId, flags) {
       `${join(runDir, "decisions.json")}: set status:"answered", answer:<one of ${JSON.stringify(decision.options || [])}>, ` +
       `answered_by:"human", answered_at:<ISO-8601>. Agents never write answers. Then re-run the refused engine command.`,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Gate page and `engine gate collect`: gate open writes one curator page per
+// (run, gate); collect maps the answers back. Only an exact option resolves one.
+// ---------------------------------------------------------------------------
+
+/** Pending decisions a human answers together with `decision` (same blocked stages). */
+function pendingFor(decisions, decision) {
+  const blocks = new Set(decision.blocks || []);
+  return decisions.filter((d) => (d.status === "pending" || isUnresolvedJudgment(d)) &&
+    (d.id === decision.id || (Array.isArray(d.blocks) && d.blocks.some((b) => blocks.has(b)))));
+}
+
+function renderGateArtifact({ runId, runDir }, gate) {
+  const plansDir = join(detentRoot(), ".plans");
+  mkdirSync(plansDir, { recursive: true });
+  const file = join(plansDir, `${runId}-${gate.name}.html`);
+  const primary = (gate.stage && STAGE_ARTIFACTS[gate.stage]) || [];
+  const docs = [...new Set([...primary, ...Object.values(STAGE_ARTIFACTS).flat()])]
+    .filter((rel) => existsSync(join(runDir, rel)));
+  const docHtml = docs.map((rel, i) =>
+    `<details${i === 0 ? " open" : ""}><summary>${escapeHtml(rel)}</summary><p><strong>${i === 0 ? "The artifact this gate reviews" : "Earlier run artifact, for context"}: ${escapeHtml(rel)}</strong></p><pre>${escapeHtml(readFileSync(join(runDir, rel), "utf8"))}</pre></details>`,
+  ).join("\n");
+  const blocks = gate.decisions.map((d) => {
+    const options = (d.options || []).map((o) =>
+      `<div class="option" data-plan-option="${escapeHtml(o)}"><strong>${escapeHtml(o)}</strong></div>`,
+    ).join("\n");
+    return `<section>
+<h2>Decision ${escapeHtml(d.id)}</h2>
+<div data-plan-question="${escapeHtml(d.id)}">
+<p class="q-label">${escapeHtml(d.question || "")}</p>
+${d.context ? `<p class="sub">Context: ${escapeHtml(d.context)}</p>` : ""}
+<div class="options">
+${options}
+</div>
+</div>
+</section>`;
+  }).join("\n");
+  writeFileSync(file, `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gate ${escapeHtml(gate.name)}</title>
+<style>
+  :root { --paper:#faf8f5; --paper-2:#efece7; --ink:#16273c; --muted:#7e7c76; --rule:#e1ddd7;
+          --accent:#397882; --accent-tint:#bfe6ec; --mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --paper:#14181c; --paper-2:#1b2026; --ink:#e8e6e2; --muted:#98a2af;
+      --rule:#2b3037; --accent:#7fc3cd; --accent-tint:#1d3a40; }
+  }
+  * { box-sizing: border-box; min-width: 0; }
+  body { margin: 0; padding: 2rem 1rem 6rem; background: var(--paper); color: var(--ink);
+         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; line-height: 1.6; }
+  main { max-width: 52rem; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin: .2rem 0 1rem; }
+  h2 { font-size: 1.1rem; margin: 2rem 0 .5rem; }
+  .eyebrow, .sub { font-family: var(--mono); font-size: .75rem; color: var(--muted); }
+  pre { background: var(--paper-2); border: 1px solid var(--rule); padding: 1rem; overflow-x: auto;
+        white-space: pre-wrap; font-family: var(--mono); font-size: .85rem; }
+  summary { cursor: pointer; font-family: var(--mono); font-size: .85rem; }
+  .q-label { font-weight: 600; }
+  .options { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .6rem; }
+  .option { border: 1px solid var(--rule); border-radius: .4rem; padding: .6rem 1rem; cursor: pointer; background: var(--paper-2); }
+  .option:hover { border-color: var(--accent); }
+  [data-curator-chosen] { border-color: var(--accent); background: var(--accent-tint); }
+</style>
+</head>
+<body>
+<main>
+<p class="eyebrow">${escapeHtml(runId)} · gate ${escapeHtml(gate.name)}${gate.stage ? ` · stage ${escapeHtml(gate.stage)}` : ""}</p>
+<h1>Needs your decision</h1>
+${blocks}
+<h2>What you are deciding on</h2>
+${docHtml || `<p class="sub">No stage artifact has been written yet.</p>`}
+</main>
+</body>
+</html>
+`);
+  return file;
+}
+
+// ---------------------------------------------------------------------------
+// engine gate collect — map curator feedback into decisions.json. Non-blocking
+// by design: it never waits for a human. Only an answer that is EXACTLY one of
+// the decision's options resolves a decision; everything else stays pending.
+// ---------------------------------------------------------------------------
+
+function gateHtmlsOf(runId, runDir) {
+  const plansDir = join(detentRoot(), ".plans");
+  const names = new Set(loadDecisions(runDir).map((d) => d.gate || d.id));
+  return new Set([...names]
+    .map((n) => join(plansDir, `${runId}-${n}.html`))
+    .filter((f) => existsSync(f))
+    .map((f) => realpathSync(f)));
+}
+
+function persistFeedback(runDir, items) {
+  if (items.length === 0) return;
+  const lines = items.map((item) => JSON.stringify({ ts: nowIso(),
+    ...(item && typeof item === "object" && !Array.isArray(item) ? item : { raw: item }) }) + "\n");
+  appendFileSync(join(runDir, "review-feedback.jsonl"), lines.join(""));
+}
+
+/** Parse a feedback file: a JSON array of items, a {prompts:[...]} payload, or curator-drain JSON lines. */
+function parseFeedbackText(text, label) {
+  const lines = (() => {
+    try { return [JSON.parse(text)]; } catch { return text.split("\n").filter((l) => l.trim()); }
+  })();
+  const items = [];
+  for (const line of lines) {
+    let v = line;
+    if (typeof line === "string") {
+      try { v = JSON.parse(line); } catch { throw new Error(`${label}: not valid JSON: ${line.slice(0, 120)}`); }
+    }
+    if (Array.isArray(v)) items.push(...v);
+    else if (v && Array.isArray(v.prompts)) items.push(...v.prompts);
+    else throw new Error(`${label}: expected an array of items or a {prompts:[...]} payload`);
+  }
+  return items;
+}
+
+/** Run `curator drain` and return the prompts addressed to this run's gate pages. */
+function drainCuratorFor(runId, runDir) {
+  const curator = curatorOnPath();
+  if (!curator) return { items: [], note: "curator not on PATH" };
+  const htmls = gateHtmlsOf(runId, runDir);
+  if (htmls.size === 0) return { items: [], note: "no gate page rendered for this run yet" };
+  const r = spawnSync(curator, ["drain", ...htmls], { encoding: "utf8", timeout: 30000 });
+  if (r.error) throw new Error(`curator drain could not run: ${r.error.message}`);
+  if (r.status !== 0) throw new Error(`curator drain exited ${r.status}: ${(r.stdout + r.stderr).trim().slice(-400)}`);
+  const items = [];
+  for (const line of r.stdout.split("\n").filter((l) => l.trim())) {
+    let v;
+    try { v = JSON.parse(line); } catch { throw new Error(`curator drain printed non-JSON: ${line.slice(0, 120)}`); }
+    if (!Array.isArray(v.prompts) || v.prompts.length === 0) continue;
+    persistFeedback(runDir, v.prompts);
+    let key = v.key;
+    try { key = realpathSync(v.key); } catch { /* a key that no longer exists cannot be ours */ }
+    if (!htmls.has(key)) throw new Error(`curator drain returned feedback for ${v.key}, which is not one of this run's gate pages`);
+    items.push(...v.prompts);
+  }
+  return { items };
+}
+
+function applyFeedback(runDir, items) {
+  const decisions = loadDecisions(runDir);
+  const answered = [];
+  const unresolved = [];
+  let feedback = 0;
+  for (const item of items) {
+    if (!item || typeof item !== "object") throw new Error(`feedback item is not an object: ${JSON.stringify(item)}`);
+    if (item.type !== "decision") {
+      feedback++;
+      continue;
+    }
+    const d = decisions.find((x) => x.id === item.question);
+    const base = { id: item.question, answer: item.answer ?? null, ...(item.note ? { note: item.note } : {}) };
+    if (!d) { unresolved.push({ ...base, reason: "no such decision" }); continue; }
+    if (d.status !== "pending" && !isUnresolvedJudgment(d)) { unresolved.push({ ...base, reason: `decision is ${d.status}, not pending` }); continue; }
+    if (typeof item.answer !== "string" || !Array.isArray(d.options) || !d.options.includes(item.answer)) {
+      unresolved.push({ ...base, reason: item.answer == null ? "no option chosen" : `'${item.answer}' is not one of the options` });
+      continue;
+    }
+    if (isUnresolvedJudgment({ cause: d.cause, answer: item.answer })) {
+      unresolved.push({ ...base, reason: "a judgment decision cannot be resolved by the proceed-degraded answer" });
+      continue;
+    }
+    Object.assign(d, {
+      status: "answered", answer: item.answer, answered_by: "human", answered_via: "curator",
+      answered_at: new Date().toISOString(), ...(item.note ? { note: item.note } : {}),
+    });
+    answered.push(d.id);
+  }
+  if (answered.length) saveDecisions(runDir, decisions);
+  syncGateAnsweredEvents(runDir, decisions);
+  return { answered, unresolved, feedback, pending: decisions.filter((d) => d.status === "pending" || isUnresolvedJudgment(d)).map((d) => d.id) };
+}
+
+function collectResult(runId, runDir, items, extra = {}) {
+  if (items.length === 0) {
+    return { ok: true, run_id: runId, collected: 0, note: "nothing yet", answered: [], unresolved: [], feedback: 0, ...extra };
+  }
+  const r = applyFeedback(runDir, items);
+  return {
+    ok: true, run_id: runId, collected: items.length,
+    answered: r.answered, unresolved: r.unresolved, feedback: r.feedback, ...extra,
+    next_step: r.pending.length
+      ? `still pending: ${r.pending.join(", ")} — answer in curator, then: engine gate collect --run ${runId}`
+      : `all decisions answered — re-run the refused engine command`,
+  };
+}
+
+function cmdGateCollect(flags) {
+  const repo = repoOf(flags);
+  const { runId, runDir } = findRun(repo, flags);
+  let items;
+  let extra = {};
+  if (flags.file !== undefined) {
+    if (flags.file === true) refuse("--file requires a path", "engine gate collect --run <id> --file <feedback.json>");
+    const f = resolve(String(flags.file));
+    if (!existsSync(f)) refuse(`feedback file not found: ${f}`, "pass a curator feedback JSON file");
+    try { items = parseFeedbackText(readFileSync(f, "utf8"), f); } catch (e) { refuse(e.message, "fix the feedback file"); }
+    persistFeedback(runDir, items);
+  } else {
+    try {
+      const d = drainCuratorFor(runId, runDir);
+      items = d.items;
+      extra = d.note ? { curator: d.note } : {};
+    } catch (e) { fail(e.message, "check `curator status`, or pass --file <feedback.json>"); }
+  }
+  const res = collectResult(runId, runDir, items, extra);
+  out({ next_step: `waiting on a human: engine gate collect --run ${runId} again after they answer in curator`, ...res });
 }
 
 // ---------------------------------------------------------------------------
@@ -1932,7 +2177,7 @@ function cmdAdvisorConsult(flags) {
 // Dispatch.
 // ---------------------------------------------------------------------------
 
-const USAGE = "engine <run new|stage begin|stage end|gate open|socket call|next|dashboard|live|bench|eval|pack validate|respond|step|advisor consult|handoff|attempt|env|decide-why|spend|help> — see engine/cli/README.md";
+const USAGE = "engine <setup|run new|stage begin|stage end|gate open|gate collect|socket call|next|dashboard|live|bench|eval|pack validate|respond|step|advisor consult|handoff|attempt|env|decide-why|spend|help> — see engine/cli/README.md";
 
 /**
  * cmdEval — wraps engine/eval/eval.mjs's runEval() for `engine eval`. An
@@ -2397,14 +2642,164 @@ function cmdPackValidate(flags) {
   out({ ok: true, ...summary, next_step: "pack is valid — proceed" });
 }
 
+// ---------------------------------------------------------------------------
+// engine setup — first-run config. Fills empty detent.user.yaml fields from
+// git/gh and writes a starter stack.yaml wired to the built-in adapters.
+// ---------------------------------------------------------------------------
+
+const PLACEHOLDER_EMAIL = "you@example.com";
+
+function probeValue(cmd, args, cwd) {
+  const r = spawnSync(cmd, args, { encoding: "utf8", cwd, timeout: 15000 });
+  if (r.error || r.status !== 0) return null;
+  return r.stdout.trim() || null;
+}
+
+function shellQuote(p) {
+  return /^[A-Za-z0-9_/.:@%+=,-]+$/.test(p) ? p : `'${p.replace(/'/g, "'\\''")}'`;
+}
+
+// Fills one empty child of the top-level `user:` block; returns the new
+// lines, or null when no safely editable line exists there.
+function fillUserKey(lines, key, value) {
+  const start = lines.findIndex((l) => /^user:[ \t]*(#.*)?\r?$/.test(l));
+  if (start === -1) return null;
+  const ph = PLACEHOLDER_EMAIL.replace(".", "\\.");
+  let indent = null;
+  for (let i = start + 1; i < lines.length; i++) {
+    const l = lines[i];
+    if (!l.trim() || /^[ \t]*#/.test(l)) continue;
+    const lead = /^ */.exec(l)[0].length;
+    if (lead === 0) return null;
+    if (indent === null) indent = lead;
+    if (lead !== indent) continue;
+    const m = new RegExp(`^( {${indent}}${key}:)[ \\t]*(?:""|''|"${ph}"|${ph})?([ \\t]+#.*?)?([ \\t]*\\r?)$`).exec(l);
+    if (!m) continue;
+    const out = lines.slice();
+    out[i] = `${m[1]} ${JSON.stringify(value)}${m[2] || ""}${m[3].includes("\r") ? "\r" : ""}`;
+    return out;
+  }
+  return null;
+}
+
+function starterStack(clone) {
+  const adapter = (n) => JSON.stringify(join(clone, "engine", "adapters", n));
+  return [
+    "# Starter stack.yaml written by `detent setup`. Add other sockets from",
+    "# engine/stack.example.yaml in the detent clone as you wire more tools.",
+    'engine_version: "1"',
+    "",
+    "sockets:",
+    "  ticket:",
+    `    command: ${adapter("gh-ticket")}`,
+    '    version: "builtin"',
+    "",
+    "  knowledge:",
+    "    providers:",
+    '      - name: "repo-docs"',
+    `        command: ${adapter("repo-docs-knowledge")}`,
+    '        version: "builtin"',
+    "",
+    "  bot-comments:",
+    `    command: ${adapter("gh-bot-comments")}`,
+    '    version: "builtin"',
+    "",
+  ].join("\n");
+}
+
+function cmdSetup(flags) {
+  if (!flags.repo || flags.repo === true) {
+    return refuse("setup needs the work repo", "detent setup --repo <path-to-work-repo>");
+  }
+  const repo = resolve(flags.repo);
+  if (!existsSync(repo) || !statSync(repo).isDirectory()) {
+    return refuse(`--repo is not a directory: ${repo}`, "pass the path of the repo you will work in");
+  }
+  const g = spawnSync("git", ["-C", repo, "rev-parse", "--git-dir"], { encoding: "utf8" });
+  if (g.error || g.status !== 0) {
+    return refuse(`${repo} is not a git repo`, "run `git init` there, or pass the path of your work repo");
+  }
+  const stackPath = join(repo, "stack.yaml");
+  if (existsSync(stackPath) && flags.force !== true) {
+    return refuse(`${stackPath} already exists`, "keep it, or re-run with --force to overwrite it");
+  }
+
+  const clone = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const userPath = join(detentRoot(), "detent.user.yaml");
+  const wrote = [];
+  const leftAlone = [];
+  const unresolved = [];
+  const unresolvedReasons = {};
+
+  let text;
+  if (existsSync(userPath)) {
+    text = readFileSync(userPath, "utf8");
+  } else {
+    const example = join(clone, "detent.user.example.yaml");
+    if (!existsSync(example)) {
+      return fail(`template missing: ${example}`, "restore detent.user.example.yaml in the detent clone");
+    }
+    text = readFileSync(example, "utf8");
+    wrote.push(userPath);
+  }
+  let user;
+  try {
+    user = parseYamlSubset(text, userPath).user || {};
+  } catch (e) {
+    return refuse(`failed to parse ${userPath}: ${e.message}`, "fix or delete detent.user.yaml, then re-run detent setup");
+  }
+  const isEmpty = (v) => v === undefined || v === null || v === "" || v === "''" || v === PLACEHOLDER_EMAIL;
+  const gitCmd = process.env.DETENT_GIT_CMD || "git";
+  const ghCmd = process.env.DETENT_GH_CMD || "gh";
+  const probes = [
+    ["name", () => probeValue(gitCmd, ["config", "user.name"], repo)],
+    ["email", () => probeValue(gitCmd, ["config", "user.email"], repo)],
+    ["github_login", () => probeValue(ghCmd, ["api", "user", "--jq", ".login"], repo)],
+  ];
+  let changed = false;
+  for (const [key, probe] of probes) {
+    const dotted = `user.${key}`;
+    if (!isEmpty(user[key])) { leftAlone.push(dotted); continue; }
+    const value = probe();
+    if (value === null) { unresolved.push(dotted); continue; }
+    const edited = fillUserKey(text.split("\n"), key, value);
+    if (edited === null) {
+      unresolved.push(dotted);
+      unresolvedReasons[dotted] = `no empty ${key}: line found under the top-level user: block`;
+      continue;
+    }
+    text = edited.join("\n");
+    changed = true;
+  }
+  if (!Array.isArray(user.teams) || user.teams.length === 0) unresolved.push("user.teams");
+  if (isEmpty(user.jira_account)) unresolved.push("user.jira_account");
+  if (changed || wrote.includes(userPath)) writeFileSync(userPath, text);
+  if (!wrote.includes(userPath) && changed) wrote.push(userPath);
+
+  writeFileSync(stackPath, starterStack(clone));
+  wrote.push(stackPath);
+
+  out({
+    ok: true,
+    wrote,
+    left_alone: leftAlone,
+    unresolved,
+    ...(Object.keys(unresolvedReasons).length ? { unresolved_reasons: unresolvedReasons } : {}),
+    next_step: `detent run new --ticket <owner/repo#N> --repo ${shellQuote(repo)}` +
+      (unresolved.length ? `; fill ${unresolved.join(", ")} in ${userPath} (run \`gh auth login\` first for user.github_login)` : ""),
+  });
+}
+
 function cmdHelp() {
   out({
     ok: true,
     usage: {
+      "setup": "engine setup --repo <path> [--force] — first run: create <DETENT_ROOT>/detent.user.yaml and fill empty user.name/email/github_login from git and gh (never overwrites a set value), and write a starter stack.yaml in the work repo wired to the built-in adapters by absolute path. Refuses (exit 2) if --repo is missing or not a git repo, or if stack.yaml exists without --force. Values it cannot detect are listed in `unresolved`",
       "run new": "engine run new --ticket <ref> [--repo <path>] [--slug <slug>] [--no-worktree] — create a run under the centralized <DETENT_ROOT>/.sdlc/ with a dedicated git worktree (the default flow)",
       "stage begin": "engine stage begin <stage> [--run <id>] [--repo <path>] — enter a stage (refuses illegal transitions)",
       "stage end": "engine stage end <stage> [--run <id>] [--repo <path>] — finish a stage (checks artifact + gates). implement: [--tdd-test <name> --tdd-red <sha> --tdd-green <sha> | --tdd-exempt <reason>] records the tdd block (implement records, never judges). recheck: asserts red_sha is an ancestor of green_sha via git cat-file/merge-base, proving ORDER only, never that the test was observed failing.",
-      "gate open": "engine gate open <gate-name-or-decision-id> [--run <id>] [--repo <path>] — render a pending human gate",
+      "gate open": "engine gate open <gate-name-or-decision-id> [--run <id>] [--repo <path>] — render a pending human gate; with curator on PATH it writes <DETENT_ROOT>/.plans/<run>-<gate>.html (one data-plan-question block per pending decision, stage artifacts embedded) and prints `curator open` then `engine gate collect`",
+      "gate collect": "engine gate collect --run <id> [--file <feedback.json>] — non-blocking: map curator answers into decisions.json (only an exact decision option resolves one; null/other answers stay pending and are listed under `unresolved`); selection/prompt feedback is appended to <run>/review-feedback.jsonl. Without --file it runs `curator drain` for the run's gate pages only.",
       "socket call": "engine socket call <name> [--payload-file <json>] [--stack <path>] — dispatch a socket per stack.yaml",
       "next": "engine next [--run <id>] [--repo <path>] — print the exact next command for the current run",
       "dashboard": "engine dashboard — render ALL runs under <DETENT_ROOT>/.sdlc/ into one curator artifact (stage, status, pending gates, age)",
@@ -2438,10 +2833,12 @@ function main() {
   }
   const [a, b, c] = positional;
   if (a === "help" || flags.help === true) return cmdHelp();
+  if (a === "setup") return cmdSetup(flags);
   if (a === "run" && b === "new") return cmdRunNew(flags);
   if (a === "stage" && b === "begin") return cmdStageBegin(c, flags);
   if (a === "stage" && b === "end") return cmdStageEnd(c, flags);
   if (a === "gate" && b === "open") return cmdGateOpen(c, flags);
+  if (a === "gate" && b === "collect") return cmdGateCollect(flags);
   if (a === "socket" && b === "call") return cmdSocketCall(c, flags);
   if (a === "next") return cmdNext(flags);
   if (a === "dashboard") return cmdDashboard();
@@ -2460,9 +2857,14 @@ function main() {
   refuse(`unknown command: ${positional.join(" ") || "(none)"}`, USAGE);
 }
 
-try {
-  main();
-} catch (e) {
+function internalError(e) {
   // Loud, structured, never silent (error-handling rule: no swallowed errors).
   out({ ok: false, reason: `engine internal error: ${e.message}`, next_step: "this is a bug in engine.mjs — read the stack", stack: e.stack }, 1);
+}
+
+try {
+  const pending = main();
+  if (pending && typeof pending.catch === "function") pending.catch(internalError);
+} catch (e) {
+  internalError(e);
 }
