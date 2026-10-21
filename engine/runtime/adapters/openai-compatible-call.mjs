@@ -58,11 +58,11 @@ export async function complete({ baseUrl, model, prompt, apiKey, fetch = globalT
       if (res.ok) {
         let body;
         try { body = JSON.parse(text); } catch (e) {
-          return scrub({ protocol: PROTOCOL, ok: false, class: "bad_body", http_status: res.status, attempts: attempt, message: `response body is not JSON: ${e.message}: ${text.slice(0, SNIPPET)}` });
+          return scrub({ protocol: PROTOCOL, ok: false, class: "bad_body", http_status: res.status, attempts: attempt, message: `response body is not JSON: ${e.message}: ${scrub(text).slice(0, SNIPPET)}` });
         }
         return scrub({ protocol: PROTOCOL, ok: true, http_status: res.status, attempts: attempt, body });
       }
-      failure = { class: "http", http_status: res.status, attempts: attempt, message: text.slice(0, SNIPPET) };
+      failure = { class: "http", http_status: res.status, attempts: attempt, message: scrub(text).slice(0, SNIPPET) };
       why = `HTTP ${res.status}`;
       retryAfter = res.headers.get("retry-after");
       again = retryable(res.status);
