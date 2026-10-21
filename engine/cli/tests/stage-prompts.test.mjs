@@ -45,3 +45,49 @@ test("run state is placed in DETENT_ROOT/.sdlc, not the work repo's main checkou
   }
   assert.match(read("implement/SKILL.md"), /\$\{DETENT_ROOT\}\/\.sdlc\//);
 });
+
+const REAL_STAGES = new Set(["intake", "research", "plan", "implement", "recheck", "ship", "respond", "intent_check"]);
+
+test("stage names in blocks literals and stage-status keys are real stages", () => {
+  for (const f of docs) {
+    const s = read(f);
+    for (const m of s.matchAll(/"blocks":\s*\[([^\]]*)\]/g)) {
+      for (const name of m[1].match(/"([^"]+)"/g) || []) {
+        assert.ok(REAL_STAGES.has(name.slice(1, -1)), `${f}: blocks names pseudo-stage ${name}`);
+      }
+    }
+    for (const m of s.matchAll(/`(\w+): (?:in_progress|done|blocked)(?:\|[a-z_|]+)?`/g)) {
+      assert.ok(REAL_STAGES.has(m[1]), `${f}: stage-status key '${m[1]}' is not a real stage`);
+    }
+  }
+  const example = /```json\n(\{\n  "run_id"[\s\S]*?\n\})\n```/.exec(read("CONTRACT.md"));
+  assert.ok(example, "CONTRACT.md stage-status example not found");
+  for (const key of Object.keys(JSON.parse(example[1]).stages)) {
+    assert.ok(REAL_STAGES.has(key), `CONTRACT.md stage-status example has pseudo-stage '${key}'`);
+  }
+});
+
+test("ship says not to push while a decision blocking ship is pending", () => {
+  assert.match(read("ship/SKILL.md"), /must not push[\s\S]{0,200}pending/i);
+  assert.match(read("ship/SKILL.md"), /"blocks": \["ship"\]/);
+});
+
+test("recheck reads worktree, branch and base_sha from run.json, not the implement entry", () => {
+  const recheck = read("recheck/SKILL.md");
+  assert.match(recheck, /run\.json/);
+  assert.match(recheck, /base_sha/);
+  assert.ok(!/from the `implement` entry/.test(recheck), "recheck still reads the range from the implement entry");
+  assert.ok(!/recording worktree path, branch, and commit range/.test(read("implement/SKILL.md")),
+    "implement still claims stage end records worktree/branch/range");
+});
+
+test("plan asks why rejected options lost and implement records dead ends and env", () => {
+  const plan = read("plan/SKILL.md");
+  assert.match(plan, /detent decide-why --run <id> --decision <D-id> --option "<opt>" --why "<reason>"/);
+  assert.match(plan, /never invent/i);
+  const impl = read("implement/SKILL.md");
+  assert.match(impl, /detent attempt "<approach>" --run <id> --outcome failed\|abandoned\|superseded --evidence "<why>"/);
+  assert.match(impl, /detent attempt --none --run <id>/);
+  assert.match(impl, /detent env --run <id> --verify "<cmd>"/);
+  assert.match(impl, /incomplete/i);
+});
