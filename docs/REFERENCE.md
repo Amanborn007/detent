@@ -115,6 +115,8 @@ A run has seven stages: intake, research, plan, implement, recheck, ship and res
 
 **How you answer a gate.** `detent gate open <id>` writes `.plans/<run-id>-<gate>.html` with one question per pending decision and the stage artifacts embedded. `curator open` shows it. After you click, `detent gate collect --run <run-id>` runs `curator drain` for that run's gate pages only and writes an answer into `decisions.json` only when it exactly matches one of the decision's options. Other feedback goes to `review-feedback.jsonl`. Without curator you can edit `decisions.json` by hand.
 
+**Drive (experimental).** `detent drive` is experimental, runs on macOS and Linux only, and spends Claude credit: it stops at `--budget` (default 5 USD per invocation). It runs one `claude -p` child per stage with `--setting-sources project`, so the target repo's own `.claude/settings.json` hooks run: only drive repos you trust. Children get a scoped permission profile (no blanket Bash), cannot push, and cannot answer or edit an existing decision. Stops are `needs_human`, `before_ship`, `max_steps`, `budget`, or a failure such as `no_progress`, `child_timeout` or `child_answered_decision`.
+
 **Run state.** Each run lives in `${DETENT_ROOT}/.sdlc/<date>-<ticket>[-slug]/` with `run.json`, `stage-status.json`, `decisions.json`, `events.jsonl`, `gates/`, `handoff/` and `worktree/`. Run ids never change, so a re-run is a new run. Every command prints one JSON line with a `next_step`. Exit 0 is ok, 1 is a provider or environment failure, and 2 is a refusal with a `reason`.
 
 [GUIDE.md](../GUIDE.md) has the stage details. `engine/stages/WALKTHROUGH.md` traces a fictional ticket through all seven.
@@ -205,6 +207,7 @@ Sentinel is a tool and a hook, not a skill. It sits in the same loop.
 | `detent stage begin <stage>`, `detent stage end <stage>` | Move a stage, with the checks above. |
 | `detent gate open <id>` | Render a pending gate as a curator page. |
 | `detent gate collect --run <id>` | Write your curator answers into `decisions.json`. |
+| `detent drive --run <id>` | Experimental: run the stages with headless Claude children until a human decision is needed. Flags: `--budget` (USD, default 5), `--model`, `--max-steps`, `--allow-ship`. See the note below. |
 | `detent socket call <name>` | Call one socket by hand. |
 | `detent dashboard`, `detent live <run-id>` | One curator page of all runs, or a live view of one run. |
 | `detent respond --pr <url>` | Arm the respond stage on an open PR with no ticket. |

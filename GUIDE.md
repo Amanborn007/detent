@@ -135,6 +135,8 @@ detent gate open <gate-id> --repo ~/code/your-repo
 
 With curator installed this writes `.plans/<run-id>-<gate>.html`, a page with one question per pending decision and the plan or research text underneath, and prints a `curator open` command. Answer in the browser, then run `detent gate collect --run <run-id>`. It reads your clicks from curator and writes an answer into `decisions.json` only when it is exactly one of the decision's options. Anything else stays pending and is listed under `unresolved`. Comments you add are saved to `review-feedback.jsonl` in the run directory. Run `detent dashboard` to see every active run with its stage and pending gates.
 
+**Letting the engine drive.** `detent drive --run <run-id>` runs the stages for you with one headless Claude child per stage and stops when it needs your decision, before ship, or when it has spent `--budget` (default 5 USD). In a Claude Code session, `/detent:drive` launches it in the background and walks you through the gate page. `detent drive` is experimental, works on macOS and Linux only, and spends Claude credit. Children run with `--setting-sources project`, so the target repo's own `.claude/settings.json` hooks run: only drive repos you trust. Children cannot push and cannot answer decisions; the details are in [engine/cli/README.md](engine/cli/README.md).
+
 ### 4.3 You pushed a PR
 
 The autoscan hook runs after `gh pr create`, `gh pr ready` and `git push` on a branch with an open PR. It does two things:

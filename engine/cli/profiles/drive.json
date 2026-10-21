@@ -1,0 +1,29 @@
+{
+  "$comment": "Base permission profile for `engine drive` children, passed to `claude -p` with --settings next to --permission-mode dontAsk and --setting-sources project, so anything not allowed here is denied rather than prompted. drive adds the engine path prefix, the implement-only git add/commit, and the repo's declared verify command. Never a bypass mode and never a blanket Bash grant: drive refuses to start on a profile that has either (--profile <file> replaces this one and is checked the same way).",
+  "env": {
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "DISABLE_TELEMETRY": "1"
+  },
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "allow": [
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "WebFetch",
+      "WebSearch"
+    ]
+  }
+}
