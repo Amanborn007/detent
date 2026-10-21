@@ -209,3 +209,11 @@ test("prompt is stdin-only, cwd is an empty temp dir", () => {
   assert.notEqual(rec.cwd, realpathSync(repo));
   assert.deepEqual(rec.entries, []);
 });
+
+test("DETENT_RUNTIME=nope: exit 2 naming the runtime, claude never called", () => {
+  const r = run(req(mkRepo()), { env: { DETENT_RUNTIME: "nope" } });
+  assert.equal(r.code, 2);
+  assert.match(r.json.error, /nope/);
+  assert.ok(r.json.next_step);
+  assert.equal(r.called, false);
+});
