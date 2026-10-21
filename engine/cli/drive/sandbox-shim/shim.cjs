@@ -117,6 +117,7 @@ function denyCovers(denySet, requirement) {
 // exp: { home?, readDeny[], writeAllow[], readAllow?[], writeDenyRequired[] }
 function validateProfile(text, exp) {
   const violations = [];
+  const findings = [];
   const v = (code) => { if (!violations.includes(code)) violations.push(code); };
   let forms;
   try { forms = parseSbpl(text); } catch (e) { return { ok: false, violations: [`profile_unparseable:${e.message}`], ports: [] }; }
@@ -178,7 +179,10 @@ function validateProfile(text, exp) {
     if (ops.some((o) => o.startsWith("file-write"))) {
       for (const s of strs(filters)) {
         if (isRegexKind(s.kind)) v("write_regex_allow");
-        else if (!within(allowedWrite, s.v)) v(`write_outside_expected:${s.v}`);
+        else if (!within(allowedWrite, s.v)) {
+          // Claude adds its own per-uid tmp dir; surfaced so the caller decides whether to deny it.
+          if (/^(\/private)?\/tmp\/claude-\d+$/.test(s.v)) { if (!findings.includes(`claude_added_write:${s.v}`)) findings.push(`claude_added_write:${s.v}`); } else v(`write_outside_expected:${s.v}`);
+        }
       }
     }
     if (ops.some((o) => o.startsWith("file-read")) && !ops.some((o) => o.startsWith("file-write"))) {
@@ -190,7 +194,7 @@ function validateProfile(text, exp) {
   if (ports.size > 2) v(`network_ports_gt2:${[...ports].join(",")}`);
   for (const p of exp.readDeny || []) if (!denyCovers(denyRead, p)) v(`deny_read_missing:${p}`);
   for (const p of exp.writeDenyRequired || []) if (!denyCovers(denyWrite, p)) v(`deny_write_missing:${p}`);
-  return { ok: violations.length === 0, violations, ports: [...ports].sort((a, b) => a - b) };
+  return { ok: violations.length === 0, violations, findings, ports: [...ports].sort((a, b) => a - b) };
 }
 
 function normaliseProfile(text) {
@@ -211,7 +215,16 @@ function parseTokens(text) {
   return out;
 }
 
-function evaluateTokens(tokens, expect, controls, { canaryHits = 0 } = {}) {
+function parseNames(text) {
+  const out = {};
+  for (const line of String(text).split("\n")) {
+    const m = /^@names ([a-z0-9_]+) (.*)$/.exec(line.trim());
+    if (m) out[m[1]] = m[2].split(",").filter((n) => /^[A-Za-z0-9_]+$/.test(n));
+  }
+  return out;
+}
+
+function evaluateTokens(tokens, expect, controls, { canaryHits = 0, names = {} } = {}) {
   const failures = [];
   const inconclusive = [];
   for (const [key, e] of Object.entries(expect || {})) {
@@ -235,6 +248,10 @@ function evaluateTokens(tokens, expect, controls, { canaryHits = 0 } = {}) {
       if (c === undefined) inconclusive.push(`${key}: no control ${e.control}`);
       else if (t !== c) failures.push(`${key}: sandboxed rc ${t} differs from unsandboxed rc ${c}`);
     } else failures.push(`${key}: unknown expectation ${e.k}`);
+  }
+  for (let i = 0; i < failures.length; i++) {
+    const key = failures[i].split(":")[0];
+    if (names[key] && names[key].length) failures[i] += ` (names: ${names[key].join(",")})`;
   }
   if (canaryHits > 0) failures.push(`canary_listener: ${canaryHits} connection(s) reached drive's listener`);
   return { failures, inconclusive };
@@ -317,15 +334,17 @@ async function capture(cfg, logDir, p) {
   const v = validateProfile(p.profile, cfg.validate);
   state.violations = v.violations;
   state.ports = v.ports;
+  state.findings = v.findings;
   if (!v.ok) { state.ok = false; state.stage = "static"; return state; }
   const canary = await startCanaryListener({ socketPath: path.join(logDir, "canary.sock") });
   let r;
   try { r = await replay(cfg, p, canary); } finally { await sleep(100); state.canaryHits = canary.hits(); await canary.close(); }
   state.tokens = parseTokens(r.out);
+  state.names = parseNames(r.out);
   state.replayCode = r.code;
   state.stage = "replay";
   if (r.timedOut || r.error) { state.ok = false; state.failures.push(`replay ${r.timedOut ? "timed out" : `failed to start: ${r.error}`}`); return state; }
-  const ev = evaluateTokens(state.tokens, state.expect, state.controls, { canaryHits: state.canaryHits });
+  const ev = evaluateTokens(state.tokens, state.expect, state.controls, { canaryHits: state.canaryHits, names: state.names });
   state.failures = ev.failures;
   state.inconclusive = ev.inconclusive;
   state.ok = ev.failures.length === 0 && ev.inconclusive.length === 0;
@@ -388,7 +407,7 @@ async function main(argv) {
   return run();
 }
 
-module.exports = { parseSbpl, validateProfile, normaliseProfile, profileHash, parseTokens, evaluateTokens, startCanaryListener, parseWrapper, REFUSED, REFUSE_EXIT, BUILTIN_WRITE, KNOWN_MACH };
+module.exports = { parseNames, parseSbpl, validateProfile, normaliseProfile, profileHash, parseTokens, evaluateTokens, startCanaryListener, parseWrapper, REFUSED, REFUSE_EXIT, BUILTIN_WRITE, KNOWN_MACH };
 
 if (require.main === module) {
   main(process.argv.slice(2)).catch((e) => { process.stderr.write(`${REFUSED}: shim error: ${e && e.stack ? e.stack : e}\n`); process.exit(REFUSE_EXIT); });

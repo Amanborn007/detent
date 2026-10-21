@@ -46,11 +46,12 @@ function main() {
   }
   const r = cp.spawnSync(sh.realShell, ["-c", cfg.probe.script, "selfprobe", String(sh.canaryPort), sh.canarySocket], { encoding: "utf8", timeout: cfg.timeoutMs, maxBuffer: 1 << 20 });
   const tokens = lib.parseTokens(r.stdout || "");
-  const ev = lib.evaluateTokens(tokens, cfg.probe.expect, cfg.probe.controls || {});
+  const names = lib.parseNames(r.stdout || "");
+  const ev = lib.evaluateTokens(tokens, cfg.probe.expect, cfg.probe.controls || {}, { names });
   const failures = [...ev.failures];
   if (r.error) failures.push(`probe did not run: ${r.error.code || r.error.message}`);
   const ok = failures.length === 0 && ev.inconclusive.length === 0;
-  fs.writeSync(fd, `${JSON.stringify({ ev: "call", mode: "shell", ts: Date.now(), ok, tokens, failures, inconclusive: ev.inconclusive })}\n`);
+  fs.writeSync(fd, `${JSON.stringify({ ev: "call", mode: "shell", ts: Date.now(), ok, tokens, names, failures, inconclusive: ev.inconclusive })}\n`);
   if (!ok) return refuse(`the sandbox probe failed inside the sandbox: ${[...failures, ...ev.inconclusive].slice(0, 6).join("; ")}`);
   return runReal();
 }

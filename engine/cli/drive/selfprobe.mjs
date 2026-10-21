@@ -16,6 +16,7 @@ export const validateCapturedProfile = shim.validateProfile;
 export const profileHash = shim.profileHash;
 export const startCanaryListener = shim.startCanaryListener;
 export const parseTokens = shim.parseTokens;
+export const parseNames = shim.parseNames;
 export const evaluateTokens = shim.evaluateTokens;
 export const SHIM_REFUSED_MARKER = shim.REFUSED;
 
@@ -95,8 +96,14 @@ export function buildSelfProbe(opts) {
 
   rc("tty_dev_tty", "( : > /dev/tty )", E.rcNot0());
   rc("kill_parent", `kill -0 ${drivePid}`, E.rcNot0());
-  count("env_secret_names", `/usr/bin/env | cut -d= -f1 | grep -ciE '${SECRET_NAMES}'`, E.zero());
-  if (envAllow) count("env_extra_names", `/usr/bin/env | cut -d= -f1 | grep -cvxE ${sq(`(${[...envAllow, RUNTIME_ENV].join("|")})`)}`, E.zero());
+  const secretGrep = `grep -iE '${SECRET_NAMES}'`;
+  count("env_secret_names", `/usr/bin/env | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' | cut -d= -f1 | ${secretGrep} | wc -l | tr -d ' '`, E.zero());
+  L.push(`[ "$N" != 0 ] && echo "@names env_secret_names $(/usr/bin/env | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' | cut -d= -f1 | ${secretGrep} | paste -sd, -)"`);
+  if (envAllow) {
+    const extraGrep = `grep -vxE ${sq(`(${[...envAllow, RUNTIME_ENV].join("|")})`)}`;
+    count("env_extra_names", `/usr/bin/env | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' | cut -d= -f1 | ${extraGrep} | wc -l | tr -d ' '`, E.zero());
+    L.push(`[ "$N" != 0 ] && echo "@names env_extra_names $(/usr/bin/env | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' | cut -d= -f1 | ${extraGrep} | paste -sd, -)"`);
+  }
   count("ps_parent_secret", `ps -E -ww -p ${drivePid} -o command= 2>/dev/null | tr ' ' '\\n' | grep -cE '^[A-Za-z0-9_]*(${SECRET_NAMES})[A-Za-z0-9_]*='`, E.zero());
   for (const t of toolchain) {
     add(`tool_${t}`, `command -v ${sq(t)} >/dev/null 2>&1 && ${sq(t)} ${VERSION_FLAG[t] ?? "--version"} >/dev/null 2>&1; r tool_${t} $?`, { k: "sameAsControl", control: `tool_${t}_rc` });
@@ -166,7 +173,7 @@ export const pathWithShim = (binDir, pathVar) => `${binDir}:${pathVar}`;
 // mode "env" reads the env shim's log, "shell" the shim shell's.
 export function readShimReport(dir, { mode = "env" } = {}) {
   const log = join(dir, "log");
-  const rep = { captured: false, ok: false, violations: [], tokens: {}, failures: [], inconclusive: [], canaryHits: 0, calls: 0, refused: 0, hashMismatches: 0, callFailures: [] };
+  const rep = { captured: false, ok: false, violations: [], tokens: {}, failures: [], inconclusive: [], canaryHits: 0, calls: 0, refused: 0, hashMismatches: 0, callFailures: [], findings: [], names: {} };
   const stateFile = join(log, "state.json");
   if (mode === "env" && existsSync(stateFile)) Object.assign(rep, JSON.parse(readFileSync(stateFile, "utf8")), { captured: true });
   const calls = join(log, mode === "shell" ? "shell-calls.jsonl" : "calls.jsonl");
@@ -175,7 +182,7 @@ export function readShimReport(dir, { mode = "env" } = {}) {
       if (!line.trim()) continue;
       const ev = JSON.parse(line);
       if (ev.ev !== "call") continue;
-      if (mode === "shell" && rep.calls === 0) Object.assign(rep, { captured: true, tokens: ev.tokens });
+      if (mode === "shell" && rep.calls === 0) Object.assign(rep, { captured: true, tokens: ev.tokens, names: ev.names || {} });
       rep.calls++;
       if (!ev.ok) rep.refused++;
       if (ev.reason === "profile_changed") rep.hashMismatches++;
@@ -206,12 +213,12 @@ export function evaluateSelfProbe(report) {
   for (const v of report.violations || []) failures.push(`profile: ${v}`);
   if ((report.hashMismatches ?? 0) > 0) failures.push(`profile_changed: ${report.hashMismatches} command(s) ran with a different sandbox profile from the probed one`);
   for (const f of report.callFailures || []) failures.push(`call: ${f}`);
-  const ev = evaluateTokens(report.tokens || {}, report.expect || {}, report.controls || {}, { canaryHits: report.canaryHits ?? 0 });
+  const ev = evaluateTokens(report.tokens || {}, report.expect || {}, report.controls || {}, { canaryHits: report.canaryHits ?? 0, names: report.names || {} });
   failures.push(...ev.failures);
   inconclusive.push(...ev.inconclusive);
   if (calls !== toolUses) {
     failures.push(`call_count_mismatch: the shim wrapped ${calls} call(s) but the transcript has ${toolUses} Bash tool use(s); a command may have bypassed the shim`);
     discard = true;
   }
-  return { ok: failures.length === 0 && inconclusive.length === 0, noBash: false, discard, failures, inconclusive, knownLimits };
+  return { ok: failures.length === 0 && inconclusive.length === 0, noBash: false, discard, failures, inconclusive, knownLimits, findings: report.findings || [] };
 }
