@@ -473,6 +473,10 @@ function cmdRunNew(flags) {
   for (const s of STAGES) stages[s] = { status: "pending" };
   writeJsonAtomic(join(runDir, "stage-status.json"), { run_id: runId, stages });
   writeJsonAtomic(join(runDir, "decisions.json"), []);
+  const suggested = indexSuggestedVerify(repo);
+  if (suggested) {
+    writeJsonAtomic(join(runDir, "env.json"), { commands: {}, gotchas: [], suggested: { verify: { source: "index", command: suggested } } });
+  }
   // attempts.jsonl is deliberately NOT created here. The handoff distinguishes
   // "nobody recorded anything" (absent) from "nothing was rejected" (present
   // and empty), and only an explicit `engine attempt --none` may produce the
@@ -491,6 +495,16 @@ function cmdRunNew(flags) {
     status: "pending",
     next_step: `engine stage begin intake --run ${runId} --repo ${repo}`,
   });
+}
+
+// Only commands detent index itself emits are accepted, so a tampered manifest cannot seed an arbitrary one.
+const INDEX_VERIFY = new Set(["npm test", "make test", "go test ./...", "cargo test", "pytest"]);
+function indexSuggestedVerify(repo) {
+  const p = join(repo, ".detent", "index", "manifest.json");
+  if (!existsSync(p)) return null;
+  let m;
+  try { m = readJson(p); } catch (e) { return fail(`run new: ${p} is not valid JSON: ${e.message}`, "run \`detent index build\` to rewrite it"); }
+  return INDEX_VERIFY.has(m.suggested_verify) ? m.suggested_verify : null;
 }
 
 /** CONTRACT.md: ".sdlc/ MUST be gitignored ... the engine wiring adds the ignore
@@ -2749,6 +2763,9 @@ function starterStack(clone) {
     "    providers:",
     '      - name: "repo-docs"',
     `        command: ${adapter("repo-docs-knowledge")}`,
+    '        version: "builtin"',
+    '      - name: "repo-index"',
+    `        command: ${adapter("repo-index-knowledge")}`,
     '        version: "builtin"',
     "",
     "  bot-comments:",
