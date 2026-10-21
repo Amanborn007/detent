@@ -69,4 +69,4 @@ Reserved. They are known keys, so they are not a request error, and the claude-c
 
 ## Adding a runtime
 
-Write `adapters/<name>.mjs` exporting `{ name, capabilities(), plan(req), parse(native, req) }`, all pure, register it in `runtime.mjs`, and call `conformanceSuite({ name, makeFake })` from a test. `plan` returns `{ bin, args, cwd }`. `parse` receives the raw `spawnSync` result and returns the response.
+Write `adapters/<name>.mjs` exporting `{ name, capabilities(), plan(req), parse(native, req) }`, all pure, register it in `runtime.mjs`, and call `conformanceSuite({ name, makeFake })` from a test. `plan` returns `{ bin, args, cwd }`. `parse` receives the raw `spawnSync` result and returns the response. The fake binary your `makeFake` returns must create `<dir>/spawned` when it starts, so the suite can prove a refused request spawned nothing.

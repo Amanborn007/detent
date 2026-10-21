@@ -1,7 +1,5 @@
 // Contract checks every runtime adapter must pass. Registers node:test tests when called; importing it does nothing.
-//   fixture.name                 registered runtime name
-//   fixture.makeFake(dir, mode)  -> { bin }; mode is ok | exit1 | garbage | sleep | nobin. A fake that starts must
-//                                   create <dir>/spawned, so the suite can prove a refused request spawned nothing.
+// fixture is { name, makeFake(dir, mode) -> { bin } }; the modes and the <dir>/spawned marker rule are in test/kit.mjs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, existsSync, realpathSync } from "node:fs";
