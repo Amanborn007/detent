@@ -38,3 +38,14 @@ test("continue without --yes and without a terminal refuses", () => {
   assert.equal(r.code, 2, r.stdout);
   assert.match(r.json.next_step, /--yes/);
 });
+
+test("after one step, continue points at detent continue, not detent drive", () => {
+  const ctx = setup();
+  writeFileSync(join(ctx.d, "mode.json"), "{}");
+  mkdirSync(ctx.tmp, { recursive: true });
+  const r = engine(["continue", "--yes", "--claude-bin", ctx.stub, "--stack", ctx.stack],
+    { cwd: ctx.repo, env: { ...HUMAN, PATH: BARE_PATH, TMPDIR: ctx.tmp } });
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  assert.match(r.json.next_step, /^detent continue/);
+  assert.doesNotMatch(r.json.next_step, /drive/);
+});

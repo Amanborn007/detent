@@ -33,6 +33,8 @@ for stage in intake research plan; do
   step cont "y
 " detent continue
   expect "continue runs $stage" "^continue: run .*one step \\($stage\\)" "$cont"
+  expect "continue after $stage names a friendly verb" '^Next: .*detent (continue|decide|approve)' "$cont"
+  if printf '%s\n' "$cont" | grep -q 'detent drive'; then echo "FAIL continue after $stage names detent drive" >&2; fail=1; fi
 done
 step status "" detent status
 expect "status shows the plan waiting on the intent gate" 'plan  \(waiting on D-001\)' "$status"
@@ -43,6 +45,9 @@ step approve "y
 " detent approve
 expect "approve asks first" 'with "approve"\? \[y/N\]' "$approve"
 expect "approve moves the run on" '^Next: detent continue' "$approve"
+expect "approve no longer shows the plan waiting on the answered gate" '^  [^ ] plan *$' "$approve"
+expect "start has no en or em dash" '^Next: detent continue[:.] ' "$start"
+if printf '%s\n' "$start$approve" | grep -q '[–—]'; then echo "FAIL friendly output contains an en or em dash" >&2; fail=1; fi
 step cont "y
 " detent continue
 expect "continue closes the plan stage and hands implement to a person" '^Next: the plan is approved' "$cont"
