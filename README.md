@@ -67,7 +67,7 @@ It reads your own diff and lists the comments, defensive try/catch blocks and `a
 
 Two recorded walkthroughs show a ticket moving through detent, both offline or replayable:
 
-- **Terminal:** `detent doctor`, `start`, `status`, `continue`, `decide` and `approve` against a throwaway repo. The script is [docs/demo/terminal.tape](docs/demo/terminal.tape); render it with `vhs docs/demo/terminal.tape`, or run the same commands without vhs with `bash docs/demo/terminal-smoke.sh`.
+- **Terminal:** `detent doctor`, `start`, `status`, `continue`, `decide` and `approve` against a throwaway repo. The script is [docs/demo/terminal.tape](docs/demo/terminal.tape); see it as [docs/demo/terminal.gif](docs/demo/terminal.gif), re-render it with `vhs docs/demo/terminal.tape`, or run the same commands without vhs with `bash docs/demo/terminal-smoke.sh`.
 - **Claude Code:** a real `/detent:status` and `/detent:continue` session, captured with `claude -p --output-format stream-json`. Open [docs/demo/claude-code.html](docs/demo/claude-code.html) in a browser, or read the raw captures in [docs/demo/transcripts/](docs/demo/transcripts/).
 
 ## Drive a ticket

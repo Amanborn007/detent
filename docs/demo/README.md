@@ -32,7 +32,7 @@ A recording of the real thing inside Claude Code is scripted in [RECORDING.md](R
 
 `terminal.tape` drives the friendly verbs end to end on a throwaway clone of `acme/widgets`: `detent doctor`, `detent start acme/widgets#1` (which also builds the repo index and prints one line with its counts), `status`, three `continue` steps, `decide` and `approve`. Stand-ins, all offline: `fixtures/stub-claude.mjs` writes each stage's file from `fixtures/term/`, `fixtures/stub-gh-term` answers `gh`, `fixtures/bin/curator` answers `curator`, and `fixtures/stub-ticket` answers the ticket socket. The engine is real. `terminal-env.sh` builds the repo and defines `detent`.
 
-`terminal-smoke.sh` runs the same commands without vhs and asserts the key output lines; `smoke.sh` calls it. To render the GIF, run `vhs docs/demo/terminal.tape` from the repo root. The GIF is not committed until it has been rendered with vhs.
+`terminal-smoke.sh` runs the same commands without vhs and asserts the key output lines; `smoke.sh` calls it. To render the GIF, run `vhs docs/demo/terminal.tape` from the repo root. The rendered GIF is committed as `terminal.gif`; re-render it after changing the tape or the verbs' output.
 
 ## Claude Code track
 
