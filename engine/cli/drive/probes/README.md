@@ -81,3 +81,5 @@ grandparent probe shows it is any same-user process, not only the parent. So for
 
 `--api-key-file <path>` reads the PB2-PB5 key from a file instead of `ANTHROPIC_API_KEY` and never prints it.
 When `live.alt_default.bash_ran` or `live.alt_hardened.bash_ran` is not `pass`, its note carries claude exit code, is_error, subtype, denial count and the first stderr line.
+
+The alt probes run one claude call each: the harness writes every check to `probe.sh` in claude's cwd and asks for a single `sh ./probe.sh` Bash call. `ps_env_parent` uses a host-compiled KERN_PROCARGS2 helper copied next to the script. If the model never calls Bash the note says `model_declined`.

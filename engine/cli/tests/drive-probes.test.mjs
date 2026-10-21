@@ -9,7 +9,7 @@ import { buildReport, result, summarize, validateResult, REPORT_SCHEMA } from ".
 import { classifyPreflight, preflight } from "../drive/probes/exec.mjs";
 import { diagnoseCommand, parseDenials } from "../drive/probes/diagnose.mjs";
 import { describeRun, parseClaudeJson } from "../drive/probes/live.mjs";
-import { ALT_GROUPS, altSettings, explainNoBash, liveCommands, parseTranscript, transcriptPrompt } from "../drive/probes/transcript.mjs";
+import { PROBE_PROMPT, PROCARGS_C, altSettings, explainNoBash, liveCommands, parseTranscript, probeScript } from "../drive/probes/transcript.mjs";
 import { evalLive,liveCheckScript, parseKv } from "../drive/probes/live-checks.mjs";
 
 const PROBES = join(dirname(fileURLToPath(import.meta.url)), "..", "drive", "probes");
@@ -271,22 +271,31 @@ test("explainNoBash separates a declining model from a missing tool", () => {
   assert.match(explainNoBash(parseTranscript(jl(init, use("a"), res("a", "bash_ran=1")))), /bash_tool_use=1 results=1 errors=0 tokens=1/);
 });
 
-test("live commands are single Bash calls that each print one token, and quote their paths", () => {
+test("probe script holds every check, each printing one token, and quotes its paths", () => {
   const cmds = liveCommands({ realHome: "/Users/o'x", parentPidFile: "/t/p", canaryFile: "/t/c", writeTest: "/Users/o'x/.w", loopbackPort: 5 });
   for (const [key, c] of cmds) assert.ok(c.includes(`${key}=`), key);
   assert.ok(cmds.find(([k]) => k === "ssh_config_rc")[1].includes("'/Users/o'\\''x'"));
   assert.ok(cmds.some(([k]) => k === "net_loopback_rc"));
-  assert.ok(!cmds.some(([, c]) => /printenv|\benv\s*$/.test(c)));
-  const p = transcriptPrompt(cmds);
-  assert.match(p, /own separate Bash call/);
-  assert.match(p, /^1\. echo bash_ran=1$/m);
+  const s = probeScript(cmds);
+  assert.ok(s.startsWith("#!/bin/sh\n"));
+  assert.equal(s.trim().split("\n").length, cmds.length + 1);
 });
 
-test("alt groups cover every check in at most six commands each", () => {
-  const all = liveCommands({ realHome: "/h", parentPidFile: "/p", canaryFile: "/c", writeTest: "/w" }).map(([k]) => k);
-  for (const g of ALT_GROUPS) { assert.ok(g.length <= 6); for (const k of g) assert.ok(all.includes(k), k); }
-  for (const k of all) assert.ok(ALT_GROUPS.flat().includes(k), k);
-  assert.ok(ALT_GROUPS.every((g) => g[0] === "bash_ran"));
+test("the prompt asks for exactly one Bash call and the ps checks use the compiled helper, not ps -E", () => {
+  assert.match(PROBE_PROMPT, /exactly once to run: sh \.\/probe\.sh/);
+  const cmds = liveCommands({ realHome: "/h", parentPidFile: "/p", canaryFile: "/c", writeTest: "/w" });
+  for (const k of ["ps_self_seen", "ps_parent_seen"]) {
+    const c = cmds.find(([n]) => n === k)[1];
+    assert.ok(c.includes("./procargs2") && !c.includes("ps -E"), k);
+  }
+  assert.ok(PROCARGS_C.includes("KERN_PROCARGS2"));
+});
+
+test("evalLive maps the helper results: -1 is a denied sysctl, a failing self-check is inconclusive", () => {
+  const q = (kv) => find(evalLive("l", kv, controls, { expectLoopback: false }), "ps_env_parent");
+  assert.equal(q({ ps_self_seen: 1, ps_parent_seen: -1 }).status, "pass");
+  assert.equal(q({ ps_self_seen: 1, ps_parent_seen: 1 }).status, "fail");
+  assert.equal(q({ ps_self_seen: -1, ps_parent_seen: 0 }).status, "inconclusive");
 });
 
 test("altSettings keeps the default variant plain and denies reads of secret dirs in the hardened one", () => {

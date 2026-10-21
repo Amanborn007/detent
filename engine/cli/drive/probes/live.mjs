@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { buildProbeProfile, defaultDenyRead } from "./seatbelt-deny-default.mjs";
 import { result } from "./report.mjs";
 import { run, which } from "./exec.mjs";
-import { ALT_GROUPS, altSettings, liveCommands, transcriptPrompt, parseTranscript, explainNoBash } from "./transcript.mjs";
+import { PROBE_PROMPT, PROCARGS_C, altSettings, liveCommands, probeScript, parseTranscript, explainNoBash } from "./transcript.mjs";
 import { ALLOWED_PROXY_PATHS, LIVE_BUDGET_TOTAL_USD, LIVE_MODEL, evalLive, liveCheckScript, parseKv } from "./live-checks.mjs";
 
 const FORWARD_HEADERS = ["content-type", "accept", "anthropic-version", "anthropic-beta", "user-agent"];
@@ -186,29 +186,29 @@ export async function runLive({ T, realHome, canary, nonce, log, apiKeyFile }) {
   const detentRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
   for (const variant of ["default", "hardened"]) {
     const prefix = `live.alt_${variant}`;
+    if (!affordable(0.03)) { add(`${prefix}.bash_ran`, "ran", "not_run", "skipped", "budget cap reached"); continue; }
     const dir = join(T, `live-alt-${variant}`);
     stage(dir, { canary, loopbackPort: 0, keychainService: "Claude Code-credentials", writeTest });
     const env = { ...process.env };
     for (const k of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "PROBE_CANARY"]) delete env[k];
     const settings = altSettings({ hardened: variant === "hardened", realHome, detentRoot });
-    const all = liveCommands({ realHome, parentPidFile: join(dir, "parent.pid"), canaryFile: join(dir, "canary.txt"), writeTest });
-    const tokens = {};
-    const notes = [];
-    for (const [gi, keys] of ALT_GROUPS.entries()) {
-      if (!affordable(0.03)) { notes.push(`group${gi + 1}=skipped_budget`); continue; }
-      const cmds = all.filter(([k]) => keys.includes(k));
-      const r = await run(claudeReal, ["-p", "--model", LIVE_MODEL, "--max-turns", "12", "--max-budget-usd", "0.03", "--output-format", "stream-json", "--verbose",
-        "--tools", "Bash", "--allowedTools", "Bash", "--permission-mode", "dontAsk", "--settings", JSON.stringify(settings), "--setting-sources", "project",
-        "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"],
-      { env, cwd: join(dir, "work"), timeout: 240000, input: transcriptPrompt(cmds) });
-      const c = parseClaudeJson(r.stdout);
-      spent += c.cost;
-      const t = parseTranscript(r.stdout);
-      Object.assign(tokens, t.tokens);
-      notes.push(`group${gi + 1}: ${t.bashUses > 0 ? explainNoBash(t) : describeRun(r, c)}`);
-    }
+    const work = join(dir, "work");
+    const helperSrc = join(dir, "procargs2.c");
+    writeFileSync(helperSrc, PROCARGS_C);
+    const built = (await run("clang", ["-o", join(work, "procargs2"), helperSrc], { env: process.env })).code === 0;
+    const cmds = liveCommands({ realHome, parentPidFile: join(dir, "parent.pid"), canaryFile: join(dir, "canary.txt"), writeTest }).filter(([k]) => built || !k.startsWith("ps_"));
+    writeFileSync(join(work, "probe.sh"), probeScript(cmds));
+    const r = await run(claudeReal, ["-p", "--model", LIVE_MODEL, "--max-turns", "4", "--max-budget-usd", "0.03", "--output-format", "stream-json", "--verbose",
+      "--tools", "Bash", "--allowedTools", "Bash", "--permission-mode", "dontAsk", "--settings", JSON.stringify(settings), "--setting-sources", "project",
+      "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"],
+    { env, cwd: work, timeout: 180000, input: PROBE_PROMPT });
+    const c = parseClaudeJson(r.stdout);
+    spent += c.cost;
+    const t = parseTranscript(r.stdout);
+    const tokens = t.tokens;
+    const note = (t.bashUses > 0 ? explainNoBash(t) : `model_declined: ${explainNoBash(t)} ${describeRun(r, c)}`) + (built ? "" : " no_compiler");
     const ran = tokens.bash_ran === 1;
-    add(`${prefix}.bash_ran`, "Bash ran under claude's own sandbox", ran ? "bash_ran" : "no_bash", ran ? "pass" : "inconclusive", notes.join(" | ").slice(0, 300));
+    add(`${prefix}.bash_ran`, "Bash ran under claude's own sandbox", ran ? "bash_ran" : "no_bash", ran ? "pass" : "inconclusive", note.slice(0, 300));
     if (ran) results.push(...evalLive(prefix, tokens, controls, { expectLoopback: false }));
     clean();
   }

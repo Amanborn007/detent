@@ -13,26 +13,12 @@ import { buildReport, result } from "./report.mjs";
 import { buildProbeProfile, defaultDenyRead, CLAUDE_BASE_VERSION, XCODE_SELECT_LINK, XCODE_LICENSE_PLIST } from "./seatbelt-deny-default.mjs";
 import { preflight, run } from "./exec.mjs";
 import { TOOLS, diagnose } from "./diagnose.mjs";
+import { PROCARGS_C } from "./transcript.mjs";
 
 const SELF = fileURLToPath(import.meta.url);
 const CONNECT_JS = `const net=require("net");const a=process.argv.slice(1);const s=a.length>1?net.connect(+a[1],a[0]):net.connect(a[0]);
 const t=setTimeout(()=>{process.stdout.write("timeout");process.exit(0)},2500);
 s.on("connect",()=>{process.stdout.write("connected");process.exit(0)});s.on("error",e=>{process.stdout.write("error:"+e.code);process.exit(0)})`;
-const PROCARGS_C = `#include <sys/sysctl.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-int main(int c, char **v) {
-  int m[3] = {CTL_KERN, KERN_PROCARGS2, atoi(v[1])}; size_t n = 0, L = strlen(v[2]);
-  if (sysctl(m, 3, 0, &n, 0, 0)) { puts("rc=fail"); return 0; }
-  char *b = malloc(n);
-  if (sysctl(m, 3, b, &n, 0, 0)) { puts("rc=fail"); return 0; }
-  int f = 0;
-  for (size_t i = 0; i + L <= n; i++) if (!memcmp(b + i, v[2], L)) { f = 1; break; }
-  printf("seen=%d\\n", f);
-  return 0;
-}
-`;
 
 
 function listen(server, where) {
