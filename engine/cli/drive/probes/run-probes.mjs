@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildReport, result } from "./report.mjs";
-import { buildProbeProfile, defaultDenyRead, CLAUDE_BASE_VERSION, XCODE_SELECT_LINK } from "./seatbelt-deny-default.mjs";
+import { buildProbeProfile, defaultDenyRead, CLAUDE_BASE_VERSION, XCODE_SELECT_LINK, XCODE_LICENSE_PLIST } from "./seatbelt-deny-default.mjs";
 import { preflight, run } from "./exec.mjs";
 import { TOOLS, diagnose } from "./diagnose.mjs";
 
@@ -80,7 +80,7 @@ export async function runSandboxProbes({ T, S, realHome, canary, nonce }) {
   const profile = buildProbeProfile({
     scratch: S, loopbackPort: allowedPort,
     denyRead: [...defaultDenyRead(realHome), ...Object.values(markers).map((m) => m.dir), p1.denied.dir, dirname(p1.secret.path)],
-    reallowRead: [p1.open.dir, XCODE_SELECT_LINK],
+    reallowRead: [p1.open.dir, XCODE_SELECT_LINK, XCODE_LICENSE_PLIST],
     denyWrite: [join(S, "ro")],
   });
   const profileSha = createHash("sha256").update(profile).digest("hex").slice(0, 16);
@@ -241,11 +241,16 @@ export async function runSandboxProbes({ T, S, realHome, canary, nonce }) {
     const built = (await host(["clang", "-o", bin, src])).code === 0;
     const probe = [bin, String(process.pid), canary];
     const h = built ? await host(probe) : { stdout: "" };
-    if (!built) add("esc.procargs2_parent", "canary not visible", "no_compiler", "inconclusive", "clang could not build the sysctl helper on the host");
-    else if (!h.stdout.includes("seen=1")) add("esc.procargs2_parent", "canary not visible", "control_failed", "inconclusive", "the helper could not read the harness env unsandboxed");
+    // Seatbelt did not hide other processes' env in a real run, so a failure here is a known limitation, reported as it is.
+    const KL = "known_limitation: canary not visible";
+    if (!built) add("esc.procargs2_parent", KL, "no_compiler", "inconclusive", "clang could not build the sysctl helper on the host");
+    else if (!h.stdout.includes("seen=1")) add("esc.procargs2_parent", KL, "control_failed", "inconclusive", "the helper could not read the harness env unsandboxed");
     else {
-      const r = await sb(probe);
-      add("esc.procargs2_parent", "canary not visible", r.stdout.includes("seen=1") ? "visible" : r.stdout.includes("seen=0") ? "not_visible" : "sysctl_denied", r.stdout.includes("seen=1") ? "fail" : "pass");
+      const verdict = (r) => (r.stdout.includes("seen=1") ? ["visible", "fail"] : r.stdout.includes("seen=0") ? ["not_visible", "pass"] : ["sysctl_denied", "pass"]);
+      add("esc.procargs2_parent", KL, ...verdict(await sb(probe)));
+      // The launcher runs with the clean sandbox env, so the harness is the grandparent and holds the only canary.
+      const gp = await run("/bin/sh", ["-c", 'sandbox-exec -p "$0" "$@"', profile, ...probe], { env: sbEnv, cwd: S });
+      add("esc.procargs2_grandparent", KL, ...verdict(gp), "the canary sits in the harness env, two processes above the sandboxed helper");
     }
   }
   {

@@ -13,8 +13,8 @@ export function run(cmd, args, { env, cwd, timeout = 20000, input } = {}) {
     const t = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, timeout);
     child.stdout.on("data", (d) => { if (stdout.length < CAP) stdout += d; });
     child.stderr.on("data", (d) => { if (stderr.length < CAP) stderr += d; });
-    child.on("error", (e) => { clearTimeout(t); resolve({ code: null, signal: null, stdout, stderr, error: e.code || "error", timedOut }); });
-    child.on("close", (code, signal) => { clearTimeout(t); resolve({ code, signal, stdout, stderr, timedOut }); });
+    child.on("error", (e) => { clearTimeout(t); resolve({ pid: child.pid, code: null, signal: null, stdout, stderr, error: e.code || "error", timedOut }); });
+    child.on("close", (code, signal) => { clearTimeout(t); resolve({ pid: child.pid, code, signal, stdout, stderr, timedOut }); });
     child.stdin.on("error", () => {});
     child.stdin.end(input ?? "");
   });

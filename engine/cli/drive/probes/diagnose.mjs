@@ -5,7 +5,7 @@ import os from "node:os";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { buildProbeProfile, defaultDenyRead, XCODE_SELECT_LINK } from "./seatbelt-deny-default.mjs";
+import { buildProbeProfile, defaultDenyRead, XCODE_SELECT_LINK, XCODE_LICENSE_PLIST } from "./seatbelt-deny-default.mjs";
 import { run } from "./exec.mjs";
 
 export const TOOLS = [
@@ -23,11 +23,13 @@ export function diagnoseCommand(tool, repo) {
 
 const LINE = /([^\s()]+)\((\d+)\)\s+deny\(\d+\)\s+(\S+)\s*(.*)$/;
 
-export function parseDenials(text, tag) {
+// A line counts as ours when it carries the tag or comes from one of the pids we spawned.
+export function parseDenials(text, tag, pids = []) {
   const rows = [];
+  const mine = new Set(pids.map(String));
   for (const line of String(text).split("\n")) {
     const m = LINE.exec(line);
-    if (m && line.includes("Sandbox")) rows.push({ process: m[1], operation: m[3], target: m[4].replace(tag, "").trim(), tagged: line.includes(tag) });
+    if (m && line.includes("Sandbox")) rows.push({ process: m[1], operation: m[3], target: m[4].replace(tag, "").trim(), tagged: line.includes(tag) || mine.has(m[2]) });
   }
   const use = rows.some((r) => r.tagged) ? rows.filter((r) => r.tagged) : rows;
   const grouped = new Map();
@@ -51,16 +53,16 @@ export async function diagnose({ tool, realHome = realpathSync(os.homedir()) }) 
     const argv = diagnoseCommand(tool, repo);
     if (!argv) return { error: "unknown_tool", message: `--diagnose takes one of: ${[...TOOLS.map(([n]) => n), "git-commit"].join(", ")}` };
     const tag = `detent-diag-${randomBytes(4).toString("hex")}`;
-    const profile = buildProbeProfile({ scratch: S, loopbackPort: 9, denyRead: defaultDenyRead(realHome), reallowRead: [XCODE_SELECT_LINK], logTag: tag });
+    const profile = buildProbeProfile({ scratch: S, loopbackPort: 9, denyRead: defaultDenyRead(realHome), reallowRead: [XCODE_SELECT_LINK, XCODE_LICENSE_PLIST], logTag: tag });
     const dd = await run("/usr/bin/xcode-select", ["-p"], { env: process.env });
     const devDir = dd.code === 0 && dd.stdout.trim().startsWith("/") ? dd.stdout.trim() : "/Library/Developer/CommandLineTools";
     const env = { DEVELOPER_DIR: devDir, PATH: process.env.PATH, HOME: join(T, "fakehome"), TMPDIR: join(S, "tmp"), LANG: "C", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
     const r = await run("sandbox-exec", ["-p", profile, ...argv], { env, cwd: S, timeout: 60000 });
     await new Promise((res) => setTimeout(res, 3000));
     const lg = await run("/usr/bin/log", ["show", "--predicate", 'eventMessage CONTAINS "deny"', "--last", "1m", "--style", "compact"], { env: process.env, timeout: 60000 });
-    const parsed = parseDenials(lg.stdout, tag);
+    const parsed = parseDenials(lg.stdout, tag, [r.pid]);
     return {
-      tool, exit: r.code, signal: r.signal, developer_dir: devDir, log_show_exit: lg.code, log_tagged: parsed.tagged,
+      tool, exit: r.code, signal: r.signal, stderr_first_line: r.stderr.split("\n")[0].slice(0, 200), pid: r.pid, developer_dir: devDir, log_show_exit: lg.code, log_tagged: parsed.tagged,
       note: lg.code !== 0 ? "log show failed; try running it with sudo" : parsed.denials.length ? undefined : "no denials were logged in the last minute",
       denials: parsed.denials,
     };

@@ -25,7 +25,7 @@ const SYSCTL_NAMES = [
   "hw.l1icachesize_compat", "hw.l2cachesize_compat", "hw.l3cachesize_compat", "hw.logicalcpu",
   "hw.logicalcpu_max", "hw.machine", "hw.memsize", "hw.ncpu", "hw.nperflevels", "hw.packages",
   "hw.pagesize_compat", "hw.pagesize", "hw.physicalcpu", "hw.physicalcpu_max", "hw.tbfrequency_compat",
-  "hw.vectorunit", "kern.argmax", "kern.bootargs", "kern.hostname", "kern.maxfiles",
+  "hw.vectorunit", "kern.argmax", "kern.bootargs", "kern.hostname", "kern.iossupportversion", "kern.maxfiles",
   "kern.maxfilesperproc", "kern.maxproc", "kern.ngroups", "kern.osproductversion", "kern.osrelease",
   "kern.ostype", "kern.osvariant_status", "kern.osversion", "kern.secure_kernel", "kern.tcsm_available",
   "kern.tcsm_enable", "kern.usrstack64", "kern.version", "kern.willshutdown",
@@ -50,6 +50,8 @@ export function defaultDenyRead(home) {
 
 // The /usr/bin developer-tool shims read this to find the active toolchain.
 export const XCODE_SELECT_LINK = "/private/var/db/xcode_select_link";
+// xcrun exits 69 (EX_UNAVAILABLE) unless it can read the license acceptance here.
+export const XCODE_LICENSE_PLIST = "/Library/Preferences/com.apple.dt.Xcode.plist";
 
 const DEVICE_WRITES = ["/dev/null", "/dev/dtracehelper", "/dev/autofs_nowait"];
 const DEVICE_IOCTL = ["/dev/null", "/dev/zero", "/dev/random", "/dev/urandom", "/dev/dtracehelper", "/dev/tty"];

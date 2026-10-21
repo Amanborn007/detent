@@ -65,3 +65,16 @@ node, npm, git, go, cargo, python3, make, clang or git-commit. If `log show` is 
 
 If `esc.procargs2_parent` still reports `visible` with the explicit `kern.procargs` deny in place, Seatbelt
 cannot hide another process's environment, and the design must never put a secret in a parent's exec-time env or argv.
+
+## Design implications of the procargs2 result
+
+`esc.procargs2_parent` and `esc.procargs2_grandparent` are reported with the expectation
+`known_limitation: canary not visible`, and `fail` stays `fail`. On this Seatbelt profile another same-user
+process's environment and argv were readable through `KERN_PROCARGS2` even with `kern.procargs` denied, and the
+grandparent probe shows it is any same-user process, not only the parent. So for drive:
+
+- spawn the sandbox through a launcher whose exec-time env and argv contain no secret;
+- never put the broker key in any environment variable or argument; read it from a file or the keychain into memory;
+- SECURITY.md must say that other same-user processes' env and argv are readable from inside the sandbox.
+
+`--diagnose` also prints the shim's first stderr line (at most 200 characters) and matches denials by the spawned pid.

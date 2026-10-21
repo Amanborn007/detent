@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildProbeProfile, defaultDenyRead, OMITTED_MACH, XCODE_SELECT_LINK } from "../drive/probes/seatbelt-deny-default.mjs";
+import { buildProbeProfile, defaultDenyRead, OMITTED_MACH, XCODE_SELECT_LINK, XCODE_LICENSE_PLIST } from "../drive/probes/seatbelt-deny-default.mjs";
 import { buildReport, result, summarize, validateResult, REPORT_SCHEMA } from "../drive/probes/report.mjs";
 import { classifyPreflight, preflight } from "../drive/probes/exec.mjs";
 import { diagnoseCommand, parseDenials } from "../drive/probes/diagnose.mjs";
@@ -53,6 +53,23 @@ test("parseDenials keeps operation and path only, prefers tagged lines and group
     { process: "xcrun", operation: "mach-lookup", target: "com.apple.example", count: 1 },
   ]);
   assert.equal(parseDenials(log.replaceAll("detent-diag-ab12", "zz"), "detent-diag-ab12").tagged, false);
+});
+
+test("parseDenials also claims lines from the spawned pid when the tag is missing", () => {
+  const log = [
+    "Sandbox: git(4242) deny(1) file-read-data /Library/Preferences/com.apple.dt.Xcode.plist",
+    "Sandbox: logd_helper(77) deny(1) file-read-data /private/var/x",
+  ].join("\n");
+  const r = parseDenials(log, "detent-diag-none", [4242]);
+  assert.equal(r.tagged, true);
+  assert.deepEqual(r.denials.map((d) => d.process), ["git"]);
+});
+
+test("the xcode license plist is re-allowed as a single literal file after the /Library/Preferences deny", () => {
+  const p = buildProbeProfile({ ...base, denyRead: defaultDenyRead("/Users/u"), reallowRead: [XCODE_LICENSE_PLIST] });
+  assert.ok(p.indexOf('(deny file-read* (subpath "/Library/Preferences"))') < p.indexOf(`(allow file-read* (subpath "${XCODE_LICENSE_PLIST}"))`));
+  assert.ok(!p.includes('(allow file-read* (subpath "/Library/Preferences"))'));
+  assert.ok(p.includes('(sysctl-name "kern.iossupportversion")'));
 });
 
 test("diagnoseCommand maps tools and rejects unknown names", () => {
