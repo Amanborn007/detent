@@ -245,6 +245,18 @@ test("decide-why refuses an unknown decision, the answer itself, or a stray opti
   });
 });
 
+test("decide-why matches the answer and options ignoring case and surrounding whitespace", () => {
+  const root = mkroot();
+  mkrun(root, RUN_ID, { "run.json": RUN_JSON, "decisions.json": GATED });
+  const answer = engine(root, "decide-why", "--run", RUN_ID, "--decision", "D-001",
+    "--option", " Reuse lib/retry.ts", "--why", "x");
+  assert.equal(answer.code, 2);
+  assert.match(answer.json.reason, /is the ANSWER/);
+  const ok = engine(root, "decide-why", "--run", RUN_ID, "--decision", "D-001",
+    "--option", "New Implementation ", "--why", "x");
+  assert.equal(ok.code, 0, JSON.stringify(ok.json));
+});
+
 test("decide-why requires all three of --decision/--option/--why", () => {
   const root = mkroot();
   mkrun(root, RUN_ID, { "run.json": RUN_JSON, "decisions.json": GATED });
