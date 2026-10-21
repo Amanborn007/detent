@@ -59,7 +59,12 @@ variants() {
 
 # Longest match first so a root under $HOME becomes $DETENT_ROOT, not ~/...
 PAIRS=()
-while IFS= read -r v; do PAIRS+=("$v"$'\t''$DETENT_ROOT'); done < <(variants "$ROOT")
+# macOS also spells /var and /tmp paths through their /private alias.
+ROOTS=("$ROOT")
+[[ "$ROOT" == /var/* || "$ROOT" == /tmp/* ]] && ROOTS+=("/private$ROOT")
+for r in "${ROOTS[@]}"; do
+  while IFS= read -r v; do PAIRS+=("$v"$'\t''$DETENT_ROOT'); done < <(variants "$r")
+done
 while IFS= read -r v; do PAIRS+=("$v"$'\t''~'); done < <(variants "$HOME")
 PAIRS+=("$HOST_FULL"$'\t''<host>')
 [[ "$HOST_SHORT" == "$HOST_FULL" ]] || PAIRS+=("$HOST_SHORT"$'\t''<host>')
@@ -69,7 +74,8 @@ scrub() {
   local pair from to
   for pair in "${PAIRS[@]}"; do
     from="${pair%%$'\t'*}"; to="${pair#*$'\t'}"
-    FROM="$from" TO="$to" perl -0pi -e 's/\Q$ENV{FROM}\E/$ENV{TO}/g' "$1"
+    # A path can be written with doubled slashes (a TMPDIR or DETENT_ROOT ending in /).
+    FROM="$from" TO="$to" perl -0pi -e 'my $p = quotemeta($ENV{FROM}); $p =~ s{\\/}{/+}g; s/$p/$ENV{TO}/g' "$1"
   done
 }
 
