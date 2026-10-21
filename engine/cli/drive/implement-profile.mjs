@@ -105,6 +105,7 @@ export function buildImplementSettings(ctx) {
       allowUnsandboxedCommands: false,
       autoAllowBashIfSandboxed: true,
       excludedCommands: [],
+      allowAppleEvents: false,
       enableWeakerNestedSandbox: false,
       enableWeakerNetworkIsolation: false,
       network: { allowedDomains: [], strictAllowlist: true },
@@ -126,7 +127,8 @@ const ALLOWED = {
   permissions: ["defaultMode", "allow", "deny"],
   sandbox: [
     "enabled", "failIfUnavailable", "allowUnsandboxedCommands", "autoAllowBashIfSandboxed",
-    "excludedCommands", "enableWeakerNestedSandbox", "enableWeakerNetworkIsolation", "network", "filesystem",
+    "excludedCommands", "allowAppleEvents", "allowNestedUserNamespaces",
+    "enableWeakerNestedSandbox", "enableWeakerNetworkIsolation", "network", "filesystem",
   ],
   network: ["allowedDomains", "strictAllowlist"],
   filesystem: ["denyRead", "allowRead", "denyWrite", "allowWrite"],
@@ -161,7 +163,14 @@ export function validateImplementSettings(s, ctx) {
     if (sb[k] !== undefined && sb[k] !== false) errs.push(`sandbox.${k} must be false`);
   }
   if (!Array.isArray(net.allowedDomains) || net.allowedDomains.length) errs.push("sandbox.network.allowedDomains must be []");
+  if (net.strictAllowlist !== true) errs.push("sandbox.network.strictAllowlist must be true");
+  if (sb.autoAllowBashIfSandboxed !== true) errs.push("sandbox.autoAllowBashIfSandboxed must be true");
+  if (sb.allowAppleEvents !== false) errs.push("sandbox.allowAppleEvents must be false");
+  if (sb.allowNestedUserNamespaces !== undefined && sb.allowNestedUserNamespaces !== false) {
+    errs.push("sandbox.allowNestedUserNamespaces must be false");
+  }
   if (s.disableAllHooks !== true) errs.push("disableAllHooks must be true");
+  if (s.enableAllProjectMcpServers !== false) errs.push("enableAllProjectMcpServers must be false");
 
   const list = (k) => (Array.isArray(fs[k]) ? fs[k] : []);
   for (const t of SHARED_TMP) {
