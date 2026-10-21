@@ -1,9 +1,9 @@
 ---
-name: sdlc-recheck
-description: SDLC engine stage 6 — fresh-context comparison of what implement actually committed against the approved plan/plan.md and the answered decisions in decisions.json, producing recheck.md with a per-step verdict table. Every material divergence becomes a pending decision (the conditional drift gate) with options accept / route-to-plan / route-to-implement; a clean recheck unlocks ship with no human interrupt. Drift means a human call, never forward motion. Trigger: /sdlc-recheck <run-id>.
+name: recheck
+description: SDLC engine stage 6 — fresh-context comparison of what implement actually committed against the approved plan/plan.md and the answered decisions in decisions.json, producing recheck.md with a per-step verdict table. Every material divergence becomes a pending decision (the conditional drift gate) with options accept / route-to-plan / route-to-implement; a clean recheck unlocks ship with no human interrupt. Drift means a human call, never forward motion.
 ---
 
-# sdlc-recheck — diff vs approved plan, drift becomes a gate
+# recheck — diff vs approved plan, drift becomes a gate
 
 Contract: `engine/stages/CONTRACT.md`. Inputs: `plan/plan.md`, `decisions.json`, the
 brief's acceptance criteria, and the implementation diff. Output: `recheck.md` +

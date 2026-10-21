@@ -1,9 +1,9 @@
 ---
-name: sdlc-research
-description: SDLC engine stage 2 — given .sdlc/<run-id>/brief.md, first run an access preflight over every source the run needs (probe reachable|blocked|partial, write access-report.json), then fan out over every knowledge provider in stack.yaml, the skill-discovery socket, and the target repo itself (conventions, git-archaeology precedent, gh search); merge with per-source attribution into research.md with a mandatory "what could help that already exists" section, a mandatory BLAST RADIUS map of what the proposed change touches, and KNOW/GUESS-marked findings (findings from a blocked/partial source tagged degraded-confidence). Research that only restates the ticket, or silently proceeds on a blocked/partial critical source, is a failed run. Trigger: /sdlc-research <run-id>.
+name: research
+description: SDLC engine stage 2 — given .sdlc/<run-id>/brief.md, first run an access preflight over every source the run needs (probe reachable|blocked|partial, write access-report.json), then fan out over every knowledge provider in stack.yaml, the skill-discovery socket, and the target repo itself (conventions, git-archaeology precedent, gh search); merge with per-source attribution into research.md with a mandatory "what could help that already exists" section, a mandatory BLAST RADIUS map of what the proposed change touches, and KNOW/GUESS-marked findings (findings from a blocked/partial source tagged degraded-confidence). Research that only restates the ticket, or silently proceeds on a blocked/partial critical source, is a failed run.
 ---
 
-# sdlc-research — fan out, attribute, mark confidence
+# research — fan out, attribute, mark confidence
 
 Contract: `engine/stages/CONTRACT.md`. Input: `brief.md` (never the raw ticket — if
 brief.md is missing or `intake` is not `done` in `stage-status.json`, STOP and say
