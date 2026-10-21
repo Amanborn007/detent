@@ -55,7 +55,8 @@ assert.match(sdk.body, /queuePrompt/);
 console.log(`sdk GET /sdk.js -> ${sdk.code} (${sdk.body.length} bytes)`);
 
 const secret = readFileSync(path.join(stateDir, 'secret'), 'utf8').trim();
-const rKey = crypto.createHmac('sha256', secret).update(`curator-artifact:${sid}`).digest('hex');
+const boot = JSON.parse(readFileSync(path.join(stateDir, 'state.json'), 'utf8')).bootId;
+const rKey = crypto.createHmac('sha256', secret).update(`curator-artifact:${boot}:${sid}`).digest('hex');
 const served = await get(port, `/artifact/${sid}?k=${rKey}`);
 assert.equal(served.code, 200);
 const tag = `<script src="/sdk.js?s=${sid}"></script>`;

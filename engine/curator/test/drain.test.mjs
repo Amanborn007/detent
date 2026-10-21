@@ -19,7 +19,8 @@ import crypto from 'node:crypto';
 
 function browserHeaders(stateDir, port, sid) {
   const secret = readFileSync(join(stateDir, 'secret'), 'utf8').trim();
-  const cap = crypto.createHmac('sha256', secret).update(`curator-session:${sid}`).digest('hex');
+  const boot = JSON.parse(readFileSync(join(stateDir, 'state.json'), 'utf8')).bootId;
+  const cap = crypto.createHmac('sha256', secret).update(`curator-session:${boot}:${sid}`).digest('hex');
   return { 'X-Curator-Cap': cap, Origin: `http://127.0.0.1:${port}` };
 }
 

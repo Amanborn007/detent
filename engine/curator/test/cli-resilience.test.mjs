@@ -493,7 +493,8 @@ test('poll: a successful poll against a reachable server resets a pre-existing f
 
   // Queue feedback while nobody is polling, so it lands durably in state.json.
   const secret = readFileSync(join(stateDir, 'secret'), 'utf8').trim();
-  const cap = crypto.createHmac('sha256', secret).update(`curator-session:${sessionId}`).digest('hex');
+  const boot = readStateFile(stateDir).bootId;
+  const cap = crypto.createHmac('sha256', secret).update(`curator-session:${boot}:${sessionId}`).digest('hex');
   const send = await fetchRaw(port, `/api/send?s=${sessionId}`, {
     method: 'POST',
     body: { sessionId, items: [{ type: 'comment', text: 'looks good' }] },

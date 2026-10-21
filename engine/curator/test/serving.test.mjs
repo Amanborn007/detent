@@ -24,7 +24,8 @@ function fetchRaw(port, path, { headers = {} } = {}) {
 }
 
 const SECRET = crypto.randomBytes(32).toString('hex');
-const artifactKey = (id) => crypto.createHmac('sha256', SECRET).update(`curator-artifact:${id}`).digest('hex');
+let BOOT = '';
+const artifactKey = (id) => crypto.createHmac('sha256', SECRET).update(`curator-artifact:${BOOT}:${id}`).digest('hex');
 
 async function withServer(fn) {
   // realpath so safeReadArtifact's canonical comparison matches (macOS /var -> /private/var).
@@ -33,6 +34,7 @@ async function withServer(fn) {
   const server = createServer(store, { secret: SECRET });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const port = server.address().port;
+  BOOT = server.bootId;
   try {
     await fn({ dir, store, port });
   } finally {

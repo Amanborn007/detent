@@ -390,7 +390,7 @@ function chromePage(session) {
 <body>
 <header id="hdr"><span class="dot"></span><h1>${title}</h1><span class="hint">alt-click to annotate · select text to comment</span></header>
 <div id="banner">Session ended. Nothing further will be sent to the agent.</div>
-<div id="nokey">This link has no access key, so nothing on this page can reach the agent. Run <code>curator open &lt;file&gt;</code> again and use the link it prints.</div>
+<div id="nokey">This link has no access key, or its keys came from an earlier curator server, so nothing on this page can reach the agent. Run <code>curator open &lt;file&gt;</code> again and use the link it prints.</div>
 <main>
   <iframe id="plan" sandbox="allow-scripts allow-forms" title="plan artifact"></iframe>
   <aside>
@@ -416,6 +416,7 @@ function chromePage(session) {
   var CAP = keys.get('c') || '';
   var RKEY = keys.get('r') || '';
   var noKey = !CAP || !RKEY;
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
   var frame = document.getElementById('plan');
   var queueEl = document.getElementById('queue');
   var chatEl = document.getElementById('chat');
@@ -532,6 +533,7 @@ function chromePage(session) {
   }
 
   window.addEventListener('message', function (ev) {
+    if (ev.source !== frame.contentWindow) return;
     var d = ev.data;
     if (!d || d.curator !== true) return;
     if (d.action === 'annotate-request') {
@@ -557,6 +559,7 @@ function chromePage(session) {
       enqueue(dec);
       toFrame({ action: 'decision-accepted', question: d.question, answer: d.answer });
     } else if (d.action === 'prompt') {
+      if (!window.confirm('The artifact page wants to queue this prompt for the agent: ' + String(d.text).slice(0, 300))) return;
       enqueue({ type: 'prompt', text: d.text });
     }
   });
@@ -566,7 +569,10 @@ function chromePage(session) {
       method: method,
       headers: { 'Content-Type': 'application/json', 'X-Curator-Cap': CAP },
       body: body === undefined ? undefined : JSON.stringify(body),
-    }).then(function (r) { return r.json(); });
+    }).then(function (r) {
+      if (r.status === 401) stale();
+      return r.json();
+    });
   }
 
   function addMsg(from, text) {
@@ -616,6 +622,14 @@ function chromePage(session) {
     render();
   }
 
+  var timer = null;
+  function stale() {
+    if (timer) { clearInterval(timer); timer = null; }
+    noKey = true;
+    document.body.classList.add('nokey');
+    render();
+  }
+
   function tick() {
     api('GET', '/api/updates?s=' + SID + '&since=' + chatVersion).then(function (resp) {
       if (resp.error) return;
@@ -629,7 +643,7 @@ function chromePage(session) {
     document.body.classList.add('nokey');
   } else {
     frame.src = '/artifact/' + SID + '?k=' + encodeURIComponent(RKEY);
-    setInterval(tick, 1500);
+    timer = setInterval(tick, 1500);
     tick();
   }
   render();
@@ -661,6 +675,7 @@ export function createServer(store, { secret } = {}) {
     throw new Error('createServer requires the server secret: refusing to serve without authentication');
   }
   let boundPort = 0;
+  const bootId = crypto.randomBytes(16).toString('hex');
 
   const bearerOk = (req) => {
     const m = /^Bearer (.+)$/.exec(String(req.headers.authorization || ''));
@@ -669,7 +684,7 @@ export function createServer(store, { secret } = {}) {
   const capOf = (req) => String(req.headers['x-curator-cap'] || '');
   const sessionFor = (url) => store.getById(url.searchParams.get('s') || '');
   // An unknown session still compares against a throwaway key so the 401 does not reveal whether it exists.
-  const capOk = (session, given) => safeEqual(given, sessionKey(secret, session ? session.id : '-')) && Boolean(session);
+  const capOk = (session, given) => safeEqual(given, sessionKey(secret, bootId, session ? session.id : '-')) && Boolean(session);
   const unauthorized = () => new HttpError(401, NO_CREDENTIAL.error, NO_CREDENTIAL.next_step);
 
   const server = http.createServer(async (req, res) => {
@@ -695,7 +710,7 @@ export function createServer(store, { secret } = {}) {
       if (req.method === 'GET' && p === '/healthz') {
         const nonce = url.searchParams.get('nonce') || '';
         if (!/^[A-Za-z0-9_-]{16,128}$/.test(nonce)) throw new HttpError(400, 'missing or malformed nonce', 'GET /healthz?nonce=<16 to 128 url-safe characters>');
-        return sendJson(res, 200, { ok: true, pid: process.pid, proof: healthProof(secret, nonce) });
+        return sendJson(res, 200, { ok: true, pid: process.pid, boot: bootId, proof: healthProof(secret, nonce) });
       }
 
       if (req.method === 'GET' && p === '/sdk.js') {
@@ -714,7 +729,7 @@ export function createServer(store, { secret } = {}) {
       if (req.method === 'GET' && p.startsWith('/artifact/')) {
         const session = store.getById(p.slice('/artifact/'.length));
         const given = url.searchParams.get('k') || '';
-        if (!session || !safeEqual(given, artifactKey(secret, session.id))) throw unauthorized();
+        if (!session || !safeEqual(given, artifactKey(secret, bootId, session.id))) throw unauthorized();
         // A registered artifact that has since been moved/deleted is a routine,
         // expected condition (the agent regenerated the plan) — report it as a
         // clean 404, not a 500 with a raw ENOENT that leaks the fs path.
@@ -855,6 +870,7 @@ export function createServer(store, { secret } = {}) {
   server.on('listening', () => {
     boundPort = server.address().port;
   });
+  server.bootId = bootId;
   return server;
 }
 
@@ -887,7 +903,7 @@ if (isDirectRun() && process.argv.includes('--daemon')) {
   const server = createServer(store, { secret });
   server.listen(0, '127.0.0.1', () => {
     const { port } = server.address();
-    store.meta = { pid: process.pid, port, startedAt: new Date().toISOString() };
+    store.meta = { pid: process.pid, port, bootId: server.bootId, startedAt: new Date().toISOString() };
     store.flush();
     process.stdout.write(JSON.stringify({ ok: true, pid: process.pid, port }) + '\n');
   });

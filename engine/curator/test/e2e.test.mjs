@@ -74,7 +74,8 @@ function fetchRaw(port, path, { method = 'GET', body, headers = {} } = {}) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const secret = () => readFileSync(join(stateDir, 'secret'), 'utf8').trim();
-const keyFor = (label, id) => crypto.createHmac('sha256', secret()).update(`${label}:${id}`).digest('hex');
+const bootId = () => JSON.parse(readFileSync(join(stateDir, 'state.json'), 'utf8')).bootId;
+const keyFor = (label, id) => crypto.createHmac('sha256', secret()).update(`${label}:${bootId()}:${id}`).digest('hex');
 const browser = () => ({ 'X-Curator-Cap': keyFor('curator-session', sessionId), Origin: `http://127.0.0.1:${port}` });
 
 let port;

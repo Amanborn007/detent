@@ -4,6 +4,7 @@
 // Commands: open | poll | reply | end | status | log
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
@@ -137,14 +138,14 @@ async function resolveServer() {
     return { status: 'down', state };
   }
   if (!json.ok || json.pid !== state.pid) return { status: 'down', state };
-  if (typeof json.proof !== 'string') return { status: 'untrusted', why: 'legacy', state };
+  if (typeof json.proof !== 'string' || typeof json.boot !== 'string') return { status: 'untrusted', why: 'legacy', state };
   const secret = readSecret(STATE_DIR);
   if (!secret) {
     throw new AuthSetupError(`curator server (pid ${state.pid}, port ${state.port}) is running but its secret ${secretPath(STATE_DIR)} is missing`,
       `Stop the server, then run: curator open <file.html>. Its pid is ${state.pid} (kill ${state.pid}). curator never creates a new secret under a running server.`);
   }
   if (!safeEqual(json.proof, healthProof(secret, nonce))) return { status: 'untrusted', why: 'bad-proof', state };
-  return { status: 'running', port: state.port, state, secret };
+  return { status: 'running', port: state.port, state, secret, boot: json.boot };
 }
 
 function failUntrusted({ state, why }, nextCmd) {
@@ -153,17 +154,61 @@ function failUntrusted({ state, why }, nextCmd) {
     `Run: ${nextCmd}. curator open replaces a legacy server and refuses to stop a process that is not a curator daemon.`);
 }
 
-// Only a process whose command line is the curator daemon is ever signalled.
-async function stopUntrustedServer({ state }) {
-  const { pid, port } = state;
+function commandOf(pid) {
   const ps = spawnSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' });
-  if (ps.error || ps.status !== 0 || !ps.stdout.includes('server.mjs --daemon')) {
-    fail(`port ${port} is held by pid ${pid}, which is not a curator daemon, so it was not stopped`,
-      `Stop whatever listens on port ${port} yourself or choose another CURATOR_STATE_DIR, then run: curator open <file.html>`);
-  }
+  return ps.error || ps.status !== 0 ? null : ps.stdout.trim();
+}
+
+async function terminate(pid) {
   process.kill(pid, 'SIGTERM');
   for (let i = 0; i < 100 && pidAlive(pid); i++) await new Promise((r) => setTimeout(r, 50));
   if (pidAlive(pid)) fail(`the old curator server (pid ${pid}) did not stop after SIGTERM`, `Run: kill -9 ${pid}, then run: curator open <file.html>`);
+}
+
+// Only this clone's own daemon, matched on its exact command line, is signalled for the recorded server.
+async function stopUntrustedServer({ state }) {
+  const { pid, port } = state;
+  const cmd = commandOf(pid);
+  if (cmd === null || !cmd.endsWith(` ${SERVER_PATH} --daemon`)) {
+    fail(`port ${port} is held by pid ${pid}, which is not a curator daemon started from this clone, so it was not stopped`,
+      `Stop whatever listens on port ${port} yourself or choose another CURATOR_STATE_DIR, then run: curator open <file.html>`);
+  }
+  await terminate(pid);
+}
+
+// Before authentication the state lived in ~/.curator, and a server left there answers anyone.
+async function retireLegacyServer() {
+  const legacyDir = path.join(os.homedir(), '.curator');
+  if (path.resolve(legacyDir) === path.resolve(STATE_DIR)) return [];
+  let pid;
+  try {
+    pid = JSON.parse(fs.readFileSync(path.join(legacyDir, 'state.json'), 'utf8')).pid;
+  } catch {
+    return [];
+  }
+  if (!Number.isInteger(pid) || !pidAlive(pid)) return [];
+  const cmd = commandOf(pid);
+  if (cmd !== null && /(^|\s)\/\S*\/curator\/server\.mjs --daemon$/.test(cmd)) {
+    await terminate(pid);
+    return [];
+  }
+  const warning = `pid ${pid} from the old ${path.join(legacyDir, 'state.json')} is still running as "${cmd}". If it is an old curator server it answers every request without a credential: stop it with: kill ${pid}`;
+  process.stderr.write(`curator: WARNING ${warning}\n`);
+  return [warning];
+}
+
+// The keys must never reach an argv, where any process can read them. The browser opens a local file that redirects.
+function launchBrowser(url) {
+  if (process.env.CURATOR_NO_BROWSER) return;
+  const opener = process.platform === 'darwin' ? 'open' : process.platform === 'linux' ? 'xdg-open' : null;
+  if (!opener) return;
+  const launcher = path.join(STATE_DIR, `open-${crypto.randomBytes(8).toString('hex')}.html`);
+  fs.writeFileSync(launcher, `<!DOCTYPE html>\n<meta charset="utf-8"><title>curator</title>\n<script>location.replace(${JSON.stringify(url)});</script>\n`, { mode: 0o600 });
+  const child = spawn(opener, [launcher], { detached: true, stdio: 'ignore' });
+  child.on('error', (e) => process.stderr.write(`curator: could not run ${opener}: ${e.message}\n`));
+  child.unref();
+  const sweep = 'setTimeout(() => { try { require("fs").unlinkSync(process.argv[1]); } catch {} }, 15000)';
+  spawn(process.execPath, ['-e', sweep, launcher], { detached: true, stdio: 'ignore' }).unref();
 }
 
 // --- consecutive-failure counter (poll-failures.json) ------------------------
@@ -351,6 +396,7 @@ async function cmdOpen(args) {
   const file = canonicalFile(positionals[0], { mustExist: true });
   if (!fs.statSync(file).isFile()) fail(`not a file: ${file}`, 'Point curator open at a self-contained .html artifact.');
   const checked = enforceArtifactCheck(file);
+  const warnings = await retireLegacyServer();
   let resolved = await resolveServer();
   if (resolved.status === 'unreachable') {
     // NEVER spawn here: the server is alive, we just can't see it — spawning
@@ -371,11 +417,9 @@ async function cmdOpen(args) {
   const { port, secret } = resolved;
   const { code, json } = await httpJson({ method: 'POST', port, path: '/api/open', body: { file }, timeoutMs: 5000, secret });
   if (code !== 200) fail(json.error || `server error ${code}`, json.next_step);
-  const url = browserUrl(port, json.sessionId, secret);
-  if (!process.env.CURATOR_NO_BROWSER && process.platform === 'darwin') {
-    spawn('open', [url], { detached: true, stdio: 'ignore' }).unref();
-  }
-  out({ url, key: file, session: json.sessionId, ...checked, next_step: POLL_HINT(file) });
+  const url = browserUrl(port, json.sessionId, secret, resolved.boot);
+  launchBrowser(url);
+  out({ url, key: file, session: json.sessionId, ...checked, ...(warnings.length ? { warnings } : {}), next_step: POLL_HINT(file) });
 }
 
 // `drainTimeoutMs` bounds the running-server long-poll. Left undefined for the
@@ -857,7 +901,7 @@ async function cmdStatus(args) {
       out({ sessions: 0, server: 'running', port, next_step: 'Run: curator open <file.html> to start a session.' });
       return;
     }
-    for (const s of sessions) out({ ...s, server: 'running', url: browserUrl(port, s.session, resolved.secret) });
+    for (const s of sessions) out({ ...s, server: 'running', url: browserUrl(port, s.session, resolved.secret, resolved.boot) });
     return;
   }
   const state = resolved.state;

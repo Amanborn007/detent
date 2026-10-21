@@ -160,13 +160,28 @@ and `secret` are 0600.
   another program) gets nothing and `curator open` replaces it if its pid is a
   curator daemon.
 - `curator open` prints a `url` ending `#c=<key>&r=<key>`. The page reads both
-  from the fragment; `c` authorises its `send`, `end` and `updates` calls and
-  `r` loads the artifact in the iframe. The fragment never reaches the server.
+  from the fragment and then removes it from the address bar; `c` authorises its
+  `send`, `end` and `updates` calls and `r` loads the artifact in the iframe. The
+  fragment never reaches the server. Both keys are bound to one server boot
+  (`HMAC(secret, "curator-session:" + boot + ":" + id)`, `boot` from `/healthz`),
+  so after a server restart an open tab gets a 401 and tells you to run
+  `curator open` again; reloading a tab also needs a fresh `curator open`.
   Treat the url like a password and do not paste it into tickets or PRs.
+- The browser is launched on a 0600 local file in the state dir that redirects to
+  the url, so the keys never appear in a process argument list. The file is
+  deleted after 15 seconds.
 - Every request needs `Host` exactly `127.0.0.1:<port>` (or `localhost`,
   `[::1]`), and an `Origin` if sent must be the server itself. POST bodies must
   be `application/json`. There is no CORS: `OPTIONS` is 405.
 - `/api/open` accepts `.html` files only.
+
+### Migrating from `~/.curator`
+
+Older curator servers kept their state in `~/.curator` and answered anyone.
+`curator open` reads `~/.curator/state.json`; if its pid is a curator daemon
+(`.../curator/server.mjs --daemon`, from this or another clone) it stops it. If
+the pid is something else it prints a warning with the pid and `kill <pid>`.
+The new state directory is separate, so old sessions are not carried over.
 
 A process that runs as you without a sandbox can read `secret`, so this keeps
 out web pages and other users, not your own shell. See `SECURITY.md`.

@@ -18,7 +18,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import http from 'node:http';
@@ -37,8 +37,10 @@ const fresh = (name) => {
 };
 
 const hmac = (secret, label) => crypto.createHmac('sha256', secret).update(label).digest('hex');
-const R = (secret, id) => hmac(secret, `curator-artifact:${id}`);
-const C = (secret, id) => hmac(secret, `curator-session:${id}`);
+let BOOT = '';
+const bootOf = (dir) => JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8')).bootId;
+const R = (secret, id, boot = BOOT) => hmac(secret, `curator-artifact:${boot}:${id}`);
+const C = (secret, id, boot = BOOT) => hmac(secret, `curator-session:${boot}:${id}`);
 
 const toKill = new Set();
 after(() => {
@@ -158,6 +160,7 @@ test('setup: open starts a server that created its secret', async () => {
   port = Number(new URL(opened.url).port);
   sessionId = opened.session;
   toKill.add(JSON.parse(readFileSync(join(stateDir, 'state.json'), 'utf8')).pid);
+  BOOT = bootOf(stateDir);
   otherArtifact = makeArtifact(workDir, 'other.html');
   otherSession = (await openViaCli(otherArtifact)).session;
   const file = join(stateDir, 'secret');
@@ -449,7 +452,7 @@ server.listen(0, '127.0.0.1', () => {
 process.on('SIGTERM', () => process.exit(0));
 `);
   const legacy = await new Promise((resolve) => {
-    const child = spawn(process.execPath, [join(fakeDir, 'server.mjs'), '--daemon'], { env: { ...process.env, CURATOR_STATE_DIR: dir } });
+    const child = spawn(process.execPath, ['--input-type=module', '-e', 'await import(process.env.FAKE_SERVER)', SERVER, '--daemon'], { env: { ...process.env, CURATOR_STATE_DIR: dir, FAKE_SERVER: pathToFileURL(join(fakeDir, 'server.mjs')).href } });
     toKill.add(child.pid);
     child.stdout.once('data', (c) => resolve({ child, ...JSON.parse(String(c).split('\n')[0]) }));
   });
@@ -542,10 +545,11 @@ test('a state dir inside a git work tree gets a .gitignore that ignores everythi
   assert.equal(readFileSync(join(dir, '.gitignore'), 'utf8').trim(), '*');
 });
 
-test('the secret survives a restart, a stopped server clears its pid, and old keys keep working', async () => {
+test('the secret survives a restart, a stopped server clears its pid, and the old keys stop working', async () => {
   const dir = join(fresh('restart'), 'state');
   const file = makeArtifact(dirname(dir));
   const first = await openViaCli(file, dir);
+  const firstBootId = bootOf(dir);
   const s1 = readSecret(dir);
   const pid1 = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8')).pid;
   process.kill(pid1, 'SIGTERM');
@@ -559,6 +563,11 @@ test('the secret survives a restart, a stopped server clears its pid, and old ke
   assert.equal(readSecret(dir), s1, 'same secret after a restart');
   assert.equal(second.session, first.session);
   const port2 = Number(new URL(second.url).port);
-  const upd = await raw(port2, { path: `/api/updates?s=${first.session}`, headers: { Host: `127.0.0.1:${port2}`, 'X-Curator-Cap': C(s1, first.session) } });
-  assert.equal(upd.code, 200, 'the key from the first url still works');
+  const firstBoot = new URL(first.url).hash.includes(C(s1, first.session, firstBootId)) ? firstBootId : null;
+  assert.ok(firstBoot, 'the first url carried keys for the first boot');
+  const asHeaders = (key) => ({ Host: `127.0.0.1:${port2}`, 'X-Curator-Cap': key });
+  const old = await raw(port2, { path: `/api/updates?s=${first.session}`, headers: asHeaders(C(s1, first.session, firstBoot)) });
+  assert.equal(old.code, 401, 'the key from the first url is refused by the next boot');
+  const current = await raw(port2, { path: `/api/updates?s=${first.session}`, headers: asHeaders(C(s1, first.session, bootOf(dir))) });
+  assert.equal(current.code, 200, 'the key from the new url works');
 });
