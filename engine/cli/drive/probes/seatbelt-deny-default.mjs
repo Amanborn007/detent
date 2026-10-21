@@ -6,11 +6,14 @@ import { posix } from "node:path";
 export const CLAUDE_BASE_VERSION = "2.1.306";
 
 // Dropped from Claude's allowlist on purpose; the probes check they stay unreachable.
-export const OMITTED_MACH = ["com.apple.securityd.xpc", "com.apple.coreservices.launchservicesd", "com.apple.SecurityServer"];
+export const OMITTED_MACH = ["com.apple.securityd.xpc", "com.apple.coreservices.launchservicesd", "com.apple.SecurityServer", "com.apple.lsd.mapdb"];
+
+// Denied again after the allowlist, so a later edit to it cannot reopen these.
+const DENY_MACH_REGEX = '^com\\.apple\\.([Cc]ore[Ss]ervices|lsd|securityd|SecurityServer|security\\.)';
 
 const MACH_LOOKUP = [
   "com.apple.audio.systemsoundserver", "com.apple.distributed_notifications@Uv3",
-  "com.apple.FontObjectsServer", "com.apple.fonts", "com.apple.logd", "com.apple.lsd.mapdb",
+  "com.apple.FontObjectsServer", "com.apple.fonts", "com.apple.logd",
   "com.apple.PowerManagement.control", "com.apple.system.logger",
   "com.apple.system.notification_center", "com.apple.system.opendirectoryd.libinfo",
   "com.apple.system.opendirectoryd.membership", "com.apple.bsd.dirhelper",
@@ -72,13 +75,14 @@ function ancestors(p) {
 // scratch is the only writable tree and loopbackPort the only reachable endpoint.
 // denyRead entries are emitted before reallowRead, and denyWrite after the write
 // allow, so each probe can pin down SBPL's last-matching-rule-wins order.
-export function buildProbeProfile({ scratch, loopbackPort, denyRead = [], reallowRead = [], denyWrite = [] }) {
+export function buildProbeProfile({ scratch, loopbackPort, denyRead = [], reallowRead = [], denyWrite = [], logTag = "detent-probe" }) {
+  if (!/^[A-Za-z0-9-]{1,64}$/.test(logTag)) throw new Error(`logTag must be 1-64 letters, digits or dashes: ${logTag}`);
   if (!Number.isInteger(loopbackPort) || loopbackPort < 1 || loopbackPort > 65535) {
     throw new Error(`loopbackPort must be an integer in 1..65535: ${loopbackPort}`);
   }
   const out = [
     "(version 1)",
-    '(deny default (with message "detent-probe"))',
+    `(deny default (with message "${logTag}"))`,
     "",
     "(allow process-exec)",
     "(allow process-fork)",
@@ -90,6 +94,9 @@ export function buildProbeProfile({ scratch, loopbackPort, denyRead = [], reallo
     "(allow mach-lookup",
     ...MACH_LOOKUP.map((n) => `  (global-name ${JSON.stringify(n)})`),
     ")",
+    `(deny mach-lookup (global-name-regex #"${DENY_MACH_REGEX}"))`,
+    "(deny appleevent-send)",
+    "(deny lsopen)",
     "",
     "(allow ipc-posix-shm)",
     "(allow ipc-posix-sem)",
@@ -105,6 +112,7 @@ export function buildProbeProfile({ scratch, loopbackPort, denyRead = [], reallo
     ...SYSCTL_NAMES.map((n) => `  (sysctl-name ${JSON.stringify(n)})`),
     ...SYSCTL_PREFIXES.map((n) => `  (sysctl-name-prefix ${JSON.stringify(n)})`),
     ")",
+    '(deny sysctl-read (sysctl-name-prefix "kern.procargs") (sysctl-name-prefix "kern.proc.args"))',
     '(allow sysctl-write (sysctl-name "kern.tcsm_enable"))',
     "(allow distributed-notification-post)",
     "",

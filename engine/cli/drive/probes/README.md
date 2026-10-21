@@ -54,3 +54,14 @@ without the `com.apple.securityd.xpc`, `com.apple.coreservices.launchservicesd` 
 `com.apple.SecurityServer` mach names. It is unit tested in `engine/cli/tests/drive-probes.test.mjs`,
 but the profile has not been applied by `sandbox-exec` yet; the first run on a real terminal is the check
 that it compiles.
+
+## Diagnosing a blocked tool
+
+`node engine/cli/drive/probes/run-probes.mjs --diagnose <tool>` runs one tool under the profile and prints the
+sandbox denials from `log show` (process, operation, path, count; never tool output). `<tool>` is one of
+node, npm, git, go, cargo, python3, make, clang or git-commit. If `log show` is refused, run it with sudo.
+
+## Known limit
+
+If `esc.procargs2_parent` still reports `visible` with the explicit `kern.procargs` deny in place, Seatbelt
+cannot hide another process's environment, and the design must never put a secret in a parent's exec-time env or argv.

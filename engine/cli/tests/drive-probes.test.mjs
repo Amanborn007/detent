@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 import { buildProbeProfile, defaultDenyRead, OMITTED_MACH, XCODE_SELECT_LINK } from "../drive/probes/seatbelt-deny-default.mjs";
 import { buildReport, result, summarize, validateResult, REPORT_SCHEMA } from "../drive/probes/report.mjs";
 import { classifyPreflight, preflight } from "../drive/probes/exec.mjs";
-import { evalLive, liveCheckScript, parseKv } from "../drive/probes/live-checks.mjs";
+import { diagnoseCommand, parseDenials } from "../drive/probes/diagnose.mjs";
+import { evalLive,liveCheckScript, parseKv } from "../drive/probes/live-checks.mjs";
 
 const PROBES = join(dirname(fileURLToPath(import.meta.url)), "..", "drive", "probes");
 const base = { scratch: "/private/var/folders/xx/S", loopbackPort: 49152 };
@@ -19,7 +20,45 @@ test("profile is deny-default and omits the keychain and Launch Services mach na
   assert.ok(p.includes("(allow process-info* (target same-sandbox))"));
   assert.ok(p.includes("(allow signal (target same-sandbox))"));
   assert.ok(p.includes('(sysctl-name "kern.argmax")'));
-  assert.ok(!p.includes("procargs"));
+  assert.ok(!/\(allow sysctl-read[^)]*procargs/s.test(p));
+});
+
+test("profile explicitly denies the launch, apple-event and procargs paths after the allowlists", () => {
+  const p = buildProbeProfile(base);
+  const at = (s) => p.indexOf(s);
+  assert.ok(at("(deny lsopen)") > at("(allow mach-lookup"));
+  assert.ok(at("(deny appleevent-send)") > 0);
+  assert.ok(p.includes('(deny mach-lookup (global-name-regex #"^com\\.apple\\.([Cc]ore[Ss]ervices|lsd|securityd|SecurityServer|security\\.)"))'));
+  assert.ok(at('(deny sysctl-read (sysctl-name-prefix "kern.procargs")') > at("(allow sysctl-read"));
+  assert.ok(!p.includes("lsd.mapdb"));
+});
+
+test("logTag is validated and lands in the deny-default message", () => {
+  assert.ok(buildProbeProfile({ ...base, logTag: "detent-diag-ab12" }).includes('(with message "detent-diag-ab12")'));
+  assert.throws(() => buildProbeProfile({ ...base, logTag: 'x"y' }), /logTag/);
+});
+
+test("parseDenials keeps operation and path only, prefers tagged lines and groups repeats", () => {
+  const log = [
+    "2026-10-21 10:00:00.1 Df kernel[0:1] (Sandbox) Sandbox: git(111) deny(1) file-read-data /Library/Developer/CommandLineTools/usr/bin/git detent-diag-ab12",
+    "2026-10-21 10:00:00.2 Df kernel[0:1] (Sandbox) Sandbox: git(111) deny(1) file-read-data /Library/Developer/CommandLineTools/usr/bin/git detent-diag-ab12",
+    "2026-10-21 10:00:00.3 Df kernel[0:1] (Sandbox) Sandbox: xcrun(112) deny(1) mach-lookup com.apple.example detent-diag-ab12",
+    "2026-10-21 10:00:00.4 Df kernel[0:1] (Sandbox) Sandbox: other(9) deny(1) file-write-create /tmp/x some-other-tag",
+    "unrelated line",
+  ].join("\n");
+  const r = parseDenials(log, "detent-diag-ab12");
+  assert.equal(r.tagged, true);
+  assert.deepEqual(r.denials, [
+    { process: "git", operation: "file-read-data", target: "/Library/Developer/CommandLineTools/usr/bin/git", count: 2 },
+    { process: "xcrun", operation: "mach-lookup", target: "com.apple.example", count: 1 },
+  ]);
+  assert.equal(parseDenials(log.replaceAll("detent-diag-ab12", "zz"), "detent-diag-ab12").tagged, false);
+});
+
+test("diagnoseCommand maps tools and rejects unknown names", () => {
+  assert.deepEqual(diagnoseCommand("make", "/r"), ["make", "-v"]);
+  assert.equal(diagnoseCommand("git-commit", "/r")[3], "_");
+  assert.equal(diagnoseCommand("rm", "/r"), null);
 });
 
 test("profile writes only to the scratch dir and a few devices, never a tty", () => {

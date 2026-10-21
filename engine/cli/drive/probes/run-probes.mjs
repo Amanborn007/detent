@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { buildReport, result } from "./report.mjs";
 import { buildProbeProfile, defaultDenyRead, CLAUDE_BASE_VERSION, XCODE_SELECT_LINK } from "./seatbelt-deny-default.mjs";
 import { preflight, run } from "./exec.mjs";
+import { TOOLS, diagnose } from "./diagnose.mjs";
 
 const SELF = fileURLToPath(import.meta.url);
 const CONNECT_JS = `const net=require("net");const a=process.argv.slice(1);const s=a.length>1?net.connect(+a[1],a[0]):net.connect(a[0]);
@@ -33,10 +34,6 @@ int main(int c, char **v) {
 }
 `;
 
-const TOOLS = [
-  ["node", ["-v"]], ["npm", ["-v"]], ["git", ["--version"]], ["go", ["version"]],
-  ["cargo", ["--version"]], ["python3", ["-V"]], ["make", ["-v"]], ["clang", ["--version"]],
-];
 
 function listen(server, where) {
   return new Promise((resolve, reject) => { server.once("error", reject); server.listen(where, () => resolve(server)); });
@@ -179,12 +176,12 @@ export async function runSandboxProbes({ T, S, realHome, canary, nonce }) {
     add("esc.defaults_write", "domain not created", wrote ? "created" : "not_created", wrote ? "fail" : "pass");
   }
   {
-    const probeArgs = ["-g", "-a", "NoSuchApp.detentprobe"];
-    const reach = (r) => /Unable to find application/i.test(r.stderr);
-    if (!reach(await host(["/usr/bin/open", ...probeArgs]))) add("esc.open", "launchservices unreachable", "control_failed", "inconclusive", "open could not reach Launch Services even unsandboxed");
+    // Finder is always running, so this needs the open action itself, not just a name lookup.
+    const openArgs = ["/usr/bin/open", "-g", "-b", "com.apple.finder"];
+    if ((await host(openArgs)).code !== 0) add("esc.open", "open action refused", "control_failed", "inconclusive", "open -g -b com.apple.finder failed even unsandboxed");
     else {
-      const reached = reach(await sb(["/usr/bin/open", ...probeArgs]));
-      add("esc.open", "launchservices unreachable", reached ? "reachable" : "blocked", reached ? "fail" : "pass");
+      const r = await sb(openArgs);
+      add("esc.open", "open action refused", r.code === 0 ? "launched" : `refused(rc=${r.code})`, r.code === 0 ? "fail" : "pass");
     }
   }
   {
@@ -315,6 +312,12 @@ export async function main(argv) {
     process.stderr.write(`sandbox_unavailable:${pf.code}: ${pf.message}\n`);
     process.stdout.write(JSON.stringify({ error: "sandbox_unavailable", code: pf.code, message: pf.message }) + "\n");
     return pf.code === "nested" ? 71 : 2;
+  }
+  const diag = argValue(argv, "--diagnose");
+  if (argv.includes("--diagnose")) {
+    const d = await diagnose({ tool: diag });
+    process.stdout.write(JSON.stringify(d, null, 2) + "\n");
+    return d.error ? 2 : 0;
   }
   const canary = process.env.PROBE_CANARY;
   const nonce = randomBytes(6).toString("hex");
