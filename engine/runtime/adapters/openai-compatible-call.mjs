@@ -106,7 +106,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
     a = parseArgv(argv);
     if (a.keyEnv !== undefined) {
       apiKey = env[a.keyEnv];
-      if (!apiKey) throw new Error("the variable named by --api-key-env is empty or unset");
+      if (!apiKey) throw new Error(`environment variable ${a.keyEnv} is empty or unset`);
     }
   } catch (e) {
     process.stderr.write(`openai-compatible-call: ${e.message}\n`);
