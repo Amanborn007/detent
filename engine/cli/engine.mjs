@@ -935,7 +935,7 @@ function endStage(stage, repo, runId, runDir, tddRecord) {
         { gate: gateDef.name, decision_id: gate.id, ...ho },
       );
     }
-    if (gate.status === "answered" && gate.answer === "revise") {
+    if (gate.status === "answered" && optionKey(gate.answer) === optionKey("revise")) {
       return no(
         `the ${gateDef.name} gate verdict is 'revise' — loop back, update ${primaryArtifact(stage) || "the stage artifact"}, and re-raise the gate (new decision block)`,
         `revise per the gate annotations, then engine stage end ${stage} again after a fresh gate approval`,
