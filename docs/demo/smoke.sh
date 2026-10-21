@@ -27,4 +27,5 @@ if [ "$actual" != "$expected" ]; then
 fi
 html="$(echo "$DETENT_ROOT"/.plans/*-intent.html)"
 [ -s "$html" ] || { echo "smoke FAILED: gate page missing: $html" >&2; exit 1; }
+bash "$here/terminal-smoke.sh" || exit 1
 echo "smoke ok"

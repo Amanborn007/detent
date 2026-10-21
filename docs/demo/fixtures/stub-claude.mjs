@@ -20,7 +20,7 @@ const FILES = {
 };
 const artifacts = [];
 for (const [rel, fixture] of Object.entries(FILES[stage] || {})) {
-  const body = readFileSync(join(here, fixture), "utf8");
+  const body = readFileSync(join(here, "term", fixture), "utf8");
   const p = join(outbox, rel);
   mkdirSync(dirname(p), { recursive: true });
   writeFileSync(p, body);
