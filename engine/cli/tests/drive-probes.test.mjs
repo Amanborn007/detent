@@ -8,6 +8,7 @@ import { buildProbeProfile, defaultDenyRead, OMITTED_MACH, XCODE_SELECT_LINK, XC
 import { buildReport, result, summarize, validateResult, REPORT_SCHEMA } from "../drive/probes/report.mjs";
 import { classifyPreflight, preflight } from "../drive/probes/exec.mjs";
 import { diagnoseCommand, parseDenials } from "../drive/probes/diagnose.mjs";
+import { describeRun, parseClaudeJson } from "../drive/probes/live.mjs";
 import { evalLive,liveCheckScript, parseKv } from "../drive/probes/live-checks.mjs";
 
 const PROBES = join(dirname(fileURLToPath(import.meta.url)), "..", "drive", "probes");
@@ -222,4 +223,14 @@ test("the harness never prints captured probe output", () => {
   const src = readFileSync(join(PROBES, "run-probes.mjs"), "utf8");
   assert.ok(!/console\./.test(src));
   assert.ok(!/write\([^)]*\.(stdout|stderr)\b/.test(src));
+});
+
+test("describeRun reports exit, flags and counts, and result text only for errors", () => {
+  const ok = parseClaudeJson(JSON.stringify({ is_error: false, subtype: "success", result: "SECRET-TOOL-OUTPUT", num_turns: 2, permission_denials: [1] }));
+  assert.ok(!describeRun({ code: 0, stderr: "" }, ok).includes("SECRET"));
+  assert.match(describeRun({ code: 0, stderr: "" }, ok), /denials=1/);
+  const bad = parseClaudeJson(JSON.stringify({ is_error: true, subtype: "error_during_execution", result: "x".repeat(500) }));
+  assert.equal(bad.error_text.length, 200);
+  assert.match(describeRun({ code: 1, stderr: "\nboom line\nsecond", timedOut: false }, bad), /exit=1 .*is_error=true .*stderr1="boom line"/);
+  assert.match(describeRun({ code: null, signal: "SIGKILL", stderr: "", timedOut: true }, parseClaudeJson("")), /timed_out=true/);
 });

@@ -41,13 +41,33 @@ export function startMessagesProxy({ apiKey, placeholder, upstream = "https://ap
   });
 }
 
-function parseClaudeJson(stdout) {
+export function parseClaudeJson(stdout) {
   try {
     const j = JSON.parse(stdout.trim().split("\n").pop());
-    return { answered: j.is_error === false, subtype: String(j.subtype ?? ""), cost: Number(j.total_cost_usd) || 0, turns: Number(j.num_turns) || 0 };
+    const isError = j.is_error === true;
+    return {
+      answered: j.is_error === false, is_error: isError, subtype: String(j.subtype ?? ""), cost: Number(j.total_cost_usd) || 0, turns: Number(j.num_turns) || 0,
+      denials: Array.isArray(j.permission_denials) ? j.permission_denials.length : 0,
+      error_text: isError && typeof j.result === "string" ? j.result.slice(0, 200) : "",
+    };
   } catch {
-    return { answered: false, subtype: "unparsed", cost: 0, turns: 0 };
+    return { answered: false, is_error: null, subtype: "unparsed", cost: 0, turns: 0, denials: 0, error_text: "" };
   }
+}
+
+// Exit code, flags and counts only; the result text is included solely when claude marked it an error.
+export function describeRun(r, c) {
+  const first = String(r.stderr || "").split("\n").find((l) => l.trim()) || "";
+  const parts = [`exit=${r.code ?? r.signal ?? r.error}`, `timed_out=${Boolean(r.timedOut)}`, `is_error=${c.is_error}`, `subtype=${c.subtype || "none"}`, `denials=${c.denials}`, `turns=${c.turns}`];
+  if (c.error_text) parts.push(`error=${JSON.stringify(c.error_text)}`);
+  if (first) parts.push(`stderr1=${JSON.stringify(first.slice(0, 200))}`);
+  return parts.join(" ").slice(0, 600);
+}
+
+export function readKeyFile(path) {
+  const k = readFileSync(path, "utf8").trim();
+  if (!k) throw new Error("--api-key-file is empty");
+  return k;
 }
 
 function prompt(script, args) {
@@ -75,7 +95,7 @@ async function hostControls(realHome) {
   };
 }
 
-export async function runLive({ T, realHome, canary, nonce, log }) {
+export async function runLive({ T, realHome, canary, nonce, log, apiKeyFile }) {
   const results = [];
   let spent = 0;
   const add = (probe, expected, actual, status, note) => results.push(result({ probe, expected, actual, status, note }));
@@ -91,10 +111,10 @@ export async function runLive({ T, realHome, canary, nonce, log }) {
   try { forced = /"sandbox"/.test(readFileSync(managed, "utf8")); } catch { /* absent or unreadable means not forced */ }
   add("live.pb6_managed_sandbox", "no forced sandbox setting", forced ? "managed settings carry a sandbox key" : "none", forced ? "fail" : "pass", "boolean only; the file is not printed");
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = apiKeyFile ? readKeyFile(apiKeyFile) : process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     for (const id of ["live.pb2_proxy_only", "live.pb3_fake_home", "live.pb4_binary_dir_only", "live.pb5_bash_under_outer"]) {
-      add(id, "claude answers", "not_run", "skipped", "set ANTHROPIC_API_KEY to run the outer-sandbox probes");
+      add(id, "claude answers", "not_run", "skipped", "set ANTHROPIC_API_KEY or pass --api-key-file to run the outer-sandbox probes");
     }
   } else if (affordable(0.06)) {
     const placeholder = `probe-${nonce}`;
@@ -158,14 +178,14 @@ export async function runLive({ T, realHome, canary, nonce, log }) {
     const settings = { sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false } };
     const args = st.args.map((a) => (a === "$REAL_HOME" ? realHome : a));
     const r = await run(claudeReal, ["-p", "--model", LIVE_MODEL, "--max-turns", "3", "--max-budget-usd", "0.04", "--output-format", "json",
-      "--tools", "Bash", "--allowedTools", "Bash", "--settings", JSON.stringify(settings), "--setting-sources", "project",
+      "--tools", "Bash", "--allowedTools", "Bash", "--permission-mode", "dontAsk", "--settings", JSON.stringify(settings), "--setting-sources", "project",
       "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"],
     { env, cwd: join(dir, "work"), timeout: 180000, input: prompt(st.script, args) });
     const c = parseClaudeJson(r.stdout);
     spent += c.cost;
     const kv = existsSync(st.out) ? parseKv(readFileSync(st.out, "utf8")) : {};
     add("live.alt_builtin.bash_ran", "Bash ran under claude's own sandbox", kv.bash_ran === 1 ? "bash_ran" : `no_bash(answered=${c.answered} subtype=${c.subtype})`, kv.bash_ran === 1 ? "pass" : "inconclusive",
-      kv.bash_ran === 1 ? undefined : "the rest of this group is not evaluated; check that this shell is not itself sandboxed");
+      kv.bash_ran === 1 ? undefined : describeRun(r, c).slice(0, 300));
     if (kv.bash_ran === 1) results.push(...evalLive("live.alt_builtin", kv, controls, { expectLoopback: false }));
     clean();
   } else add("live.alt_builtin.bash_ran", "ran", "not_run", "skipped", "budget cap reached");

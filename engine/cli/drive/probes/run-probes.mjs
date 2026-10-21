@@ -338,7 +338,7 @@ export async function main(argv) {
     if (live) {
       log("running live probes (spends up to 0.10 USD)");
       const { runLive } = await import("./live.mjs");
-      all = results.concat(await runLive({ T, realHome, canary, nonce, log }));
+      all = results.concat(await runLive({ T, realHome, canary, nonce, log, apiKeyFile: argValue(argv, "--api-key-file") }));
     }
     const report = buildReport({ results: all, meta: { platform: process.platform, os_release: os.release(), node: process.version, claude_profile_base: CLAUDE_BASE_VERSION, profile_sha256_16: profileSha, live } });
     const text = JSON.stringify(report, null, 2) + "\n";

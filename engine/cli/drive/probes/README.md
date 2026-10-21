@@ -78,3 +78,6 @@ grandparent probe shows it is any same-user process, not only the parent. So for
 - SECURITY.md must say that other same-user processes' env and argv are readable from inside the sandbox.
 
 `--diagnose` also prints the shim's first stderr line (at most 200 characters) and matches denials by the spawned pid.
+
+`--api-key-file <path>` reads the PB2-PB5 key from a file instead of `ANTHROPIC_API_KEY` and never prints it.
+When `live.alt_builtin.bash_ran` is not `pass`, its note carries claude exit code, is_error, subtype, denial count and the first stderr line.
