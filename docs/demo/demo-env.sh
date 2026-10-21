@@ -21,7 +21,7 @@ detent() {
   local o rc
   o=$(node "$DEMO_SRC/engine/cli/engine.mjs" "$@"); rc=$?
   if [ "$1" = setup ] && [ $rc -eq 0 ]; then
-    sed "s|^\( *command: \).*gh-ticket.*|\1\"$FIX/stub-ticket\"|" "$DEMO_TMP/repo/stack.yaml" > "$DEMO_TMP/stack.tmp" && mv "$DEMO_TMP/stack.tmp" "$DEMO_TMP/repo/stack.yaml"
+    node -e 'const fs=require("fs"),[f,cmd]=process.argv.slice(1);fs.writeFileSync(f,fs.readFileSync(f,"utf8").replace(/^( *command: ).*gh-ticket.*$/m,(_,p)=>p+JSON.stringify(cmd)))' "$DEMO_TMP/repo/stack.yaml" "$FIX/stub-ticket" || return 1
   fi
   printf '%s\n' "$o"
   return $rc

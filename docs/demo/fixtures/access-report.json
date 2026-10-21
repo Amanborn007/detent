@@ -5,7 +5,7 @@
     "needed_for": "the ticket text",
     "status": "reachable",
     "criticality": "critical",
-    "detail": "offline fixture answered the ticket socket",
+    "detail": "canned fixture for the demo; no provider ran",
     "blocked_reason": null,
     "enable_action": null,
     "probed_at": "2026-10-21T09:00:00Z"
@@ -16,7 +16,7 @@
     "needed_for": "F1 and F2: where the delay is computed",
     "status": "reachable",
     "criticality": "important",
-    "detail": "built-in repo-docs provider read the work repo",
+    "detail": "canned fixture for the demo; no provider ran",
     "blocked_reason": null,
     "enable_action": null,
     "probed_at": "2026-10-21T09:00:01Z"

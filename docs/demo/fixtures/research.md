@@ -1,3 +1,5 @@
+> Demo fixture: the files cited here are illustrative and are not in the throwaway repo.
+
 # Research: acme/widgets#1
 
 ## Findings

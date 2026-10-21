@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // One engine JSON line on stdin -> one human line on stdout. Usage: engine ... | node say.mjs <kind>
-// Every value printed comes from that JSON. The `ok` value is also appended to $DEMO_TMP/oks.log for smoke.sh.
+// Every status, id and path printed comes from that JSON; only the "on disk" file names come from argv. The `ok` value is also appended to $DEMO_TMP/oks.log for smoke.sh.
 import { appendFileSync, readFileSync } from "node:fs";
 
 const kind = process.argv[2];
@@ -13,9 +13,10 @@ const G = "\x1b[32m", R = "\x1b[31m", Y = "\x1b[33m", D = "\x1b[2m", Z = "\x1b[0
 const pad = (s) => s.padEnd(9);
 const line = (mark, colour, label, text) => console.log(`${colour}${mark}${Z} ${pad(label)}${text}`);
 
-if (process.env.DEMO_TMP) appendFileSync(`${tmp}/oks.log`, `${kind} ${j.ok}\n`);
+const held = kind === "plan" && !j.ok && Boolean(j.gate && j.decision_id);
+if (process.env.DEMO_TMP) appendFileSync(`${tmp}/oks.log`, `${kind} ${held ? "held" : j.ok}\n`);
 
-if (!j.ok && kind !== "plan") {
+if (!j.ok && !held) {
   line("x", R, kind, j.reason);
   console.log(`  ${D}${j.next_step}${Z}`);
 } else if (kind === "setup") {
@@ -26,10 +27,11 @@ if (!j.ok && kind !== "plan") {
   console.log(`  ${D}next stage: ${j.stage}${Z}`);
 } else if (kind === "ticket") {
   line("✓", G, "ticket", `${j.response.id}  "${j.response.title}"`);
-} else if (kind === "plan" && !j.ok) {
+} else if (held) {
   line("■", Y, "plan", `written, held at the ${j.gate} gate (${j.decision_id} pending)`);
 } else if (kind === "gate") {
-  line("■", Y, "gate", "waiting on you: plan approval");
+  const d = j.decision;
+  line("■", Y, "gate", `waiting on you: ${d.gate || d.id} gate ${d.id} (${d.options.join(" or ")})`);
   console.log(`  page: ${short(j.html)}`);
 } else {
   const files = process.argv[3] ? `  (${process.argv[3]} on disk)` : "";

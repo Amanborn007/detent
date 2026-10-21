@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Replays the demo against the real engine and fails on any unexpected `ok`. Offline: no network, no LLM.
 set -u
+command -v curator >/dev/null 2>&1 || { echo "smoke.sh needs curator on PATH (see docs/demo/README.md)" >&2; exit 2; }
 here="$(cd "$(dirname "$0")" && pwd)"
 export DEMO_TMP="$(mktemp -d "${TMPDIR:-/tmp}/detent-demo.XXXXXX")"
 trap 'rm -rf "$DEMO_TMP"' EXIT
@@ -16,7 +17,7 @@ run true
 ticket true
 intake true
 research true
-plan false
+plan held
 gate true'
 actual="$(cat "$DEMO_TMP/oks.log")"
 if [ "$actual" != "$expected" ]; then

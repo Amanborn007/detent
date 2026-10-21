@@ -1,3 +1,5 @@
+> Demo fixture: the files cited here are illustrative and are not in the throwaway repo.
+
 # Plan: acme/widgets#1
 
 ## Approach

@@ -12,6 +12,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const CHROME = process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const W = 1100, H = 540;
 const ROOT = resolve(here, "..", "..");
+if (spawnSync("bash", ["-c", "command -v curator"]).status !== 0) throw new Error("render-fallback.mjs needs curator on PATH (see docs/demo/README.md)");
 
 // 1. Parse the tape: commands typed after Show, with the sleep that follows each.
 const tape = readFileSync(join(here, "demo.tape"), "utf8").split("\n");
@@ -26,8 +27,9 @@ for (const line of tape) {
   if (s && steps.length) steps[steps.length - 1].sleep = Number(s[1]);
 }
 
-// 2. Run them for real, one bash session, output split by markers.
 const work = mkdtempSync(join(tmpdir(), "detent-demo-"));
+try {
+// 2. Run them for real, one bash session, output split by markers.
 const MARK = "@@STEP@@";
 const script = [`export DEMO_TMP=${JSON.stringify(work + "/state")}`, `source ${JSON.stringify(join(here, "demo-env.sh"))} >/dev/null 2>&1`]
   .concat(steps.map((s) => `echo ${MARK}; ${s.cmd}`)).join("\n");
@@ -99,4 +101,6 @@ const ff = spawnSync("ffmpeg", ["-y", "-loglevel", "error", "-f", "concat", "-sa
 if (ff.status !== 0) throw new Error(`ffmpeg failed: ${ff.stderr}`);
 const total = frames.reduce((a, f) => a + f.dur, 0);
 console.log(`wrote ${out} (${frames.length} frames, ~${total.toFixed(1)}s)`);
-rmSync(work, { recursive: true, force: true });
+} finally {
+  rmSync(work, { recursive: true, force: true });
+}
