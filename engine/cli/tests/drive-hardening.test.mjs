@@ -46,7 +46,7 @@ test("a proposal with no env.json beforehand still creates no env.json", () => {
 test("the gate page shows the proposed commands, gotchas and attempts, escaped", () => {
   const t = setup();
   throughStage(t, "research");
-  const patch = { env: { commands: { verify: "run <b>this</b>" }, gotchas: ["g <i>1</i>"] }, attempts: [{ approach: "A <u>x</u>", outcome: "failed" }] };
+  const patch = { env: { commands: { verify: "run <b>this</b>" }, gotchas: ["g <i>1</i>"] }, attempts: [{ approach: "A <u>x</u>", outcome: "failed", evidence: "e" }] };
   const r = drive(t, { manifestPatch: patch });
   assert.equal(r.code, 0, r.stdout + r.stderr);
   assert.equal(r.json.stopped, "needs_human");

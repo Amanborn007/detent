@@ -258,12 +258,12 @@ test("child cwd is a fresh empty non-writable dir, not the outbox, outside DETEN
   const c = r.calls[0];
   assert.deepEqual(c.cwdEntries, []);
   assert.equal(c.cwdMode & 0o222, 0, "cwd not writable");
-  assert.notEqual(c.cwd, realpathSync(c.outbox));
+  assert.notEqual(c.cwd, c.outbox);
   assert.ok(!c.cwd.startsWith(realpathSync(t.home)), "outside DETENT_ROOT");
   assert.ok(c.cwd.startsWith(realpathSync(t.tmp)), "under $TMPDIR/detent-drive");
   assert.match(c.cwd, /detent-drive\/[^/]+\/steps\/1\/cwd$/);
-  const adds = c.args.flatMap((x, i) => (x === "--add-dir" ? [realpathSync(c.args[i + 1])] : []));
-  assert.deepEqual(adds.sort(), [realpathSync(c.inputs), realpathSync(c.outbox)].sort());
+  const adds = c.args.flatMap((x, i) => (x === "--add-dir" ? [c.args[i + 1]] : []));
+  assert.deepEqual(adds.sort(), [c.inputs, c.outbox].sort());
   assert.ok(!existsSync(join(t.tmp, "detent-drive", t.runId, "steps", "1")), "step dir deleted after apply");
 });
 
@@ -281,16 +281,16 @@ test("settings: dontAsk, exactly two outbox allows, denies, hooks off, file outs
   const r = drive(t, {}, ["--max-steps", "1"]);
   const c = r.calls[0];
   const s = c.settings;
-  const out = realpathSync(c.outbox).slice(1);
+  const out = c.outbox.slice(1);
   assert.equal(s.permissions.defaultMode, "dontAsk");
   assert.deepEqual([...s.permissions.allow].sort(), [`Edit(//${out}/**)`, `Write(//${out}/**)`]);
-  for (const d of ["WebFetch", "WebSearch", "Task", "Agent", "Skill", "NotebookEdit", `Write(//${realpathSync(c.inputs).slice(1)}/**)`,
-    `Edit(//${realpathSync(c.inputs).slice(1)}/**)`, `Write(//${out}/.git/**)`, `Edit(//${out}/.git/**)`]) {
+  for (const d of ["WebFetch", "WebSearch", "Task", "Agent", "Skill", "NotebookEdit", `Write(//${c.inputs.slice(1)}/**)`,
+    `Edit(//${c.inputs.slice(1)}/**)`, `Write(//${out}/.git/**)`, `Edit(//${out}/.git/**)`]) {
     assert.ok(s.permissions.deny.includes(d), `deny lacks ${d}`);
   }
   assert.equal(s.disableAllHooks, true);
   const sp = realpathSync(c.settingsPath);
-  assert.ok(!sp.startsWith(realpathSync(c.inputs)) && !sp.startsWith(realpathSync(c.outbox)) && !sp.startsWith(c.cwd));
+  assert.ok(!sp.startsWith(c.inputs) && !sp.startsWith(c.outbox) && !sp.startsWith(c.cwd));
   assert.ok(sp.startsWith(realpathSync(t.runDir)), "settings live under the run's .drive dir");
 });
 
