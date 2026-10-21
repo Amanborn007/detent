@@ -9,7 +9,7 @@ test("engine help exits 0 with a usage map and next_step", () => {
   assert.equal(r.code, 0);
   assert.equal(r.json.ok, true);
   assert.ok(r.json.usage && typeof r.json.usage === "object");
-  for (const cmd of ["run new", "stage begin", "stage end", "gate open", "socket call", "next", "help"]) {
+  for (const cmd of ["run new", "stage begin", "stage end", "gate open", "socket call", "next", "runtime run", "runtime capabilities", "help"]) {
     assert.ok(cmd in r.json.usage, `usage missing '${cmd}'`);
   }
   assert.ok(Array.isArray(r.json.stages) && r.json.stages.includes("intake"));

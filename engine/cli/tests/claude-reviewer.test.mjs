@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, chmodSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, chmodSync, realpathSync, mkdirSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ADAPTER = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "adapters", "claude-reviewer");
@@ -29,7 +29,7 @@ function mkStub() {
   writeFileSync(bin, `#!/usr/bin/env node
 const fs = require("node:fs");
 const stdin = fs.readFileSync(0, "utf8");
-fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify({ argv: process.argv.slice(2), stdin }));
+fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify({ argv: process.argv.slice(2), stdin, cwd: fs.realpathSync(process.cwd()), entries: fs.readdirSync(".") }));
 const mode = process.env.STUB_MODE;
 const good = ${JSON.stringify(GOOD)};
 const env = (result) => JSON.stringify({ type: "result", is_error: false, result, total_cost_usd: 0.0123 });
@@ -42,6 +42,11 @@ if (mode === "badloc") console.log(env(JSON.stringify({ findings: [{ ...good, lo
 if (mode === "array") console.log(JSON.stringify([{ type: "system", subtype: "init" }, { type: "assistant" }, JSON.parse(env(JSON.stringify({ findings: [good] })))]));
 if (mode === "nonjson") console.log(env("looks fine to me"));
 if (mode === "noenvelope") console.log("not an envelope");
+if (mode === "iserror") console.log(JSON.stringify({ type: "result", is_error: true, result: "Invalid API key" }));
+if (mode === "maxturns") console.log(JSON.stringify({ type: "result", subtype: "error_max_turns", is_error: true, result: "ran out of turns" }));
+if (mode === "execerror") console.log(JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: false, result: JSON.stringify({ findings: [good] }) }));
+if (mode === "maxbudget") console.log(JSON.stringify({ type: "result", subtype: "error_max_budget_usd", is_error: true, result: "budget hit" }));
+if (mode === "nullout") console.log("null");
 `);
   chmodSync(bin, 0o755);
   return { bin, log };
@@ -190,4 +195,78 @@ test("a git failure on the diff is a provider failure, exit 1", () => {
   const r = run(req(mkRepo(), "no-such-ref"));
   assert.equal(r.code, 1);
   assert.equal(r.called, false);
+});
+
+test("argv is exactly the pre-port array", () => {
+  const base = ["-p", "--output-format", "json", "--tools", "", "--strict-mcp-config", "--no-session-persistence"];
+  assert.deepEqual(run(req(mkRepo())).rec.argv, [...base, "--setting-sources", ""]);
+  assert.deepEqual(run(req(mkRepo()), { args: ["--model", "sonnet"] }).rec.argv, [...base, "--setting-sources", "", "--model", "sonnet"]);
+  assert.deepEqual(run(req(mkRepo()), { args: ["--bare"] }).rec.argv, [...base, "--bare"]);
+  assert.deepEqual(run(req(mkRepo()), { args: ["--model", "sonnet", "--bare"] }).rec.argv, [...base, "--bare", "--model", "sonnet"]);
+});
+
+test("prompt is stdin-only, cwd is an empty temp dir", () => {
+  const repo = mkRepo();
+  const { rec } = run(req(repo));
+  assert.ok(!rec.argv.includes(rec.stdin));
+  assert.match(rec.stdin, /ticket T-1/);
+  assert.match(basename(rec.cwd), /^detent-claude-reviewer-/);
+  assert.notEqual(rec.cwd, realpathSync(repo));
+  assert.deepEqual(rec.entries, []);
+});
+
+test("DETENT_RUNTIME=nope: exit 2 naming the runtime, claude never called", () => {
+  const r = run(req(mkRepo()), { env: { DETENT_RUNTIME: "nope" } });
+  assert.equal(r.code, 2);
+  assert.match(r.json.error, /nope/);
+  assert.ok(r.json.next_step);
+  assert.equal(r.called, false);
+});
+
+test("is_error envelope: exit 1 with claude's message", () => {
+  const r = run(req(mkRepo()), { mode: "iserror" });
+  assert.equal(r.code, 1);
+  assert.equal(r.json.error, "claude reported an error: Invalid API key");
+});
+
+test("error_max_turns: exit 1, turns limit", () => {
+  const r = run(req(mkRepo()), { mode: "maxturns" });
+  assert.equal(r.code, 1);
+  assert.equal(r.json.error, "claude stopped at its turns limit");
+});
+
+test("error_during_execution with valid findings is still exit 1", () => {
+  const r = run(req(mkRepo()), { mode: "execerror" });
+  assert.equal(r.code, 1);
+  assert.match(r.json.error, /^claude reported an error: /);
+  assert.equal(r.json.findings, undefined);
+});
+
+test("error_max_budget_usd: exit 1, budget limit", () => {
+  const r = run(req(mkRepo()), { mode: "maxbudget" });
+  assert.equal(r.code, 1);
+  assert.equal(r.json.error, "claude stopped at its budget limit");
+});
+
+test("stdout null: exit 2, not a JSON envelope", () => {
+  const r = run(req(mkRepo()), { mode: "nullout" });
+  assert.equal(r.code, 2);
+  assert.equal(r.json.error, "claude stdout is not a JSON envelope: not an object");
+});
+
+test("runtime port fails to load: JSON error, exit 1, no stack", () => {
+  const root = mkdtempSync(join(tmpdir(), "clrev-noruntime-"));
+  mkdirSync(join(root, "engine", "adapters"), { recursive: true });
+  const copy = join(root, "engine", "adapters", "claude-reviewer");
+  copyFileSync(ADAPTER, copy);
+  chmodSync(copy, 0o755);
+  const stub = mkStub();
+  const r = spawnSync(copy, [], {
+    input: JSON.stringify(req(mkRepo())), encoding: "utf8",
+    env: { ...process.env, DETENT_CLAUDE_BIN: stub.bin, STUB_MODE: "valid" },
+  });
+  assert.equal(r.status, 1, r.stderr);
+  const json = JSON.parse(r.stdout);
+  assert.match(json.error, /claude-reviewer crashed/);
+  assert.ok(json.next_step);
 });

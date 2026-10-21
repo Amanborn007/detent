@@ -69,15 +69,15 @@ test("setup writes stack.yaml with absolute adapter paths that exist", () => {
   const y = readFileSync(join(repo, "stack.yaml"), "utf8");
   assert.match(y, /engine_version: "1"/);
   const cmds = [...y.matchAll(/command: "([^"]+)"/g)].map((m) => m[1]);
-  assert.equal(cmds.length, 3);
+  assert.equal(cmds.length, 4);
   for (const c of cmds) {
     assert.ok(c.startsWith("/"), `not absolute: ${c}`);
     assert.ok(existsSync(c), `missing: ${c}`);
   }
-  for (const n of ["gh-ticket", "repo-docs-knowledge", "gh-bot-comments"]) {
+  for (const n of ["gh-ticket", "repo-docs-knowledge", "repo-index-knowledge", "gh-bot-comments"]) {
     assert.ok(cmds.some((c) => c.endsWith(`/engine/adapters/${n}`)), n);
   }
-  assert.equal((y.match(/version: "builtin"/g) || []).length, 3);
+  assert.equal((y.match(/version: "builtin"/g) || []).length, 4);
   assert.ok(r.json.wrote.includes(join(repo, "stack.yaml")));
 });
 

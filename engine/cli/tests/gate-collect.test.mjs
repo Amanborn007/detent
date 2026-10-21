@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { ENGINE, engine, mkRun, writeArtifact, readJson, writeJson, throughResearch, eventsOf } from "./helpers.mjs";
+import { ENGINE, engine, mkCuratorClone, mkRun, writeArtifact, readJson, writeJson, throughResearch, eventsOf } from "./helpers.mjs";
 
 const CURATOR_CLI = join(fileURLToPath(import.meta.url), "..", "..", "..", "curator", "cli.mjs");
 // No real curator may leak in from the developer's PATH.
@@ -13,18 +13,15 @@ const BARE_PATH = "/usr/bin:/bin";
 
 function scratch() { return mkdtempSync(join(tmpdir(), "gate-collect-test-")); }
 
-/** A stub `curator` on its own PATH dir: records calls, `open` prints a url, `drain` prints STUB_DRAIN. */
+/** A stub curator installed where the engine's bundled one lives: records calls, `open` prints a url, `drain` prints STUB_DRAIN. */
 function mkCuratorStub(dir) {
-  const bin = join(dir, "curator");
-  writeFileSync(bin, `#!/bin/sh
-echo "$@" >> "$CURATOR_LOG"
-case "$1" in
-  open) echo '{"url":"http://127.0.0.1:9/s/abc","key":"'"$2"'"}' ;;
-  drain) printf '%s\\n' "$STUB_DRAIN" ;;
-esac
+  return mkCuratorClone(dir, `#!${process.execPath}
+import { appendFileSync } from "node:fs";
+const a = process.argv.slice(2);
+appendFileSync(process.env.CURATOR_LOG, a.join(" ") + "\\n");
+if (a[0] === "open") console.log(JSON.stringify({ url: "http://127.0.0.1:9/s/abc", key: a[1] }));
+if (a[0] === "drain") console.log(process.env.STUB_DRAIN);
 `);
-  chmodSync(bin, 0o755);
-  return bin;
 }
 
 /** A run parked on the plan intent gate, with its gate page rendered by `gate open`. */
@@ -37,7 +34,7 @@ function atPlanGate() {
   const cdir = scratch();
   mkCuratorStub(cdir);
   const r = engine(["gate", "open", "intent", "--repo", ctx.repo, "--run", ctx.runId],
-    { env: { PATH: `${cdir}:${BARE_PATH}` } });
+    { env: { PATH: BARE_PATH, TEST_CLONE: cdir } });
   assert.equal(r.code, 0, r.stdout + r.stderr);
   const gate = readJson(join(ctx.runDir, "decisions.json")).find((d) => d.gate === "intent");
   return { ctx, gate, html: r.json.html, cdir };
@@ -75,7 +72,7 @@ test("gate open lists every pending decision that blocks the same stage on one p
   const cdir = scratch();
   mkCuratorStub(cdir);
   const r = engine(["gate", "open", "intent", "--repo", ctx.repo, "--run", ctx.runId],
-    { env: { PATH: `${cdir}:${BARE_PATH}` } });
+    { env: { PATH: BARE_PATH, TEST_CLONE: cdir } });
   const text = readFileSync(r.json.html, "utf8");
   assert.equal(r.json.html, html);
   assert.ok(text.includes(`data-plan-question="${gate.id}"`) && text.includes('data-plan-question="D-050"'));
@@ -141,7 +138,7 @@ test("gate collect drains curator for the run's gate page only and maps the answ
   const drain = JSON.stringify({ key: realpathSync(html), status: "feedback",
     prompts: [{ type: "decision", question: gate.id, answer: "revise", note: "split step 3" }] });
   const r = engine(["gate", "collect", "--run", ctx.runId], {
-    env: { PATH: `${cdir}:${BARE_PATH}`, CURATOR_LOG: log, STUB_DRAIN: drain },
+    env: { PATH: BARE_PATH, TEST_CLONE: cdir, CURATOR_LOG: log, STUB_DRAIN: drain },
   });
   assert.equal(r.code, 0, r.stdout + r.stderr);
   assert.deepEqual(r.json.answered, [gate.id]);
@@ -158,7 +155,7 @@ test("gate collect refuses feedback that curator attributes to a page outside th
   const drain = JSON.stringify({ key: other, status: "feedback",
     prompts: [{ type: "decision", question: gate.id, answer: "approve" }] });
   const r = engine(["gate", "collect", "--run", ctx.runId], {
-    env: { PATH: `${cdir}:${BARE_PATH}`, CURATOR_LOG: join(cdir, "log"), STUB_DRAIN: drain },
+    env: { PATH: BARE_PATH, TEST_CLONE: cdir, CURATOR_LOG: join(cdir, "log"), STUB_DRAIN: drain },
   });
   assert.equal(r.code, 1, r.stdout);
   assert.equal(readJson(join(ctx.runDir, "decisions.json")).find((x) => x.id === gate.id).status, "pending");
@@ -169,7 +166,7 @@ test("gate collect with a curator that has nothing returns nothing yet", () => {
   const cdir = scratch();
   mkCuratorStub(cdir);
   const r = engine(["gate", "collect", "--run", ctx.runId], {
-    env: { PATH: `${cdir}:${BARE_PATH}`, CURATOR_LOG: join(cdir, "log"), STUB_DRAIN: '{"status":"idle","sessions":0,"drained":0}' },
+    env: { PATH: BARE_PATH, TEST_CLONE: cdir, CURATOR_LOG: join(cdir, "log"), STUB_DRAIN: '{"status":"idle","sessions":0,"drained":0}' },
   });
   assert.equal(r.json.collected, 0);
   assert.equal(r.json.note, "nothing yet");
@@ -216,7 +213,7 @@ test("gate collect for a run never drains a run whose id it is a prefix of", () 
   parkAtPlan(b);
   const cdir = scratch();
   mkCuratorStub(cdir);
-  const env = { PATH: `${cdir}:${BARE_PATH}`, CURATOR_LOG: join(cdir, "log") };
+  const env = { PATH: BARE_PATH, TEST_CLONE: cdir, CURATOR_LOG: join(cdir, "log") };
   const ra = engine(["gate", "open", "intent", "--run", a.runId], { env });
   const rb = engine(["gate", "open", "intent", "--run", b.runId], { env });
   assert.ok(a.runId !== b.runId && b.runId.startsWith(`${a.runId}-`), `${a.runId} / ${b.runId}`);
@@ -250,7 +247,7 @@ test("a judgment decision cannot be resolved by the proceed-degraded answer and 
   writeJson(p, readJson(p).map((d) => d.id === "D-095" ? { ...d, status: "answered", answer: DEGRADED } : d));
   const cdir = scratch();
   mkCuratorStub(cdir);
-  r = engine(["gate", "open", "D-095", "--run", ctx.runId], { env: { PATH: `${cdir}:${BARE_PATH}`, CURATOR_LOG: join(cdir, "log") } });
+  r = engine(["gate", "open", "D-095", "--run", ctx.runId], { env: { PATH: BARE_PATH, TEST_CLONE: cdir, CURATOR_LOG: join(cdir, "log") } });
   assert.equal(r.json.mode, "curator", r.stdout);
   assert.ok(readFileSync(r.json.html, "utf8").includes('data-plan-question="D-095"'));
   r = collect(ctx, [{ type: "decision", question: "D-095", answer: "cap" }]);
@@ -277,7 +274,7 @@ test("the generated gate page passes the curator artifact check for ordinary opt
     writeJson(p, next);
     const cdir = scratch();
     mkCuratorStub(cdir);
-    const r = engine(["gate", "open", c.gate, "--run", ctx.runId], { env: { PATH: `${cdir}:${BARE_PATH}`, CURATOR_LOG: join(cdir, "log") } });
+    const r = engine(["gate", "open", c.gate, "--run", ctx.runId], { env: { PATH: BARE_PATH, TEST_CLONE: cdir, CURATOR_LOG: join(cdir, "log") } });
     assert.equal(r.code, 0, r.stdout + r.stderr);
     const chk = spawnSync(process.execPath, [CURATOR_CLI, "check", r.json.html], { encoding: "utf8" });
     assert.equal(chk.status, 0, `${JSON.stringify(c)}\n${chk.stdout}${chk.stderr}`);
@@ -288,7 +285,7 @@ test("gate collect persists every drained item, including ones it cannot apply",
   const { ctx, gate, html } = atPlanGate();
   const cdir = scratch();
   mkCuratorStub(cdir);
-  const env = { PATH: `${cdir}:${BARE_PATH}`, CURATOR_LOG: join(cdir, "log") };
+  const env = { PATH: BARE_PATH, TEST_CLONE: cdir, CURATOR_LOG: join(cdir, "log") };
   const drain = JSON.stringify({ key: realpathSync(html), status: "feedback",
     prompts: [{ type: "decision", question: gate.id, answer: null, note: "need more info" }] });
   const r = engine(["gate", "collect", "--run", ctx.runId], { env: { ...env, STUB_DRAIN: drain } });
@@ -309,7 +306,7 @@ test("gate collect persists drained feedback even when the page is refused as fo
     prompts: [{ type: "selection", comment: "keep this note", selectedText: "step 2" },
       { type: "decision", question: gate.id, answer: "approve" }] });
   const r = engine(["gate", "collect", "--run", ctx.runId], {
-    env: { PATH: `${cdir}:${BARE_PATH}`, CURATOR_LOG: join(cdir, "log"), STUB_DRAIN: drain },
+    env: { PATH: BARE_PATH, TEST_CLONE: cdir, CURATOR_LOG: join(cdir, "log"), STUB_DRAIN: drain },
   });
   assert.equal(r.code, 1, r.stdout);
   const lines = readFileSync(join(ctx.runDir, "review-feedback.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));

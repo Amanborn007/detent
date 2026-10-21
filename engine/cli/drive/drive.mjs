@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { readOutbox, validateDecisions, secretScan } from "./outbox.mjs";
 import { createStateTracker } from "./integrity.mjs";
+import { resolveStateDir } from "../../curator/auth.mjs";
 import { optionKey } from "../../handoff/handoff.mjs";
 import {
   validateDriveProfile, buildChildSettings, buildChildArgs, buildChildEnv, versionAtLeast, MIN_CLAUDE_VERSION,
@@ -28,8 +29,8 @@ const REQUIRED_HEADINGS = {
   "brief.md": ["## Goal", "## Unknowns & open questions"],
   "research.md": ["## Blast radius"],
 };
-const DEFAULT_MODEL = "claude-sonnet-5-5";
-const DEFAULT_BUDGET_USD = 5;
+export const DEFAULT_MODEL = "claude-sonnet-5-5";
+export const DEFAULT_BUDGET_USD = 5;
 const BUDGET_FLOOR_USD = 0.1;
 const MAX_REPO_ARCHIVE_BYTES = 200 * 1024 * 1024;
 const MANIFEST_CAP = 256 * 1024;
@@ -129,7 +130,7 @@ function acquireLock(E, runDir) {
   throw new Error(`could not acquire ${p}`);
 }
 
-function positiveFlag(E, flags, name, dflt, integer) {
+export function positiveFlag(E, flags, name, dflt, integer) {
   if (flags[name] === undefined) return dflt;
   const n = Number(flags[name]);
   if (flags[name] === true || !Number.isFinite(n) || n <= 0 || (integer && !Number.isInteger(n))) {
@@ -478,6 +479,18 @@ function envPanel(E, runDir) {
   return `<h2>Proposed by the child (not run, not trusted)</h2>\n<p class="sub">Nothing downstream reads this. Promote a command yourself with engine env if you want it used.</p>\n<pre>${lines.map((l) => E.escapeHtml(l)).join("\n")}</pre>`;
 }
 
+// The server secret lives here, so the child gets deny rules for it, resolved through any symlinks in the path.
+function curatorStateDirFor(E) {
+  const dir = resolve(resolveStateDir({ ...process.env, DETENT_ROOT: E.detentRoot() }));
+  let existing = dir;
+  const tail = [];
+  while (!existsSync(existing) && dirname(existing) !== existing) {
+    tail.unshift(existing.slice(dirname(existing).length + 1));
+    existing = dirname(existing);
+  }
+  return join(realpathSync(existing), ...tail);
+}
+
 function stopForHuman(E, ctx, stage, blockers, collectError) {
   const { runId, runDir } = ctx;
   const noteHtml = `<p class="sub">${E.escapeHtml(INTENT_NOTE)}</p>\n${accessPanel(E, runDir)}\n${envPanel(E, runDir)}`;
@@ -485,9 +498,9 @@ function stopForHuman(E, ctx, stage, blockers, collectError) {
     name: blockers[0].gate || blockers[0].id, stage, decisions: blockers, noteHtml,
   });
   let url;
-  const curator = E.curatorOnPath();
+  const curator = E.siblingCurator();
   if (curator) {
-    const r = spawnSync(curator, ["open", html], { encoding: "utf8", timeout: 30000 });
+    const r = spawnSync(process.execPath, [curator, "open", html], { encoding: "utf8", timeout: 30000 });
     if (r.status === 0) {
       try { url = JSON.parse(r.stdout.trim().split("\n").pop()).url; } catch { /* the page still exists on disk */ }
     } else {
@@ -497,7 +510,9 @@ function stopForHuman(E, ctx, stage, blockers, collectError) {
   const ids = blockers.map((d) => d.id);
   return stopOk(E, ctx, "needs_human", {
     stage, decisions: ids, html, ...(url ? { url } : {}), ...(collectError ? { collect_error: true } : {}),
-    next_step: `answer in curator${url ? ` (${url})` : ` (open ${html})`}, then run: detent drive --run ${runId}`,
+    next_step: process.env.DETENT_VERB
+      ? "answer the gate with detent decide (or detent approve / detent revise at your own terminal), then detent continue"
+      : `answer in curator${url ? ` (${url})` : ` (open ${html})`}, then run: detent drive --run ${runId}`,
   });
 }
 
@@ -530,7 +545,7 @@ function stopFail(E, ctx, reason, next_step, { stage, detail, extra } = {}) {
 // What next (slice A: never past plan)
 // ---------------------------------------------------------------------------
 
-function nextAction(E, status, decisions, runDir) {
+export function nextAction(E, status, decisions, runDir) {
   const stage = E.STAGES.find((s) => !["done", "skipped"].includes(status.stages[s].status));
   if (!stage) return { action: "done", stage: null };
   const blockers = E.pendingBlockers(decisions, stage);
@@ -742,12 +757,12 @@ export async function cmdDrive(flags, E) {
 
     // action === "spawn"
     if (ctx.steps >= maxSteps) {
-      return stopOk(E, ctx, "max_steps", { stage, next_step: `detent drive --run ${runId} to continue` });
+      return stopOk(E, ctx, "max_steps", { stage, next_step: process.env.DETENT_VERB ? "detent continue" : `detent drive --run ${runId} to continue` });
     }
     const remaining = budget - ctx.spent;
     if (remaining < BUDGET_FLOOR_USD) {
       return stopOk(E, ctx, "budget", {
-        stage, next_step: `spent ${round(ctx.spent)} of ${budget} USD; raise it and continue: detent drive --run ${runId} --budget <usd>`,
+        stage, next_step: `spent ${round(ctx.spent)} of ${budget} USD; raise it and continue: ${process.env.DETENT_VERB ? "detent continue" : `detent drive --run ${runId}`} --budget <usd>`,
       });
     }
     if (["pending", "blocked"].includes(status.stages[stage].status)) {
@@ -761,7 +776,9 @@ export async function cmdDrive(flags, E) {
     const io = prepareInputs(E, ctx, stage, ctx.steps);
     const settingsFile = join(runDir, ".drive", `settings-${ctx.steps}.json`);
     if (apiKey) writeFileSync(ST.keyFile, apiKey, { mode: 0o600 });
-    const settings = buildChildSettings(base, { inputs: io.inputs, outbox: io.outbox, apiKeyFile: apiKey ? ST.keyFile : null });
+    const settings = buildChildSettings(base, {
+      inputs: io.inputs, outbox: io.outbox, apiKeyFile: apiKey ? ST.keyFile : null, curatorStateDir: curatorStateDirFor(E),
+    });
     writeAtomic(settingsFile, JSON.stringify(settings, null, 2) + "\n");
     const { env, literals } = buildChildEnv(process.env, { tmpdir: io.tmp, sandboxRoot: sandboxTop });
     const args = buildChildArgs({
@@ -823,7 +840,7 @@ export async function cmdDrive(flags, E) {
     if (result.subtype === "error_max_budget_usd") {
       if (cost === null) return stopFail(E, ctx, "child_no_cost", "the result lacks total_cost_usd, so the budget cannot be enforced", { stage });
       return stopOk(E, ctx, "budget", {
-        stage, next_step: `spent ${round(ctx.spent)} of ${budget} USD; raise it and continue: detent drive --run ${runId} --budget <usd>`,
+        stage, next_step: `spent ${round(ctx.spent)} of ${budget} USD; raise it and continue: ${process.env.DETENT_VERB ? "detent continue" : `detent drive --run ${runId}`} --budget <usd>`,
       });
     }
     if (result.subtype === "error_max_turns") return stopFail(E, ctx, "child_max_turns", "the stage ran out of turns; inspect drive-last.json", { stage });
