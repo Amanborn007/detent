@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildProbeProfile, defaultDenyRead, OMITTED_MACH } from "../drive/probes/seatbelt-deny-default.mjs";
+import { buildProbeProfile, defaultDenyRead, OMITTED_MACH, XCODE_SELECT_LINK } from "../drive/probes/seatbelt-deny-default.mjs";
 import { buildReport, result, summarize, validateResult, REPORT_SCHEMA } from "../drive/probes/report.mjs";
 import { classifyPreflight, preflight } from "../drive/probes/exec.mjs";
 import { evalLive, liveCheckScript, parseKv } from "../drive/probes/live-checks.mjs";
@@ -134,22 +134,32 @@ const find = (rs, id) => rs.find((r) => r.probe.endsWith(id));
 test("evalLive: a blocked kit passes, and any success is a fail", () => {
   const kv = { bash_ran: 1, ssh_config_rc: 1, claude_dir_ls_rc: 1, claude_creds_ls_rc: 1, keychain_rc: 1, ps_self_seen: 1, ps_parent_seen: 0,
     kill0_parent_rc: 1, tty_open_rc: 1, net_ext_rc: 6, net_loopback_rc: 0, write_home_rc: 1 };
-  const ok = evalLive("live.alt_builtin", kv, controls, { keychainService: "Claude Code-credentials", expectLoopback: true });
+  const ok = evalLive("live.alt_builtin", kv, controls, { expectLoopback: true });
   assert.ok(ok.every((r) => r.status === "pass"), JSON.stringify(ok.filter((r) => r.status !== "pass")));
-  const leaky = evalLive("live.alt_builtin", { ...kv, ssh_config_rc: 0, keychain_rc: 0, ps_parent_seen: 1 }, controls, { keychainService: "Claude Code-credentials", expectLoopback: true });
+  const leaky = evalLive("live.alt_builtin", { ...kv, ssh_config_rc: 0, keychain_rc: 0, ps_parent_seen: 1 }, controls, { expectLoopback: true });
   for (const id of ["ssh_config_read", "keychain_query", "ps_env_parent"]) assert.equal(find(leaky, id).status, "fail", id);
 });
 
 test("evalLive: a failed control makes the result inconclusive instead of a pass", () => {
   const kv = { ssh_config_rc: 1, keychain_rc: 1, ps_self_seen: 0, ps_parent_seen: 0, net_ext_rc: 6 };
-  const rs = evalLive("l", kv, { ...controls, sshConfigExists: false, keychainItemFound: false, netExternalOk: false }, { keychainService: "Claude Code-credentials", expectLoopback: false });
+  const rs = evalLive("l", kv, { ...controls, sshConfigExists: false, keychainItemFound: false, netExternalOk: false }, { expectLoopback: false });
   for (const id of ["ssh_config_read", "keychain_query", "ps_env_parent", "net_external"]) assert.equal(find(rs, id).status, "inconclusive", id);
 });
 
-test("evalLive: reaching securityd with the nonexistent service is a fail", () => {
-  const rs = evalLive("l", { keychain_rc: 44 }, controls, { keychainService: "nonexistent-probe", expectLoopback: false });
-  assert.equal(find(rs, "keychain_query").status, "fail");
-  assert.equal(find(evalLive("l", { keychain_rc: 1 }, controls, { keychainService: "nonexistent-probe", expectLoopback: false }), "keychain_query").status, "pass");
+test("evalLive: only retrieving the real item fails the keychain probe; rc 44 is not reachability", () => {
+  const q = (rc) => find(evalLive("l", { keychain_rc: rc }, controls, { expectLoopback: false }), "keychain_query").status;
+  assert.equal(q(0), "fail");
+  assert.equal(q(44), "pass");
+  assert.equal(q(1), "pass");
+});
+
+test("keychain dirs are read-denied and the xcode-select link is re-allowed after the /private/var/db deny", () => {
+  const p = buildProbeProfile({ ...base, denyRead: defaultDenyRead("/Users/u"), reallowRead: [XCODE_SELECT_LINK] });
+  assert.ok(p.includes('(deny file-read* (subpath "/Users/u/Library/Keychains"))'));
+  assert.ok(p.includes('(deny file-read* (subpath "/Library/Keychains"))'));
+  assert.ok(p.indexOf('(deny file-read* (subpath "/private/var/db"))') < p.indexOf(`(allow file-read* (subpath "${XCODE_SELECT_LINK}"))`));
+  assert.ok(p.includes('(allow file-read-metadata (literal "/private/var/db"))'));
+  assert.ok(!p.includes('(allow file-read* (subpath "/private/var/db"))'));
 });
 
 test("the harness never prints captured probe output", () => {

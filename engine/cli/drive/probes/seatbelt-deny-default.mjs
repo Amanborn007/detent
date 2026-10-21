@@ -39,10 +39,14 @@ const SYSCTL_PREFIXES = [
 export function defaultDenyRead(home) {
   return [
     `${home}/.ssh`, `${home}/.aws`, `${home}/.config`, `${home}/.claude`, `${home}/.curator`,
+    `${home}/Library/Keychains`, "/Library/Keychains",
     "/Library/Application Support", "/Library/Preferences", "/opt/homebrew/etc", "/usr/local/etc",
     "/private/var/db", "/private/var/log",
   ];
 }
+
+// The /usr/bin developer-tool shims read this to find the active toolchain.
+export const XCODE_SELECT_LINK = "/private/var/db/xcode_select_link";
 
 const DEVICE_WRITES = ["/dev/null", "/dev/dtracehelper", "/dev/autofs_nowait"];
 const DEVICE_IOCTL = ["/dev/null", "/dev/zero", "/dev/random", "/dev/urandom", "/dev/dtracehelper", "/dev/tty"];

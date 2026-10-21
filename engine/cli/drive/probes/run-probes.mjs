@@ -6,23 +6,32 @@ import net from "node:net";
 import os from "node:os";
 import { createHash, randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildReport, result } from "./report.mjs";
-import { buildProbeProfile, defaultDenyRead, CLAUDE_BASE_VERSION } from "./seatbelt-deny-default.mjs";
+import { buildProbeProfile, defaultDenyRead, CLAUDE_BASE_VERSION, XCODE_SELECT_LINK } from "./seatbelt-deny-default.mjs";
 import { preflight, run } from "./exec.mjs";
 
 const SELF = fileURLToPath(import.meta.url);
 const CONNECT_JS = `const net=require("net");const a=process.argv.slice(1);const s=a.length>1?net.connect(+a[1],a[0]):net.connect(a[0]);
 const t=setTimeout(()=>{process.stdout.write("timeout");process.exit(0)},2500);
 s.on("connect",()=>{process.stdout.write("connected");process.exit(0)});s.on("error",e=>{process.stdout.write("error:"+e.code);process.exit(0)})`;
-const PROCARGS_PY = `import ctypes,sys
-l=ctypes.CDLL("libc.dylib");m=(ctypes.c_int*3)(1,49,int(sys.argv[1]));n=ctypes.c_size_t(0)
-if l.sysctl(m,3,None,ctypes.byref(n),None,0)!=0: print("rc=fail");sys.exit(0)
-b=ctypes.create_string_buffer(n.value)
-if l.sysctl(m,3,b,ctypes.byref(n),None,0)!=0: print("rc=fail");sys.exit(0)
-print("seen=%d"%(sys.argv[2].encode() in b.raw[:n.value]))`;
+const PROCARGS_C = `#include <sys/sysctl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+int main(int c, char **v) {
+  int m[3] = {CTL_KERN, KERN_PROCARGS2, atoi(v[1])}; size_t n = 0, L = strlen(v[2]);
+  if (sysctl(m, 3, 0, &n, 0, 0)) { puts("rc=fail"); return 0; }
+  char *b = malloc(n);
+  if (sysctl(m, 3, b, &n, 0, 0)) { puts("rc=fail"); return 0; }
+  int f = 0;
+  for (size_t i = 0; i + L <= n; i++) if (!memcmp(b + i, v[2], L)) { f = 1; break; }
+  printf("seen=%d\\n", f);
+  return 0;
+}
+`;
 
 const TOOLS = [
   ["node", ["-v"]], ["npm", ["-v"]], ["git", ["--version"]], ["go", ["version"]],
@@ -69,15 +78,17 @@ export async function runSandboxProbes({ T, S, realHome, canary, nonce }) {
   const extServer = await listen(net.createServer(accept), extSock);
   const allowedPort = loopAllowed.address().port, otherPort = loopOther.address().port;
 
+  const dd = await run("/usr/bin/xcode-select", ["-p"], { env: process.env });
+  const devDir = dd.code === 0 && dd.stdout.trim().startsWith("/") ? dd.stdout.trim() : "/Library/Developer/CommandLineTools";
   const profile = buildProbeProfile({
     scratch: S, loopbackPort: allowedPort,
     denyRead: [...defaultDenyRead(realHome), ...Object.values(markers).map((m) => m.dir), p1.denied.dir, dirname(p1.secret.path)],
-    reallowRead: [p1.open.dir],
+    reallowRead: [p1.open.dir, XCODE_SELECT_LINK],
     denyWrite: [join(S, "ro")],
   });
   const profileSha = createHash("sha256").update(profile).digest("hex").slice(0, 16);
   const hostEnv = { ...process.env };
-  const sbEnv = { PATH: process.env.PATH, HOME: fakeHome, TMPDIR: join(S, "tmp"), LANG: "C", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+  const sbEnv = { DEVELOPER_DIR: devDir, PATH: process.env.PATH, HOME: fakeHome, TMPDIR: join(S, "tmp"), LANG: "C", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
   const host = (argv, o = {}) => run(argv[0], argv.slice(1), { env: hostEnv, ...o });
   const sb = (argv, o = {}) => run("sandbox-exec", ["-p", profile, ...argv], { env: sbEnv, cwd: S, ...o });
   const sh = (script, ...a) => ["/bin/sh", "-c", script, "_", ...a];
@@ -154,14 +165,10 @@ export async function runSandboxProbes({ T, S, realHome, canary, nonce }) {
   }
   {
     const label = `detent.probe.${nonce}`;
-    const lc = join(S, "lc");
-    copyFileSync("/bin/launchctl", lc); chmodSync(lc, 0o755);
-    const ctl = await host([lc, "list", label]);
-    await sb([lc, "submit", "-l", label, "--", "/usr/bin/true"]);
+    await sb(["/bin/launchctl", "submit", "-l", label, "--", "/usr/bin/true"]);
     const submitted = (await host(["/bin/launchctl", "list", label])).code === 0;
     await host(["/bin/launchctl", "remove", label]);
-    if (ctl.signal) add("esc.launchctl_submit_copy", "not submitted", "control_failed", "inconclusive", "the copied launchctl cannot run even unsandboxed");
-    else add("esc.launchctl_submit_copy", "not submitted", submitted ? "submitted" : "not_submitted", submitted ? "fail" : "pass");
+    add("esc.launchctl_submit", "not submitted", submitted ? "submitted" : "not_submitted", submitted ? "fail" : "pass");
   }
   {
     const domain = `detent.probe.${nonce}`;
@@ -172,14 +179,12 @@ export async function runSandboxProbes({ T, S, realHome, canary, nonce }) {
     add("esc.defaults_write", "domain not created", wrote ? "created" : "not_created", wrote ? "fail" : "pass");
   }
   {
-    const op = join(S, "open");
-    copyFileSync("/usr/bin/open", op); chmodSync(op, 0o755);
     const probeArgs = ["-g", "-a", "NoSuchApp.detentprobe"];
     const reach = (r) => /Unable to find application/i.test(r.stderr);
-    if (!reach(await host([op, ...probeArgs]))) add("esc.open_copy", "launchservices unreachable", "control_failed", "inconclusive", "open could not reach Launch Services even unsandboxed");
+    if (!reach(await host(["/usr/bin/open", ...probeArgs]))) add("esc.open", "launchservices unreachable", "control_failed", "inconclusive", "open could not reach Launch Services even unsandboxed");
     else {
-      const reached = reach(await sb([op, ...probeArgs]));
-      add("esc.open_copy", "launchservices unreachable", reached ? "reachable" : "blocked", reached ? "fail" : "pass");
+      const reached = reach(await sb(["/usr/bin/open", ...probeArgs]));
+      add("esc.open", "launchservices unreachable", reached ? "reachable" : "blocked", reached ? "fail" : "pass");
     }
   }
   {
@@ -194,12 +199,13 @@ export async function runSandboxProbes({ T, S, realHome, canary, nonce }) {
     else add("esc.mdfind_marker", "0 hits", "0 hits (marker not indexed)", "inconclusive", "mdfind works in the sandbox but Spotlight never indexed the temp marker, so no leak could be shown");
   }
   {
-    const argv = ["/usr/bin/security", "find-generic-password", "-s", "nonexistent-probe"];
+    // rc 44 is also what an inaccessible keychain returns, so only a real item can show reachability.
+    const argv = ["/usr/bin/security", "find-generic-password", "-s", "Claude Code-credentials"];
     const h = await host(argv);
-    if (h.code !== 44) add("esc.securityd_reachable", "unreachable", `host_rc=${h.code}`, "inconclusive", "the unsandboxed query did not report item-not-found (44)");
+    if (h.code !== 0) add("esc.securityd_reachable", "item not retrievable", `host_rc=${h.code}`, "inconclusive", "the host keychain has no Claude Code-credentials item, so a failure proves nothing");
     else {
       const r = await sb(argv);
-      add("esc.securityd_reachable", "unreachable", r.code === 44 ? "reachable(rc=44)" : `rc=${r.code}`, r.code === 44 ? "fail" : "pass");
+      add("esc.securityd_reachable", "item not retrievable", r.code === 0 ? "item_found(rc=0)" : `rc=${r.code}`, r.code === 0 ? "fail" : "pass");
     }
   }
   {
@@ -233,12 +239,15 @@ export async function runSandboxProbes({ T, S, realHome, canary, nonce }) {
     else add("esc.ps_env_parent", "canary not visible", leak ? "visible" : "not_visible", leak ? "fail" : "pass");
   }
   {
-    const py = ["/usr/bin/python3", "-c", PROCARGS_PY, String(process.pid), canary];
-    const h = await host(py);
-    if (!h.stdout.includes("seen=1")) add("esc.procargs2_parent", "canary not visible", "control_failed", "inconclusive", "python3 sysctl KERN_PROCARGS2 could not read the harness env unsandboxed");
-    else if ((await sb(["/usr/bin/python3", "-c", "print(1)"])).code !== 0) add("esc.procargs2_parent", "canary not visible", "python3_unusable_in_sandbox", "inconclusive", "python3 cannot start under the profile, so the sysctl was never tried");
+    const src = join(T, "procargs2.c"), bin = join(S, "procargs2");
+    writeFileSync(src, PROCARGS_C);
+    const built = (await host(["clang", "-o", bin, src])).code === 0;
+    const probe = [bin, String(process.pid), canary];
+    const h = built ? await host(probe) : { stdout: "" };
+    if (!built) add("esc.procargs2_parent", "canary not visible", "no_compiler", "inconclusive", "clang could not build the sysctl helper on the host");
+    else if (!h.stdout.includes("seen=1")) add("esc.procargs2_parent", "canary not visible", "control_failed", "inconclusive", "the helper could not read the harness env unsandboxed");
     else {
-      const r = await sb(py);
+      const r = await sb(probe);
       add("esc.procargs2_parent", "canary not visible", r.stdout.includes("seen=1") ? "visible" : r.stdout.includes("seen=0") ? "not_visible" : "sysctl_denied", r.stdout.includes("seen=1") ? "fail" : "pass");
     }
   }

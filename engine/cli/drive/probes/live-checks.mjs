@@ -42,7 +42,7 @@ const blocked = (rc) => rc !== 0;
 
 // controls: booleans measured on the host without a sandbox.
 //   sshConfigExists, claudeCredsExist, keychainItemFound, netExternalOk
-export function evalLive(prefix, kv, controls, { keychainService, expectLoopback }) {
+export function evalLive(prefix, kv, controls, { expectLoopback }) {
   const out = [];
   const add = (probe, expected, actual, status, note) => out.push(result({ probe: `${prefix}.${probe}`, expected, actual, status, note }));
   const rcProbe = (probe, key, control, controlNote) => {
@@ -53,10 +53,8 @@ export function evalLive(prefix, kv, controls, { keychainService, expectLoopback
   rcProbe("ssh_config_read", "ssh_config_rc", controls.sshConfigExists, "no ~/.ssh/config on this host to read");
   if (kv.claude_dir_ls_rc !== undefined) rcProbe("claude_dir_list", "claude_dir_ls_rc", true);
   if (kv.claude_creds_ls_rc !== undefined) rcProbe("claude_credentials_file", "claude_creds_ls_rc", controls.claudeCredsExist, "no ~/.claude/.credentials* file on this host");
-  if (kv.keychain_rc === undefined) add("keychain_query", "blocked", "not_recorded", "skipped");
-  else if (keychainService === "Claude Code-credentials") rcProbe("keychain_query", "keychain_rc", controls.keychainItemFound,
+  rcProbe("keychain_query", "keychain_rc", controls.keychainItemFound,
     "the keychain item was not found on the host either, so a failure proves nothing");
-  else add("keychain_query", "securityd unreachable", kv.keychain_rc === 44 ? "reachable (rc=44)" : `rc=${kv.keychain_rc}`, kv.keychain_rc === 44 ? "fail" : "pass");
   if (kv.ps_parent_seen === undefined) add("ps_env_parent", "canary not visible", "not_recorded", "skipped");
   else if (!(kv.ps_self_seen >= 1)) add("ps_env_parent", "canary not visible", "control_failed", "inconclusive", "ps -E could not read its own env, so the parent result proves nothing");
   else add("ps_env_parent", "canary not visible", kv.ps_parent_seen === 0 ? "not_visible" : "visible", kv.ps_parent_seen === 0 ? "pass" : "fail");

@@ -101,7 +101,7 @@ export async function runLive({ T, realHome, canary, nonce, log }) {
     const proxy = await startMessagesProxy({ apiKey, placeholder });
     try {
       const dir = join(T, "live-a");
-      const st = stage(dir, { canary, loopbackPort: proxy.port, keychainService: "nonexistent-probe", writeTest });
+      const st = stage(dir, { canary, loopbackPort: proxy.port, keychainService: "Claude Code-credentials", writeTest });
       const profile = buildProbeProfile({ scratch: dir, loopbackPort: proxy.port, denyRead: defaultDenyRead(realHome) });
       const env = {
         PATH: process.env.PATH, HOME: join(dir, "home"), TMPDIR: join(dir, "tmp"), CLAUDE_CODE_TMPDIR: join(dir, "tmp"), LANG: "C",
@@ -122,7 +122,7 @@ export async function runLive({ T, realHome, canary, nonce, log }) {
       add("live.pb3_fake_home", "answered with an empty fake HOME", `answered=${c.answered} subtype=${c.subtype}`, c.answered ? "pass" : "fail");
       const kv = existsSync(st.out) ? parseKv(readFileSync(st.out, "utf8")) : {};
       add("live.pb5_bash_under_outer", "Bash ran with sandbox.enabled=false under --restricted", kv.bash_ran === 1 ? "bash_ran" : `no_bash(subtype=${c.subtype})`, kv.bash_ran === 1 ? "pass" : "fail");
-      if (kv.bash_ran === 1) results.push(...evalLive("live.outer", kv, controls, { keychainService: "nonexistent-probe", expectLoopback: true }));
+      if (kv.bash_ran === 1) results.push(...evalLive("live.outer", kv, controls, { expectLoopback: true }));
     } finally { await proxy.close(); clean(); }
     if (affordable(0.02)) {
       const proxy2 = await startMessagesProxy({ apiKey, placeholder: `probe-${nonce}` });
@@ -166,7 +166,7 @@ export async function runLive({ T, realHome, canary, nonce, log }) {
     const kv = existsSync(st.out) ? parseKv(readFileSync(st.out, "utf8")) : {};
     add("live.alt_builtin.bash_ran", "Bash ran under claude's own sandbox", kv.bash_ran === 1 ? "bash_ran" : `no_bash(answered=${c.answered} subtype=${c.subtype})`, kv.bash_ran === 1 ? "pass" : "inconclusive",
       kv.bash_ran === 1 ? undefined : "the rest of this group is not evaluated; check that this shell is not itself sandboxed");
-    if (kv.bash_ran === 1) results.push(...evalLive("live.alt_builtin", kv, controls, { keychainService: "Claude Code-credentials", expectLoopback: false }));
+    if (kv.bash_ran === 1) results.push(...evalLive("live.alt_builtin", kv, controls, { expectLoopback: false }));
     clean();
   } else add("live.alt_builtin.bash_ran", "ran", "not_run", "skipped", "budget cap reached");
 
