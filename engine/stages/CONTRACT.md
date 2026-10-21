@@ -184,6 +184,57 @@ Field rules:
   still-pending question if later evidence moots it — record `withdrawn_reason`).
 - Append-only otherwise: never delete or rewrite an answered decision. New information
   after an answer = a new decision block referencing the old id.
+- `cause` (optional, but should be set by whichever stage raises the decision):
+  what kind of block this is, so a dashboard or handoff note can tell a
+  20-second VPN fix from an unmade decision. One of:
+
+  | `cause` | What's blocking | Proceedable? | Unblocks via |
+  |---|---|---|---|
+  | `external` | A named person or team must act: a Slack reply, a review, a sign-off. | Yes | their reply |
+  | `infra` | VPN, credentials, a service down, an access grant: the source does not answer at all. | Yes | `enable_action` plus a re-probe |
+  | `capability` | Only a human at a browser/terminal can do this step (e.g. complete an OAuth flow). | Yes, always needs a human but is not a judgment call | a generated wizard |
+  | `data` | The source answers, but the data isn't there yet. | Yes, with the assumption stated | the source populating, then a re-probe |
+  | `judgment` | Nothing external blocks it; it needs the owner's call. | **No, never, while a human is present.** No override flag exists for this, ever. | the owner reading the gate |
+
+  `external-human` and `external-team` collapse into one `external` value:
+  nothing branches on which, and the identity that would distinguish them is
+  exactly what `waiting_on` already carries as free text. `capability` stays
+  separate from `infra` because the unblock mechanism differs: `infra` clears
+  via an unattended re-probe, `capability` always needs a human doing
+  something, just not deciding something. `data` vs `infra`: if the source
+  answers but has nothing yet, it's `data`; if the source doesn't answer at
+  all, it's `infra`. A decision with no `cause` recorded reads as
+  **unclassified**, not as `judgment`; renderers must not default an absent
+  cause to the strictest reading.
+- `waiting_on` (optional): a free-text string naming who or what unblocks this,
+  a person, a team, a service, a ticket key. Required in practice for
+  `external`, `infra`, and `capability` (nothing in this repo validates decision
+  shape, so "required" here is a documentation contract, not an enforced one).
+  Optional for `data`. Meaningless for `judgment`, which waits on the owner
+  reading the gate, not on any external party.
+- `degraded_assumption` (only on an answered decision whose `answer` is the
+  proceed-degraded string below): free text stating exactly what is being
+  assumed in the blocked information's absence, so a successor knows what was
+  accepted and doesn't mistake "accepted degraded" for "fully resolved".
+
+### The proceed-degraded answer
+
+CONTRACT.md's access hard-block (below) already has one answer string for a
+human accepting a degraded state: **`proceed degraded (accept degraded
+confidence)`**. This is the ONE vocabulary for that acceptance across every
+`cause`, not just `access-degraded`: a human recording this answer on an
+`external`/`infra`/`capability`/`data` decision means the same thing everywhere
+it appears, proceed, and the gap stated in `degraded_assumption` is accepted,
+not resolved.
+
+This string is legal only where an external/infra/capability/data unblock is
+being accepted. It can never legally appear as the answer to a `judgment`
+decision, because that would launder "the owner hasn't decided yet" into "the
+owner accepted a degraded state", which is not what happened. The gate rule
+below is mechanical about this: `engine`'s pending-blocker check treats a
+`judgment` decision answered with this exact string as still blocking, the
+same as a still-`pending` one. There is no override flag for `judgment`;
+generalizing this string to every cause must not quietly create one.
 
 ## The gate rule
 

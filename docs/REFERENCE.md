@@ -113,7 +113,7 @@ A run has seven stages: intake, research, plan, implement, recheck, ship and res
 
 **Which gates the engine enforces.** The CLI enforces one gate itself: the plan `intent` gate, with the answers `approve` or `revise`. The drift gate (accept, back to plan, back to implement) and the ship gate are rules in the stage prompts. The agent records them as pending decisions in `decisions.json`, and a pending decision blocks the stages it names. A prompt can be followed badly, so read each gate before you answer it. Recheck also checks that the recorded red commit is an ancestor of the green commit. That proves the order of the commits, not that the test was seen to fail.
 
-**How you answer a gate.** The plan stage renders `.plans/<run-id>-plan.html`. `curator open` shows it, `curator poll` collects your clicks, and the answer is copied into `decisions.json` word for word. Without curator you can edit `decisions.json` by hand.
+**How you answer a gate.** `detent gate open <id>` writes `.plans/<run-id>-<gate>.html` with one question per pending decision and the stage artifacts embedded. `curator open` shows it. After you click, `detent gate collect --run <run-id>` runs `curator drain` for that run's gate pages only and writes an answer into `decisions.json` only when it exactly matches one of the decision's options. Other feedback goes to `review-feedback.jsonl`. Without curator you can edit `decisions.json` by hand.
 
 **Run state.** Each run lives in `${DETENT_ROOT}/.sdlc/<date>-<ticket>[-slug]/` with `run.json`, `stage-status.json`, `decisions.json`, `events.jsonl`, `gates/`, `handoff/` and `worktree/`. Run ids never change, so a re-run is a new run. Every command prints one JSON line with a `next_step`. Exit 0 is ok, 1 is a provider or environment failure, and 2 is a refusal with a `reason`.
 
@@ -201,7 +201,8 @@ Sentinel is a tool and a hook, not a skill. It sits in the same loop.
 | `detent run new --ticket <ref> --repo <path>` | Create a run and its worktree. |
 | `detent next` | Print the exact next command for the run. |
 | `detent stage begin <stage>`, `detent stage end <stage>` | Move a stage, with the checks above. |
-| `detent gate open <id>` | Render a pending gate. |
+| `detent gate open <id>` | Render a pending gate as a curator page. |
+| `detent gate collect --run <id>` | Write your curator answers into `decisions.json`. |
 | `detent socket call <name>` | Call one socket by hand. |
 | `detent dashboard`, `detent live <run-id>` | One curator page of all runs, or a live view of one run. |
 | `detent respond --pr <url>` | Arm the respond stage on an open PR with no ticket. |

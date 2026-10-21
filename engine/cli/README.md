@@ -14,8 +14,9 @@ Design decisions it implements (from the wiring blueprint):
 - **D4** — `engine next` is the whole driver: read state, print the exact next
   command. No orchestrator prompt.
 - **D7** — curator is integrated **by contract, never vendored**: `gate open`
-  writes a gate-request artifact and prints `curator open`/`curator poll`
-  commands when a `curator` executable is on PATH, else a terminal fallback.
+  writes a gate-request artifact and a gate page, and prints `curator open` and
+  `engine gate collect` when a `curator` executable is on PATH, else a terminal
+  fallback.
 - **D8** — `socket call` dispatches three kinds: `exec` (argv spawn, JSON on
   stdin), `skill`, `mcp_tool`. The CLI cannot invoke skills or MCP tools — for
   those it prints a structured instruction block for the invoking agent.
@@ -139,15 +140,36 @@ the gate-request artifact `.sdlc/<run>/gates/<gate-id>.json`
 (`{run_id, gate_id, stage, playbook, artifact_path, context_paths[], decision}`),
 then:
 
-- **curator on PATH** → prints `curator open <html> && curator poll <html>` as
-  `next_step`, where `<html>` is the stage's curator artifact
-  (`.plans/<run>-<stage>.html`, authored per the stage SKILL; curator opens only
-  `.html`, not the gate-request `.json`). Curator never writes `decisions.json`:
-  the agent transcribes each `{type:"decision", question, answer}` that `poll`
-  returns, verbatim with `answered_by:"human"`;
+- **curator on PATH** → writes `<DETENT_ROOT>/.plans/<run>-<gate>.html` and
+  prints `curator open <html>`, then `engine gate collect --run <id>`, as
+  `next_step`. The page has one `data-plan-question` block per pending decision
+  that blocks the same stages, with each option as a `data-plan-option`, and the
+  stage artifacts embedded as escaped text. It is self-contained and passes
+  `engine/curator/scripts/artifact-check.py`. The path is also in the JSON as
+  `html`. Curator never writes `decisions.json`; `gate collect` does;
 - **no curator** → terminal fallback: renders the decision (question, options)
   and prints exactly how a human answers by editing `decisions.json`
   (`status:"answered"`, `answer`, `answered_by:"human"`, `answered_at`).
+
+### `engine gate collect --run <id> [--file <feedback.json>]`
+
+Non-blocking. Maps curator feedback into `decisions.json`. An answer resolves a
+pending decision only if it is exactly one of its `options`
+(`status:"answered"`, `answered_by:"human"`, `answered_via:"curator"`). A `null`
+or non-option answer leaves the decision pending and is listed under
+`unresolved` with its note. Every drained item, applied or not, is appended to
+`<run>/review-feedback.jsonl` before anything is validated. Without `--file` it
+runs `curator drain <this run's gate pages>`: exactly
+`.plans/<run-id>-<gate>.html` for the gates in this run's `decisions.json`, so
+another run whose id starts with this one is never touched and feedback for other
+pages stays queued. It refuses feedback that curator attributes to any other page. With
+nothing pending, no curator or no running server it returns
+`{collected:0, note:"nothing yet"}` immediately.
+
+A decision with `cause: "judgment"` cannot be resolved with the proceed-degraded
+string: `gate collect` rejects it as an answer, and a decision already holding it
+counts as pending, so `gate open` renders it again and a real answer resolves it.
+See `engine/stages/CONTRACT.md`.
 
 ### `engine socket call <name> [--payload-file f] [--stack <path>]`
 
