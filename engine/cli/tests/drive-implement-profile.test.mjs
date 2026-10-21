@@ -266,3 +266,33 @@ test("implementDenyRead covers detent-owned dirs passed in ctx.extraDeny", async
   assert.ok(d.includes("/Users/someone/detent") && d.includes("/System/Volumes/Data/Users/someone/detent"));
   assert.ok(d.includes("/System/Volumes/Data/Users/someone/.curator"));
 });
+
+test("validateImplementSettings pins the remaining sandbox switches", async () => {
+  const { buildImplementSettings, validateImplementSettings } = await load();
+  const ctx = mkCtx();
+  const base = buildImplementSettings(ctx);
+  assert.equal(base.sandbox.allowAppleEvents, false);
+  assert.equal(base.disableAllHooks, true);
+  assert.equal(base.enableAllProjectMcpServers, false);
+  const mut = (f) => { const s = structuredClone(base); f(s); return s; };
+  const bad = {
+    machLookup: (s) => { s.sandbox.network.allowMachLookup = ["com.apple.x"]; },
+    machLookupEmpty: (s) => { s.sandbox.network.allowMachLookup = []; },
+    appleEventsTrue: (s) => { s.sandbox.allowAppleEvents = true; },
+    appleEventsMissing: (s) => { delete s.sandbox.allowAppleEvents; },
+    ignoreViolationsEmpty: (s) => { s.sandbox.ignoreViolations = {}; },
+    nestedNsTrue: (s) => { s.sandbox.allowNestedUserNamespaces = true; },
+    allUnixSockets: (s) => { s.sandbox.network.allowAllUnixSockets = true; },
+    httpProxyZero: (s) => { s.sandbox.network.httpProxyPort = 0; },
+    socksProxy: (s) => { s.sandbox.network.socksProxyPort = 1080; },
+    autoAllowFalse: (s) => { s.sandbox.autoAllowBashIfSandboxed = false; },
+    strictMissing: (s) => { delete s.sandbox.network.strictAllowlist; },
+    strictFalse: (s) => { s.sandbox.network.strictAllowlist = false; },
+    mcpServersOn: (s) => { s.enableAllProjectMcpServers = true; },
+    mcpServersMissing: (s) => { delete s.enableAllProjectMcpServers; },
+  };
+  for (const [name, f] of Object.entries(bad)) {
+    assert.throws(() => validateImplementSettings(mut(f), ctx), Error, name);
+  }
+  validateImplementSettings(mut((s) => { s.sandbox.allowNestedUserNamespaces = false; }), ctx);
+});
