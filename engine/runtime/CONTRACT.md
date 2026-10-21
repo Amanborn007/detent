@@ -93,7 +93,7 @@ The plan runs `node adapters/openai-compatible-call.mjs --base-url <url> --model
 {"protocol":"detent-openai-call-v1","ok":false,"class":"http"|"network"|"bad_body","http_status"?,"attempts":n,"message":"..."}
 ```
 
-A nonzero helper exit is a crash and maps to kind `exit`. The key value is replaced by `[redacted]` in every field it emits.
+A nonzero helper exit is a crash and maps to kind `exit`. The key value is replaced by `[redacted]` in the error `message` and in every string inside `body`, never in `protocol`, `ok`, `class`, `http_status` or `attempts`. A key shorter than 8 characters, such as `EMPTY`, is not redacted at all, because replacing it would also rewrite ordinary text.
 
 | outcome | `stop` | `error.kind` |
 |---|---|---|

@@ -10,6 +10,7 @@ const BACKOFF_MS = [500, 1000];
 const RETRY_AFTER_CAP_MS = 10000;
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 const SNIPPET = 300;
+const MIN_REDACT_KEY = 8;
 
 /** A status number, or an error thrown by fetch (always a network failure). */
 export function retryable(statusOrErr) {
@@ -28,19 +29,24 @@ export function backoffMs(attempt, retryAfter) {
 const sleepFor = (ms) => new Promise((r) => setTimeout(r, ms));
 const errorCode = (e) => e?.cause?.code || e?.code || e?.message || String(e);
 
+// Redacts the key in free text only: a message, or the strings inside a body. The envelope is never touched.
 function scrubber(apiKey) {
-  if (!apiKey) return (v) => v;
+  if (!apiKey || apiKey.length < MIN_REDACT_KEY) return { text: (t) => t, deep: (v) => v };
   const forms = [...new Set([apiKey, JSON.stringify(apiKey).slice(1, -1)])];
-  return (v) => {
-    let s = JSON.stringify(v);
-    for (const f of forms) s = s.split(f).join("[redacted]");
-    return JSON.parse(s);
+  const text = (t) => forms.reduce((acc, f) => acc.split(f).join("[redacted]"), t);
+  const deep = (v) => {
+    if (typeof v === "string") return text(v);
+    if (Array.isArray(v)) return v.map(deep);
+    if (v !== null && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deep(x)]));
+    return v;
   };
+  return { text, deep };
 }
 
 /** Resolves to the protocol object. Never throws for a provider or network outcome. */
 export async function complete({ baseUrl, model, prompt, apiKey, fetch = globalThis.fetch, sleep = sleepFor, warn = () => {} }) {
   const scrub = scrubber(apiKey);
+  const failed = (f) => ({ protocol: PROTOCOL, ok: false, ...f, message: scrub.text(f.message) });
   const url = `${baseUrl}/chat/completions`;
   const init = {
     method: "POST",
@@ -58,11 +64,11 @@ export async function complete({ baseUrl, model, prompt, apiKey, fetch = globalT
       if (res.ok) {
         let body;
         try { body = JSON.parse(text); } catch (e) {
-          return scrub({ protocol: PROTOCOL, ok: false, class: "bad_body", http_status: res.status, attempts: attempt, message: `response body is not JSON: ${e.message}: ${scrub(text).slice(0, SNIPPET)}` });
+          return failed({ class: "bad_body", http_status: res.status, attempts: attempt, message: `response body is not JSON: ${e.message}: ${scrub.text(text).slice(0, SNIPPET)}` });
         }
-        return scrub({ protocol: PROTOCOL, ok: true, http_status: res.status, attempts: attempt, body });
+        return { protocol: PROTOCOL, ok: true, http_status: res.status, attempts: attempt, body: scrub.deep(body) };
       }
-      failure = { class: "http", http_status: res.status, attempts: attempt, message: scrub(text).slice(0, SNIPPET) };
+      failure = { class: "http", http_status: res.status, attempts: attempt, message: scrub.text(text).slice(0, SNIPPET) };
       why = `HTTP ${res.status}`;
       retryAfter = res.headers.get("retry-after");
       again = retryable(res.status);
@@ -70,9 +76,9 @@ export async function complete({ baseUrl, model, prompt, apiKey, fetch = globalT
       failure = { class: "network", attempts: attempt, message: errorCode(e) };
       why = failure.message;
     }
-    if (!again || attempt === ATTEMPTS) return scrub({ protocol: PROTOCOL, ok: false, ...failure });
+    if (!again || attempt === ATTEMPTS) return failed(failure);
     const delay = backoffMs(attempt, retryAfter);
-    warn(scrub(`openai-compatible: attempt ${attempt}/${ATTEMPTS} failed (${why}); retrying in ${delay}ms`));
+    warn(scrub.text(`openai-compatible: attempt ${attempt}/${ATTEMPTS} failed (${why}); retrying in ${delay}ms`));
     await sleep(delay);
   }
 }
