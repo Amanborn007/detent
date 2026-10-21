@@ -197,6 +197,7 @@ Sentinel is a tool and a hook, not a skill. It sits in the same loop.
 
 | Command | What it does |
 |---|---|
+| `detent setup --repo <path> [--force]` | First run: fill empty fields in `detent.user.yaml` from `git` and `gh`, and write a starter `stack.yaml` in the work repo. |
 | `detent run new --ticket <ref> --repo <path>` | Create a run and its worktree. |
 | `detent next` | Print the exact next command for the run. |
 | `detent stage begin <stage>`, `detent stage end <stage>` | Move a stage, with the checks above. |
