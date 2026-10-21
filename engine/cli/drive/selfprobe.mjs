@@ -23,7 +23,10 @@ export const SHIM_REFUSED_MARKER = shim.REFUSED;
 const sq = (s) => `'${String(s).replaceAll("'", "'\\''")}'`;
 const SECRET_NAMES = "TOKEN|KEY|SECRET|PASS|CRED|AUTH|COOKIE|SESSION";
 const VERSION_FLAG = { node: "-v", npm: "-v", go: "version" };
-const RUNTIME_ENV = "PWD|OLDPWD|SHLVL|_|HTTP_PROXY|HTTPS_PROXY|http_proxy|https_proxy|ALL_PROXY|all_proxy|NO_PROXY|no_proxy|SANDBOX_RUNTIME";
+// Names Claude Code 2.1.306 injects into every sandboxed Bash env; reported as findings, never silent.
+export const RUNTIME_ENV_NAMES = ["CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_SESSION_ID", "CLOUDSDK_PROXY_PASSWORD", "GIT_CONFIG_COUNT"];
+const RUNTIME_ENV_RE = `^(${RUNTIME_ENV_NAMES.join("|")}|GIT_CONFIG_(KEY|VALUE)_[0-9]+)$`;
+const RUNTIME_ENV ="PWD|OLDPWD|SHLVL|_|HTTP_PROXY|HTTPS_PROXY|http_proxy|https_proxy|ALL_PROXY|all_proxy|NO_PROXY|no_proxy|SANDBOX_RUNTIME";
 const KEYCHAIN_SERVICE = "Claude Code-credentials";
 
 const E = {
@@ -43,6 +46,7 @@ export function buildSelfProbe(opts) {
   const nonce = randomBytes(6).toString("hex");
   const L = ['PORT="$1"; SOCK="$2"', 'r() { echo "$1=$2"; }'];
   const expect = {};
+  let envScript;
   const add = (key, line, exp) => { L.push(line); expect[key] = exp; };
   const rc = (key, cmd, exp) => add(key, `${cmd} >/dev/null 2>&1; r ${key} $?`, exp);
   const count = (key, expr, exp) => add(key, `N=$(${expr}); r ${key} "$N"`, exp);
@@ -96,14 +100,26 @@ export function buildSelfProbe(opts) {
 
   rc("tty_dev_tty", "( : > /dev/tty )", E.rcNot0());
   rc("kill_parent", `kill -0 ${drivePid}`, E.rcNot0());
+  const V = [];
+  const vcount = (key, expr, exp) => { V.push(`N=$(${expr}); r ${key} "$N"`); expect[key] = exp; };
+  const NAMES = "/usr/bin/env | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' | cut -d= -f1";
+  const exempt = `grep -E ${sq(RUNTIME_ENV_RE)}`;
+  const notExempt = `grep -vE ${sq(RUNTIME_ENV_RE)}`;
   const secretGrep = `grep -iE '${SECRET_NAMES}'`;
-  count("env_secret_names", `/usr/bin/env | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' | cut -d= -f1 | ${secretGrep} | wc -l | tr -d ' '`, E.zero());
-  L.push(`[ "$N" != 0 ] && echo "@names env_secret_names $(/usr/bin/env | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' | cut -d= -f1 | ${secretGrep} | paste -sd, -)"`);
+  vcount("env_secret_names", `${NAMES} | ${notExempt} | ${secretGrep} | wc -l | tr -d ' '`, E.zero());
+  V.push(`[ "$N" != 0 ] && echo "@names env_secret_names $(${NAMES} | ${notExempt} | ${secretGrep} | paste -sd, -)"`);
   if (envAllow) {
     const extraGrep = `grep -vxE ${sq(`(${[...envAllow, RUNTIME_ENV].join("|")})`)}`;
-    count("env_extra_names", `/usr/bin/env | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' | cut -d= -f1 | ${extraGrep} | wc -l | tr -d ' '`, E.zero());
-    L.push(`[ "$N" != 0 ] && echo "@names env_extra_names $(/usr/bin/env | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' | cut -d= -f1 | ${extraGrep} | paste -sd, -)"`);
+    vcount("env_extra_names", `${NAMES} | ${notExempt} | ${extraGrep} | wc -l | tr -d ' '`, E.zero());
+    V.push(`[ "$N" != 0 ] && echo "@names env_extra_names $(${NAMES} | ${notExempt} | ${extraGrep} | paste -sd, -)"`);
   }
+  V.push(`E=$(${NAMES} | ${exempt} | paste -sd, -); [ -n "$E" ] && echo "@names claude_runtime_env $E"`);
+  V.push('P="${HTTP_PROXY#*://}"; P="${P%%@*}"; P="${P#*:}"; [ -z "${CLOUDSDK_PROXY_PASSWORD+x}" ] || [ "$P" = "$CLOUDSDK_PROXY_PASSWORD" ]; r cloudsdk_pw_matches_proxy $?');
+  expect.cloudsdk_pw_matches_proxy = E.rc0();
+  vcount("git_config_keys_other", "/usr/bin/env | grep -E '^GIT_CONFIG_KEY_[0-9]+=' | grep -vc '=safe.directory$'", E.zero());
+  L.push(...V);
+  envScript = `${['r() { echo "$1=$2"; }', ...V].join("\n")}\n`;
+  L.push(`D=/private/tmp/claude-$(id -u); if [ -d "$D" ]; then ( : > "$D/.detent-probe-${nonce}" ) >/dev/null 2>&1; rc=$?; rm -f "$D/.detent-probe-${nonce}" >/dev/null 2>&1; r claude_uid_tmp_writable $rc; else r claude_uid_tmp_writable 2; fi`);
   count("ps_parent_secret", `ps -E -ww -p ${drivePid} -o command= 2>/dev/null | tr ' ' '\\n' | grep -cE '^[A-Za-z0-9_]*(${SECRET_NAMES})[A-Za-z0-9_]*='`, E.zero());
   for (const t of toolchain) {
     add(`tool_${t}`, `command -v ${sq(t)} >/dev/null 2>&1 && ${sq(t)} ${VERSION_FLAG[t] ?? "--version"} >/dev/null 2>&1; r tool_${t} $?`, { k: "sameAsControl", control: `tool_${t}_rc` });
@@ -111,7 +127,7 @@ export function buildSelfProbe(opts) {
 
   const C = ['r() { echo "$1=$2"; }', `security find-generic-password -s ${sq(KEYCHAIN_SERVICE)} >/dev/null 2>&1; r keychain_rc $?`];
   for (const t of toolchain) C.push(`command -v ${sq(t)} >/dev/null 2>&1 && ${sq(t)} ${VERSION_FLAG[t] ?? "--version"} >/dev/null 2>&1; r tool_${t}_rc $?`);
-  return { script: `${L.join("\n")}\n`, expect, controlScript: `${C.join("\n")}\n` };
+  return { script: `${L.join("\n")}\n`, expect, envScript, controlScript: `${C.join("\n")}\n` };
 }
 
 // Runs the control script outside any sandbox, so the baseline for keychain and toolchain checks is real.
@@ -182,6 +198,7 @@ export function readShimReport(dir, { mode = "env" } = {}) {
       if (!line.trim()) continue;
       const ev = JSON.parse(line);
       if (ev.ev !== "call") continue;
+      for (const f of ev.findings || []) if (!rep.findings.includes(f)) rep.findings.push(f);
       if (mode === "shell" && rep.calls === 0) Object.assign(rep, { captured: true, tokens: ev.tokens, names: ev.names || {} });
       rep.calls++;
       if (!ev.ok) rep.refused++;

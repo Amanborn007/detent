@@ -224,6 +224,15 @@ function parseNames(text) {
   return out;
 }
 
+const RUNTIME_EXEMPT = /^(CLAUDE_CODE_CHILD_SESSION|CLAUDE_CODE_SESSION_ATTENDED|CLAUDE_CODE_SESSION_ID|CLOUDSDK_PROXY_PASSWORD|GIT_CONFIG_COUNT|GIT_CONFIG_(KEY|VALUE)_[0-9]+)$/;
+
+function findingsFrom(tokens, names) {
+  const out = [];
+  for (const n of names.claude_runtime_env || []) if (RUNTIME_EXEMPT.test(n)) out.push(`claude_runtime_env:${n}`);
+  if (tokens.claude_uid_tmp_writable === 0) out.push(`claude_added_write:/private/tmp/claude-${process.getuid()}`);
+  return out;
+}
+
 function evaluateTokens(tokens, expect, controls, { canaryHits = 0, names = {} } = {}) {
   const failures = [];
   const inconclusive = [];
@@ -341,6 +350,7 @@ async function capture(cfg, logDir, p) {
   try { r = await replay(cfg, p, canary); } finally { await sleep(100); state.canaryHits = canary.hits(); await canary.close(); }
   state.tokens = parseTokens(r.out);
   state.names = parseNames(r.out);
+  for (const f of findingsFrom(state.tokens, state.names)) if (!state.findings.includes(f)) state.findings.push(f);
   state.replayCode = r.code;
   state.stage = "replay";
   if (r.timedOut || r.error) { state.ok = false; state.failures.push(`replay ${r.timedOut ? "timed out" : `failed to start: ${r.error}`}`); return state; }
@@ -407,7 +417,7 @@ async function main(argv) {
   return run();
 }
 
-module.exports = { parseNames, parseSbpl, validateProfile, normaliseProfile, profileHash, parseTokens, evaluateTokens, startCanaryListener, parseWrapper, REFUSED, REFUSE_EXIT, BUILTIN_WRITE, KNOWN_MACH };
+module.exports = { findingsFrom, parseNames, parseSbpl, validateProfile, normaliseProfile, profileHash, parseTokens, evaluateTokens, startCanaryListener, parseWrapper, REFUSED, REFUSE_EXIT, BUILTIN_WRITE, KNOWN_MACH };
 
 if (require.main === module) {
   main(process.argv.slice(2)).catch((e) => { process.stderr.write(`${REFUSED}: shim error: ${e && e.stack ? e.stack : e}\n`); process.exit(REFUSE_EXIT); });
