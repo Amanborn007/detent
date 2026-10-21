@@ -1,39 +1,48 @@
 #!/usr/bin/env bash
-# Sourced by demo.tape. Builds a throwaway work repo and detent home, then defines `detent`.
+# Sourced by demo.tape and smoke.sh. Builds a throwaway work repo and detent home, then defines the demo helpers.
 DEMO_SRC="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
-DEMO_TMP="${DEMO_TMP:-$(mktemp -d)}"
+DEMO_TMP="${DEMO_TMP:-$(mktemp -d "${TMPDIR:-/tmp}/detent-demo.XXXXXX")}"
 [ -n "$DEMO_TMP" ] || return 1
-export DEMO_TMP
-mkdir -p "$DEMO_TMP"
-git init -q "$DEMO_TMP/repo"
-git -C "$DEMO_TMP/repo" -c user.email=demo@example.com -c user.name=demo commit -q --allow-empty -m init
+export DEMO_TMP DEMO_SRC
+FIX="$DEMO_SRC/docs/demo/fixtures"
+mkdir -p "$DEMO_TMP/repo"
+git -C "$DEMO_TMP/repo" init -q
+git -C "$DEMO_TMP/repo" config user.name "Demo User"
+git -C "$DEMO_TMP/repo" config user.email "demo@example.com"
+git -C "$DEMO_TMP/repo" commit -q --allow-empty -m init
 export DETENT_ROOT="$DEMO_TMP/home"
 mkdir -p "$DETENT_ROOT"
-detent() { node "$DEMO_SRC/engine/cli/engine.mjs" --repo "$DEMO_TMP/repo" "$@"; }
-# Engine prints one JSON line; show the three fields a human needs, with the temp path shortened.
-pj() {
-  node -e '
-    let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
-      const j = JSON.parse(s), tmp = process.env.DEMO_TMP;
-      const cut = (v, n) => { const t = String(v).split(tmp).join("~"); return t.length > n ? t.slice(0, n - 1) + "…" : t; };
-      const o = { ok: j.ok };
-      if (j.run_id) o.run_id = j.run_id;
-      if (j.stage) o.stage = j.stage;
-      if (j.reason) o.reason = cut(String(j.reason).replace(/^illegal transition: /, "").replace(/\s*\(expected.*$/, ""), 72);
-      o.next_step = cut(j.next_step, 72);
-      console.log(JSON.stringify(o, null, 1));
-    });'
+export DETENT_GH_CMD="$FIX/stub-gh"
+: > "$DEMO_TMP/oks.log"
+echo '{"ticket_ref":"acme/widgets#1"}' > "$DEMO_TMP/ticket.json"
+
+# The real engine. After a successful `setup`, point the ticket socket at the offline stub so the demo needs no network.
+detent() {
+  local o rc
+  o=$(node "$DEMO_SRC/engine/cli/engine.mjs" "$@"); rc=$?
+  if [ "$1" = setup ] && [ $rc -eq 0 ]; then
+    sed "s|^\( *command: \).*gh-ticket.*|\1\"$FIX/stub-ticket\"|" "$DEMO_TMP/repo/stack.yaml" > "$DEMO_TMP/stack.tmp" && mv "$DEMO_TMP/stack.tmp" "$DEMO_TMP/repo/stack.yaml"
+  fi
+  printf '%s\n' "$o"
+  return $rc
 }
-# Provider/lens ON-OFF table from `detent pack validate`.
-packs() {
-  node -e '
-    let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
-      const j = JSON.parse(s);
-      for (const x of [...j.providers, ...j.lenses])
-        console.log(x.id.padEnd(14), x.kind.padEnd(8), x.state, x.reason ? "(" + x.reason + ")" : "");
-    });'
+# Engine JSON on stdin -> one human line. See say.mjs.
+say() { node "$DEMO_SRC/docs/demo/say.mjs" "$@"; }
+
+# Stands in for Claude: writes each stage's artifact from docs/demo/fixtures, and every transition is the real engine.
+stages() {
+  detent socket call ticket --payload-file "$DEMO_TMP/ticket.json" | say ticket
+  local run; run="$(echo "$DETENT_ROOT"/.sdlc/*)"
+  detent stage begin intake >/dev/null || return 1
+  cp "$FIX/brief.md" "$run/brief.md"
+  detent stage end intake | say intake brief.md
+  detent stage begin research >/dev/null || return 1
+  cp "$FIX/research.md" "$FIX/access-report.json" "$run/"
+  detent stage end research | say research "research.md, access-report.json"
+  detent stage begin plan >/dev/null || return 1
+  mkdir -p "$run/plan" && cp "$FIX/plan.md" "$run/plan/plan.md"
+  detent stage end plan | say plan
+  return 0
 }
-brief() { echo "# Brief: $1" > "$(echo "$DETENT_ROOT"/.sdlc/*)/brief.md"; }
 export PS1='$ '
-cd "$DEMO_SRC" || return 1
-clear
+cd "$DEMO_TMP/repo" || return 1

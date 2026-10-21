@@ -7,6 +7,23 @@
 
 **Hand Claude Code a ticket. Get back a draft PR you approved twice.**
 
+From `detent setup` to the plan gate in 20 seconds, on the real engine. A stub stands in for your tracker so it runs offline, and canned files stand in for Claude's stage output.
+
+<p align="center">
+  <img alt="A terminal runs detent setup, then detent run new for a ticket, then the stages one line each, and stops at the plan gate with 'waiting on you: plan approval' and the path of the gate page." src="docs/demo/demo.gif" width="720">
+</p>
+
+<!-- DRIVE-CLIP: add the in-Claude-Code recording here once `detent drive` ships. Script: docs/demo/RECORDING.md -->
+
+The plan gate opens as a local page. You click approve or revise.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/demo-gate-dark.png">
+    <img alt="The plan gate page for the demo run: the question, approve and revise buttons, and the plan text under review." src="docs/assets/demo-gate.png" width="560">
+  </picture>
+</p>
+
 Left alone, an agent can spend an hour building the wrong thing and then push it. Detent stops it twice. It researches the ticket and writes a plan, then waits for you. It builds in a worktree, checks the diff against the plan you approved, then waits again before it pushes. It never merges.
 
 <p align="center">

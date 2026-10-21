@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Offline stand-in for `gh api user --jq .login`, so `detent setup` makes no network call in the demo.
+echo "demo-user"

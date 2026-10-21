@@ -1,7 +1,29 @@
-source "$(dirname "$0")/demo-env.sh"
-detent run new --ticket DEMO-42 --slug banner --no-worktree | pj
-detent next | pj
-detent stage begin plan | pj
-detent stage begin intake | pj >/dev/null; detent stage end intake | pj
-brief DEMO-42; detent stage end intake | pj
-detent pack validate --pack packs/example/stack.yaml | packs
+#!/usr/bin/env bash
+# Replays the demo against the real engine and fails on any unexpected `ok`. Offline: no network, no LLM.
+set -u
+here="$(cd "$(dirname "$0")" && pwd)"
+export DEMO_TMP="$(mktemp -d "${TMPDIR:-/tmp}/detent-demo.XXXXXX")"
+trap 'rm -rf "$DEMO_TMP"' EXIT
+source "$here/demo-env.sh" || exit 1
+
+detent setup --repo . | say setup
+detent run new --ticket acme/widgets#1 --repo . | say run
+stages
+detent gate open intent | say gate
+
+expected='setup true
+run true
+ticket true
+intake true
+research true
+plan false
+gate true'
+actual="$(cat "$DEMO_TMP/oks.log")"
+if [ "$actual" != "$expected" ]; then
+  echo "smoke FAILED: ok values differ" >&2
+  printf 'expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+html="$(echo "$DETENT_ROOT"/.plans/*-intent.html)"
+[ -s "$html" ] || { echo "smoke FAILED: gate page missing: $html" >&2; exit 1; }
+echo "smoke ok"
