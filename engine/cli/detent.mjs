@@ -22,6 +22,7 @@ const ROUTES = {
   herald:   { bin: 'node', script: path.join(ENGINE_ROOT, 'herald', 'herald.mjs') },
   courier:  { bin: 'node', script: path.join(ENGINE_ROOT, 'courier', 'courier.mjs') },
   feedback: { bin: 'node', script: path.join(ENGINE_ROOT, 'self-feedback', 'feedback.mjs') },
+  index:    { bin: 'node', script: path.join(ENGINE_ROOT, 'index', 'index.mjs') },
 };
 
 if (group === '--help' || group === 'help' && rest.length === 0) {
@@ -34,6 +35,7 @@ if (group === '--help' || group === 'help' && rest.length === 0) {
     '  detent courier  <...>   courier connector reads (request|await|list|get|fulfill|fail)\n' +
     '  detent drive --run <id> contained intake, research and plan with headless claude children (experimental, spends credit)\n' +
     '  detent feedback <...>   agent self-feedback journal (add|list) — coverage gaps the AGENT logs; not curator human feedback\n' +
+    '  detent index    <...>   repo index (build|refresh|status|query <words>|cochange <files>)\n' +
     '  detent drive --run <id> run a run end to end with headless claude children (experimental, spends credit, see engine/cli/README.md)\n' +
     '  detent <cmd>    <...>   engine runner (run new|next|stage|gate|socket|dashboard|bench|help)\n');
   process.exit(0);

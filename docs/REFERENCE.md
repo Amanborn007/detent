@@ -197,7 +197,7 @@ Sentinel is a tool and a hook, not a skill. It sits in the same loop.
 
 ## Tools and CLI
 
-`detent` is the one command. It sends `curator`, `sentinel`, `owl`, `herald`, `courier` and `feedback` to their own programs and everything else to the engine.
+`detent` is the one command. It sends `curator`, `sentinel`, `owl`, `herald`, `courier`, `feedback` and `index` to their own programs and everything else to the engine.
 
 | Command | What it does |
 |---|---|
@@ -212,11 +212,40 @@ Sentinel is a tool and a hook, not a skill. It sits in the same loop.
 | `detent dashboard`, `detent live <run-id>` | One curator page of all runs, or a live view of one run. |
 | `detent respond --pr <url>` | Arm the respond stage on an open PR with no ticket. |
 | `detent eval`, `detent bench`, `detent spend` | Evals, run timing, and measured Claude Code cost. |
+| `detent index build\|refresh\|status\|query <words>\|cochange <files>` | Build and read the repo index, see below. |
 | `detent pack validate` | Check the provider pack. |
 | `detent sentinel scan --pr <url>` | One read-only scan of a PR. |
 | `detent curator open\|check\|poll\|drain\|reply\|log\|answer\|end\|status` | The review surface. |
 
 `detent help` lists the umbrella commands. `node engine/cli/engine.mjs help` prints the engine's commands as JSON. [GUIDE.md](../GUIDE.md) covers all of them.
+
+## Repo index
+
+`detent index build` reads a work repo once and writes a small index of it, so research and the later stages start from a map instead of searching blind. Run it in the work repo, or pass `--repo <path>`.
+
+**What it writes.** Everything goes in `<repo>/.detent/index/`:
+
+| File | Holds |
+|---|---|
+| `profile.md` | Build, test, lint and start commands, CI steps, languages, top-level layout, entry points, CODEOWNERS team handles, and pointers to `CLAUDE.md`, `AGENTS.md`, the README and `docs/`. At most 200 lines. |
+| `map.md` | The most referenced files with their main definitions, about 1.5k tokens. |
+| `symbols.jsonl` | One line per definition: file, name, kind, line. |
+| `history.json` | Twelve months of per-file churn and co-change pairs, with no author names. |
+| `manifest.json` | The head sha, the blob sha of every indexed file, the generator version, which tagger ran, and a truncation note if the 60 second budget ran out. |
+
+`graph.json` and `history-state.json` sit beside them as working data for `query` and `refresh`.
+
+**What it reads.** Only files from `git ls-files -s`, so untracked and gitignored files are never seen. It skips `*.pem`, `*.key`, `*.p12`, `id_*`, `.env*`, `secrets/`, `credentials*`, binaries, files over 256 KB, and anything past 5000 files. It never runs repo code: commands in the profile are read from `package.json`, `Makefile`, `pyproject.toml`, `go.mod`, `Cargo.toml` and `.github/workflows`, and printed, not executed. Every value is stripped of invisible and non-printable characters and length capped, and a definition name must match `[A-Za-z0-9_$./-]`, so a hostile comment or an odd name does not reach the index.
+
+**Where it lives.** `build` adds `.detent/` to `.git/info/exclude`, resolved through `git rev-parse --git-common-dir` so a linked worktree writes to the main repo. It never edits `.gitignore`. Pass `--commit` to skip the exclude when you want the index checked in; it then shows in `git status`.
+
+**How it refreshes.** `detent index refresh` compares the manifest's blob shas with `git ls-files -s`, re-tags only changed and added files, drops removed ones, then recomputes the graph and map and adds only the new commits to the history. The result is the same as a full `build`. `detent index status` prints `fresh`, `stale` or `missing`. `query` and `cochange` print a warning on a stale index and exit 1 on a missing one.
+
+**How it ranks.** A file points at another when it uses a name the other defines. Names shorter than 4 characters, or defined in more than 3 files, are ignored. Edges are weighted by the square root of the use count and ranked with PageRank (20 iterations, damping 0.85). `detent index query <words>` boosts files whose path or definitions match the words ten times and returns the top ten as JSON. `detent index cochange <files>` lists the files that usually change with them: at least 5 revisions each, 5 shared, and 30% coupling. Commits touching more than 50 files are skipped.
+
+**What reads it.** The research stage runs `detent index status` first and reads `profile.md` before anything else. Plan and recheck use `cochange` to catch a file edited without its usual partner. The `repo-index-knowledge` adapter serves the index to the knowledge socket, and `detent setup` adds it to the starter `stack.yaml`. When a profile exists, `detent run new` writes `suggested.verify` (`source: "index"` and the command) into the run's `env.json`. It does not write `commands.verify`, because `detent drive` turns that into a Bash permission.
+
+**Tree-sitter, optionally.** The core is plain Node 20 with no installs and tags definitions with regular expressions for JavaScript, TypeScript, Python, Go, Java and Rust. For exact tags, run `npm i --prefix engine/index` to add `web-tree-sitter` and `tree-sitter-wasms`, which are optional dependencies. When they load, `manifest.json` records `tree-sitter` as the tagger; when they do not, the index falls back to regex and notes why. Set `DETENT_INDEX_TAGGER=regex` to force the regex tagger.
 
 ## Hooks
 

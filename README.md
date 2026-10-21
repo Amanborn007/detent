@@ -137,7 +137,7 @@ sockets:
         version: "builtin"
 ```
 
-Five adapters ship with Detent: `gh-ticket`, `repo-docs-knowledge`, `gh-bot-comments`, `claude-reviewer` and `cmd-verifier`. With the first three you can take a GitHub issue through a run. Add `claude-reviewer` (needs a signed-in `claude` CLI and spends tokens) and `cmd-verifier` (runs your own test and evidence commands) to give the ship stage real checks. A socket you leave out is off, and the stage that needs it says so instead of guessing. The contracts are in `engine/sockets/`, and [GUIDE.md](GUIDE.md#6-writing-a-provider-and-a-pack) walks through writing a provider.
+Six adapters ship with Detent: `gh-ticket`, `repo-docs-knowledge`, `repo-index-knowledge`, `gh-bot-comments`, `claude-reviewer` and `cmd-verifier`. `repo-index-knowledge` answers from `detent index`, which maps your repo's definitions and co-change history into `.detent/index/` (see [the reference](docs/REFERENCE.md#repo-index)). With the first three you can take a GitHub issue through a run. Add `claude-reviewer` (needs a signed-in `claude` CLI and spends tokens) and `cmd-verifier` (runs your own test and evidence commands) to give the ship stage real checks. A socket you leave out is off, and the stage that needs it says so instead of guessing. The contracts are in `engine/sockets/`, and [GUIDE.md](GUIDE.md#6-writing-a-provider-and-a-pack) walks through writing a provider.
 
 ## What it needs
 
