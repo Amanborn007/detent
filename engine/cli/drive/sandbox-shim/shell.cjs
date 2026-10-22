@@ -44,12 +44,21 @@ function main() {
     if (DENIED.has(e.code)) return refuse(`cannot append to the call log ${sh.callLog}: add it to the sandbox allowWrite list`);
     throw e;
   }
-  const r = cp.spawnSync(sh.realShell, ["-c", cfg.probe.script, "selfprobe", String(sh.canaryPort), sh.canarySocket], { encoding: "utf8", timeout: cfg.timeoutMs, maxBuffer: 1 << 20 });
+  // Claude exports its TMPDIR inside the command string, so the probe must see that value, not ours.
+  const expect = { ...cfg.probe.expect };
+  const failures = [];
+  let script = cfg.probe.script;
+  if (expect.claude_tmpdir_matches) {
+    const t = lib.tmpdirFromCommand(argv[argv.indexOf("-c") + 1]);
+    if (t.reason) { failures.push(`${t.reason}: ${t.detail}`); delete expect.claude_tmpdir_matches; } else script = `export TMPDIR='${t.value.replaceAll("'", "'\\''")}'\n${script}`;
+  }
+  const r = cp.spawnSync(sh.realShell, ["-c", script, "selfprobe", String(sh.canaryPort), sh.canarySocket], { encoding: "utf8", timeout: cfg.timeoutMs, maxBuffer: 1 << 20 });
   const tokens = lib.parseTokens(r.stdout || "");
   const names = lib.parseNames(r.stdout || "");
+  const details = lib.parseDetails(r.stdout || "");
   const findings = lib.findingsFrom(tokens, names);
-  const ev = lib.evaluateTokens(tokens, cfg.probe.expect, cfg.probe.controls || {}, { names });
-  const failures = [...ev.failures];
+  const ev = lib.evaluateTokens(tokens, expect, cfg.probe.controls || {}, { names, details });
+  failures.push(...ev.failures);
   if (r.error) failures.push(`probe did not run: ${r.error.code || r.error.message}`);
   const ok = failures.length === 0 && ev.inconclusive.length === 0;
   fs.writeSync(fd, `${JSON.stringify({ ev: "call", mode: "shell", ts: Date.now(), ok, tokens, names, findings, failures, inconclusive: ev.inconclusive })}\n`);

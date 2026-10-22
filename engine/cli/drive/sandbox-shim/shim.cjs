@@ -224,6 +224,47 @@ function parseNames(text) {
   return out;
 }
 
+function parseDetails(text) {
+  const out = {};
+  for (const line of String(text).split("\n")) {
+    const m = /^@detail ([a-z0-9_]+) (.*)$/.exec(line.trim());
+    if (m && out[m[1]] === undefined) out[m[1]] = m[2].slice(0, 300);
+  }
+  return out;
+}
+
+// The last unconditional `export TMPDIR=<word>` statement in a shell command string. A value that
+// needs the shell to expand it is refused rather than guessed at.
+function tmpdirFromCommand(cmd) {
+  const s = typeof cmd === "string" ? cmd : "";
+  const re = /(^|[\n;&{(])[ \t]*export[ \t]+TMPDIR=/g;
+  let last = -1;
+  for (let m; (m = re.exec(s));) last = re.lastIndex;
+  if (last < 0) return { reason: "claude_tmpdir_unset_in_cmd", detail: "no unconditional export TMPDIR= in the command string" };
+  let i = last;
+  let val = "";
+  const bad = { reason: "claude_tmpdir_unparseable_in_cmd", detail: "the TMPDIR value needs shell expansion or is empty" };
+  while (i < s.length && !/[\s;&|)]/.test(s[i])) {
+    const c = s[i];
+    if (c === "'") {
+      const end = s.indexOf("'", i + 1);
+      if (end < 0) return bad;
+      val += s.slice(i + 1, end);
+      i = end + 1;
+    } else if (c === '"') {
+      const end = s.indexOf('"', i + 1);
+      if (end < 0) return bad;
+      const inner = s.slice(i + 1, end);
+      if (/[$`\\]/.test(inner)) return bad;
+      val += inner;
+      i = end + 1;
+    } else if (c === "$" || c === "`") return bad;
+    else if (c === "\\") { if (i + 1 >= s.length) return bad; val += s[i + 1]; i += 2; }
+    else { val += c; i++; }
+  }
+  return val ? { value: val } : bad;
+}
+
 const RUNTIME_EXEMPT = /^(CLAUDE_CODE_CHILD_SESSION|CLAUDE_CODE_SESSION_ATTENDED|CLAUDE_CODE_SESSION_ID|CLOUDSDK_PROXY_PASSWORD|GIT_CONFIG_COUNT|GIT_CONFIG_(KEY|VALUE)_[0-9]+)$/;
 
 function findingsFrom(tokens, names) {
@@ -233,7 +274,7 @@ function findingsFrom(tokens, names) {
   return out;
 }
 
-function evaluateTokens(tokens, expect, controls, { canaryHits = 0, names = {} } = {}) {
+function evaluateTokens(tokens, expect, controls, { canaryHits = 0, names = {}, details = {} } = {}) {
   const failures = [];
   const inconclusive = [];
   for (const [key, e] of Object.entries(expect || {})) {
@@ -261,6 +302,7 @@ function evaluateTokens(tokens, expect, controls, { canaryHits = 0, names = {} }
   for (let i = 0; i < failures.length; i++) {
     const key = failures[i].split(":")[0];
     if (names[key] && names[key].length) failures[i] += ` (names: ${names[key].join(",")})`;
+    if (details[key]) failures[i] += ` (${details[key]})`;
   }
   if (canaryHits > 0) failures.push(`canary_listener: ${canaryHits} connection(s) reached drive's listener`);
   return { failures, inconclusive };
@@ -350,11 +392,12 @@ async function capture(cfg, logDir, p) {
   try { r = await replay(cfg, p, canary); } finally { await sleep(100); state.canaryHits = canary.hits(); await canary.close(); }
   state.tokens = parseTokens(r.out);
   state.names = parseNames(r.out);
+  state.details = parseDetails(r.out);
   for (const f of findingsFrom(state.tokens, state.names)) if (!state.findings.includes(f)) state.findings.push(f);
   state.replayCode = r.code;
   state.stage = "replay";
   if (r.timedOut || r.error) { state.ok = false; state.failures.push(`replay ${r.timedOut ? "timed out" : `failed to start: ${r.error}`}`); return state; }
-  const ev = evaluateTokens(state.tokens, state.expect, state.controls, { canaryHits: state.canaryHits, names: state.names });
+  const ev = evaluateTokens(state.tokens, state.expect, state.controls, { canaryHits: state.canaryHits, names: state.names, details: state.details });
   state.failures = ev.failures;
   state.inconclusive = ev.inconclusive;
   state.ok = ev.failures.length === 0 && ev.inconclusive.length === 0;
@@ -417,7 +460,7 @@ async function main(argv) {
   return run();
 }
 
-module.exports = { findingsFrom, parseNames, parseSbpl, validateProfile, normaliseProfile, profileHash, parseTokens, evaluateTokens, startCanaryListener, parseWrapper, REFUSED, REFUSE_EXIT, BUILTIN_WRITE, KNOWN_MACH };
+module.exports = { findingsFrom, parseNames, parseDetails, tmpdirFromCommand, parseSbpl, validateProfile, normaliseProfile, profileHash, parseTokens, evaluateTokens, startCanaryListener, parseWrapper, REFUSED, REFUSE_EXIT, BUILTIN_WRITE, KNOWN_MACH };
 
 if (require.main === module) {
   main(process.argv.slice(2)).catch((e) => { process.stderr.write(`${REFUSED}: shim error: ${e && e.stack ? e.stack : e}\n`); process.exit(REFUSE_EXIT); });
