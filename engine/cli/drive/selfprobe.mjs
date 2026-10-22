@@ -17,6 +17,8 @@ export const profileHash = shim.profileHash;
 export const startCanaryListener = shim.startCanaryListener;
 export const parseTokens = shim.parseTokens;
 export const parseNames = shim.parseNames;
+export const parseDetails = shim.parseDetails;
+export const tmpdirFromCommand = shim.tmpdirFromCommand;
 export const evaluateTokens = shim.evaluateTokens;
 export const SHIM_REFUSED_MARKER = shim.REFUSED;
 
@@ -124,7 +126,7 @@ export function buildSelfProbe(opts) {
   if (claudeTmp) {
     if (!isAbsolute(claudeTmp)) throw new Error("selfprobe: claudeTmp must be an absolute path");
     // A realpath mismatch means claude fell back to the shared /tmp/claude-<uid>.
-    add("claude_tmpdir_matches", `A=$(cd "$TMPDIR" 2>/dev/null && pwd -P); B=$(cd ${sq(`${claudeTmp}/claude-`)}$(id -u) 2>/dev/null && pwd -P); [ -n "$A" ] && [ "$A" = "$B" ]; r claude_tmpdir_matches $?`, E.rc0());
+    add("claude_tmpdir_matches", `A=$(cd "$TMPDIR" 2>/dev/null && pwd -P); B=$(cd ${sq(`${claudeTmp}/claude-`)}$(id -u) 2>/dev/null && pwd -P); [ -n "$A" ] && [ "$A" = "$B" ]; rc=$?; [ $rc -eq 0 ] || echo "@detail claude_tmpdir_matches TMPDIR=\${TMPDIR:-unset} resolved=\${A:-none} expected=\${B:-none}"; r claude_tmpdir_matches $rc`, E.rc0());
   }
   count("ps_parent_secret", `ps -E -ww -p ${drivePid} -o command= 2>/dev/null | tr ' ' '\\n' | grep -cE '^[A-Za-z0-9_]*(${SECRET_NAMES})[A-Za-z0-9_]*='`, E.zero());
   for (const t of toolchain) {
