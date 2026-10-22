@@ -454,17 +454,6 @@ function quarantine(runDir, stepN) {
 // Gate pages
 // ---------------------------------------------------------------------------
 
-function accessPanel(E, runDir) {
-  const p = join(runDir, "access-report.json");
-  if (!existsSync(p)) return "";
-  let rows;
-  try { rows = JSON.parse(readFileSync(p, "utf8")); } catch { return ""; }
-  if (!Array.isArray(rows) || rows.length === 0) return "";
-  const esc = E.escapeHtml;
-  const body = rows.map((r) => `<tr><td>${esc(r.source)}</td><td>${esc(r.status)}</td><td>${esc(r.criticality)}</td><td>${esc(r.detail || r.blocked_reason || "")}</td></tr>`).join("\n");
-  return `<h2>Access &amp; data completeness</h2>\n<table><tr><th>source</th><th>status</th><th>criticality</th><th>detail</th></tr>\n${body}\n</table>`;
-}
-
 function envPanel(E, runDir) {
   const p = join(runDir, "env.proposed.json");
   if (!existsSync(p)) return "";
@@ -493,7 +482,7 @@ function curatorStateDirFor(E) {
 
 function stopForHuman(E, ctx, stage, blockers, collectError) {
   const { runId, runDir } = ctx;
-  const noteHtml = `<p class="sub">${E.escapeHtml(INTENT_NOTE)}</p>\n${accessPanel(E, runDir)}\n${envPanel(E, runDir)}`;
+  const noteHtml = `<p class="sub">${E.escapeHtml(INTENT_NOTE)}</p>\n${envPanel(E, runDir)}`;
   const html = E.renderGateArtifact({ runId, runDir }, {
     name: blockers[0].gate || blockers[0].id, stage, decisions: blockers, noteHtml,
   });
