@@ -125,9 +125,9 @@ test("createRuntime: plan() adds the bin override to what the adapter planned", 
   assert.equal(createRuntime(adapter).name, "fake");
 });
 
-test("the real claude-code refuses budget, add_dirs and tools.allow, and never spawns the stub", () => {
+test("the real openai-compatible refuses budget, add_dirs and tools.allow, and never spawns the stub", () => {
   const dir = scratch();
-  const rt = getRuntime({ name: "claude-code", bins: { "claude-code": makeFake(dir, "ok").bin } });
+  const rt = getRuntime({ name: "openai-compatible", bins: { "openai-compatible": makeFake(dir, "ok").bin } });
   const cases = [
     [{ budget: { usd: 1 } }, "budget"],
     [{ add_dirs: ["/tmp"] }, "add_dirs"],
@@ -140,7 +140,7 @@ test("the real claude-code refuses budget, add_dirs and tools.allow, and never s
     assert.throws(() => rt.run(baseRequest(dir, over)), (e) => {
       assert.ok(e instanceof CapabilityError, capability);
       assert.equal(e.capability, capability);
-      assert.equal(e.runtime, "claude-code");
+      assert.equal(e.runtime, "openai-compatible");
       return true;
     });
   }

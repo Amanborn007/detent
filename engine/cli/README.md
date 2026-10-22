@@ -231,6 +231,12 @@ Runs one prompt through a model runtime and reports the result in one shape. The
 
 Exit 0 prints `{ok:true, ...response, next_step}` for stop `ok`, `budget` or `turns`. Exit 1 prints `{ok:false, reason, next_step, response}` for stop `error` or `timeout`, with the child's output under `response.raw`. Exit 2 refuses bad stdin JSON, an unknown request key, an unknown runtime, a field the runtime does not declare, or missing runtime config such as `DETENT_OPENAI_BASE_URL`, and `reason` names the field and the runtime. Nothing is spawned on exit 2. `capabilities` prints what the runtime declares.
 
+### `engine runtime plan [--runtime <name>] [--bin <path>]` / `engine runtime parse [--runtime <name>] --stdout <file> --stderr <file> (--exit-code <int> | --signal <NAME>)`
+
+For a caller that spawns the child itself, such as a shell loop that needs its own kill logic. Both read the same request JSON on stdin as `run`. `plan` prints `{ok:true, runtime, plan:{bin, args, cwd, env?, echo_stderr?}, next_step}` and exits 0, or exits 2 with the same refusals as `run`. It spawns nothing. `plan.env` is printed only when the request carried `env`, because an adapter that builds its own environment (`openai-compatible`) copies the parent's, which can hold a key. Run `plan.bin` with `plan.args` in `plan.cwd`, send the request `prompt` on stdin, then hand the captured stdout, stderr and exit status to `parse`.
+
+`parse` takes all three of `--stdout`, `--stderr` and exactly one of `--exit-code` or `--signal`, with no defaults. It validates the request without planning it, so `openai-compatible` needs no endpoint variables here. Exit codes match `run`: 0 for stop `ok`, `budget` or `turns`, 1 for `error` or `timeout`, 2 for a missing or conflicting flag, an unreadable file or a refused request.
+
 ### `engine dashboard`
 
 The run-status dashboard: assembles EVERY run under the centralized
