@@ -36,7 +36,8 @@ const EXTRA_CSS = `
   .options { display:grid; grid-template-columns:repeat(auto-fit,minmax(14rem,1fr)); gap:.7rem; margin:.8rem 0 .4rem; }
   .option { border:1px solid var(--rule); border-radius:6px; padding:.7rem 1rem; cursor:pointer; background:var(--paper-2); }
   .option:hover { border-color:var(--accent); }
-  .option p { margin:.25rem 0 0; font-size:14px; color:var(--soft); }
+  .o-name { font-weight:600; }
+  .o-note { margin-top:.25rem; font-size:14px; color:var(--soft); }
   [data-curator-chosen] { border-color:var(--accent); background:var(--accent-tint); }
   details { margin:.8rem 0; }
   summary { cursor:pointer; font-family:var(--mono); font-size:13px; }
@@ -93,6 +94,38 @@ function parseSteps(body) {
   });
 }
 
+function parseCriteria(body) {
+  const items = [];
+  for (const line of String(body).split("\n")) {
+    const m = /^\s{0,3}(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?(.*)$/.exec(line);
+    if (m) items.push(m[1].trim());
+    else if (items.length && /^\s{2,}\S/.test(line)) items[items.length - 1] += ` ${line.trim()}`;
+  }
+  return items.map((t) => t.replace(/\s*\(from [^)]*\)\s*$/, ""));
+}
+
+const words = (t) => new Set(String(t).toLowerCase().replace(/[`*_]/g, "").match(/[a-z0-9]{3,}/g) || []);
+
+// Equal counts pair by order, the way the plan template lists them; otherwise by word overlap.
+function matchCriteria(criteria, rows) {
+  if (criteria.length === rows.length) return criteria.map((criterion, i) => ({ criterion, row: rows[i] }));
+  const used = new Set();
+  return criteria.map((criterion) => {
+    const cw = words(criterion);
+    let best = -1;
+    let score = 0;
+    rows.forEach((r, i) => {
+      if (used.has(i)) return;
+      const rw = words(r[0] || "");
+      const shared = [...cw].filter((w) => rw.has(w)).length;
+      const s = shared / (Math.min(cw.size, rw.size) || 1);
+      if (s > score) { score = s; best = i; }
+    });
+    if (best >= 0 && score >= 0.5) { used.add(best); return { criterion, row: rows[best] }; }
+    return { criterion, row: null };
+  });
+}
+
 // A decision can block a name that is not a stage ("pr"); it belongs to the stage that pushes.
 const STAGE_FOR_BLOCK = { pr: "ship" };
 
@@ -140,13 +173,23 @@ export function buildGatePage(run, gate, model) {
 
   const known = new Map();
   for (const d of [...(gate.earlier || []), ...gate.decisions]) known.set(d.id, d);
-  const short = (q) => (String(q).length > 90 ? `${String(q).slice(0, 90).trimEnd()}...` : String(q));
-  const refs = (id) => {
-    const d = known.get(id);
-    if (!d) return null;
-    const state = d.status === "answered" ? `answered: ${esc(d.answer)}` : "open";
-    return `“${esc(short(d.question || ""))}” ${state}`;
+  // A decision raised by a later stage cannot be "earlier"; engine-raised ones carry no stage and stay.
+  const earlier = (gate.earlier || []).filter((d) => stages.indexOf(d.raised_by) <= stageIdx);
+  const onPage = new Set([...earlier, ...gate.decisions].map((d) => d.id));
+  const idLink = (id) => (onPage.has(id) ? `<a href="#decision-${esc(id)}">${esc(id)}</a>` : esc(id));
+  // One mention per render carries the answer; repeats in the same text are just the link.
+  const freshRefs = () => {
+    const seen = new Set();
+    return (id) => {
+      const d = known.get(id);
+      if (!d) return null;
+      if (seen.has(id)) return idLink(id);
+      seen.add(id);
+      if (d.status === "answered") return `${idLink(id)} (answered: ${esc(d.answer)})`;
+      return `${idLink(id)} (open${onPage.has(id) ? ", below" : ""})`;
+    };
   };
+  const rawRefs = (id) => (onPage.has(id) ? idLink(id) : null);
 
   // Only stages at or before the gate's; the access report is a table, never a dump.
   const docs = [];
@@ -157,15 +200,15 @@ export function buildGatePage(run, gate, model) {
       if (src !== null) docs.push({ rel, src, open: false, prefix: `doc-${slugify(rel.replace(/[./]/g, "-"))}-`, anchors: new Set() });
     }
   }
-  const mdBase = { breaks: true, tasks: true, refs };
+  const mdBase = { breaks: true, tasks: true };
   for (const d of docs) renderMarkdown(d.src, { ...mdBase, idPrefix: d.prefix, onAnchor: (a) => d.anchors.add(a) });
   const cite = (file, anchor) => {
     const d = docs.find((x) => x.rel === file || basename(x.rel) === file);
     const a = anchor.toLowerCase();
     return d && d.anchors.has(a) ? `#${d.prefix}${a}` : null;
   };
-  const md = (src, extra = {}) => renderMarkdown(src, { ...mdBase, cite, ...extra });
-  const inl = (raw) => renderInline(raw, { refs, cite });
+  const md = (src, extra = {}) => renderMarkdown(src, { ...mdBase, cite, refs: freshRefs(), ...extra });
+  const inl = (raw) => renderInline(raw, { refs: freshRefs(), cite });
 
   const notice = (rel, section, text) => {
     const doc = docs.find((d) => d.rel === rel);
@@ -214,14 +257,16 @@ export function buildGatePage(run, gate, model) {
           return `<tr><td>${esc(r.source ?? "")}</td><td>${esc(r.status ?? "")}</td><td>${esc(r.criticality ?? "")}</td><td>${esc(r.needed_for ?? "")}</td><td>${esc(detail)}</td></tr>`;
         }).join("\n");
         const bad = rows.filter((r) => r.status !== "reachable").length;
-        const sum = bad === 0 ? `All ${rows.length} sources were reachable, so nothing here blocks your answer.`
-          : `${bad} of ${rows.length} sources were not fully reachable; conclusions that rest on them carry degraded confidence.`;
-        access = `<table>\n<thead><tr><th>Source</th><th>Status</th><th>Criticality</th><th>Needed for</th><th>Detail</th></tr></thead>\n<tbody>\n${trs}\n</tbody>\n</table>\n<p>${esc(sum)}</p>`;
+        const table = `<table>\n<thead><tr><th>Source</th><th>Status</th><th>Criticality</th><th>Needed for</th><th>Detail</th></tr></thead>\n<tbody>\n${trs}\n</tbody>\n</table>`;
+        access = bad === 0
+          ? `<p>All ${rows.length} sources were reachable, so nothing blocks this decision.</p>\n<details><summary>Source table</summary>\n${table}\n</details>`
+          : `${table}\n<p>${bad} of ${rows.length} sources were not fully reachable; conclusions that rest on them carry degraded confidence.</p>`;
       }
     }
   }
   const accessSection = access ? `<section id="access">\n<h2>Access and data completeness</h2>\n${access}\n</section>` : "";
 
+  const intentCheck = isIntent && plan !== null ? sectionOf(plan, /^intent check$/i) : null;
   let goal;
   if (brief === null) {
     goal = `<h2>Goal</h2>\n${missingFile("brief.md", "brief.md is missing, so the goal and acceptance criteria cannot be shown.")}`;
@@ -229,7 +274,7 @@ export function buildGatePage(run, gate, model) {
     const g = sectionOf(brief, /^goal$/i);
     const a = sectionOf(brief, /^acceptance criteria$/i);
     let inner = g ? md(g) : notice("brief.md", "## Goal", "brief.md has no ## Goal section; the raw file is shown below");
-    inner += a ? `\n<h3>Acceptance criteria</h3>\n${md(a, { tasks: "all" })}`
+    inner += a ? (intentCheck !== null ? "" : `\n<h3>Acceptance criteria</h3>\n${md(a, { tasks: "all" })}`)
       : `\n${notice("brief.md", "## Acceptance criteria", "brief.md has no ## Acceptance criteria section; the raw file is shown below")}`;
     goal = `<h2>Goal</h2>\n${inner}`;
   }
@@ -243,7 +288,8 @@ export function buildGatePage(run, gate, model) {
       const stepsBody = sectionOf(plan, /^(plan )?steps$/i);
       const steps = stepsBody ? parseSteps(stepsBody) : [];
       if (steps.length) {
-        const lis = steps.map((st) => `<li>${inl(st.text)}${st.files ? `<div class="step-meta"><span class="k">Files:</span> ${inl(st.files)}</div>` : ""}${st.verify ? `<div class="step-meta"><span class="k">Verify:</span> ${inl(st.verify)}</div>` : ""}</li>`).join("\n");
+        const lis = steps.map((st) => `<li>${inl(st.text.replace(/\bCONDITIONAL on (D-\d{3,})/, (m, id) =>
+          (known.has(id) ? `${known.get(id).status === "answered" ? "Depends on" : "Waits on"} ${id}` : m)))}${st.files ? `<div class="step-meta"><span class="k">Files:</span> ${inl(st.files)}</div>` : ""}${st.verify ? `<div class="step-meta"><span class="k">Verify:</span> ${inl(st.verify)}</div>` : ""}</li>`).join("\n");
         inner += `<h3>Steps</h3>\n<ol class="steps">\n${lis}\n</ol>`;
       } else {
         inner += notice("plan/plan.md", "## Steps", stepsBody === null
@@ -263,28 +309,49 @@ export function buildGatePage(run, gate, model) {
     }
   }
 
-  // A decision raised by a later stage cannot be "earlier"; engine-raised ones carry no stage and stay.
-  const earlier = (gate.earlier || []).filter((d) => stages.indexOf(d.raised_by) <= stageIdx);
+  let coverHtml = "";
+  if (isIntent && plan !== null) {
+    if (intentCheck === null) {
+      coverHtml = `<h2>Does the plan cover the brief?</h2>\n${notice("plan/plan.md", "## Intent check", "plan/plan.md has no ## Intent check section; the raw file is shown below")}`;
+    } else {
+      const lines = intentCheck.split("\n");
+      const isRow = (l) => /^\s*\|/.test(l);
+      const first = lines.findIndex(isRow);
+      const last = first < 0 ? -1 : lines.length - 1 - [...lines].reverse().findIndex(isRow);
+      const before = first < 0 ? lines : lines.slice(0, first);
+      const after = first < 0 ? [] : lines.slice(last + 1);
+      const rows = first < 0 ? [] : lines.slice(first, last + 1).filter(isRow).slice(2)
+        .map((l) => l.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim()));
+      const accBody = brief ? sectionOf(brief, /^acceptance criteria$/i) : null;
+      const criteria = accBody ? parseCriteria(accBody) : [];
+      const pairs = criteria.length ? matchCriteria(criteria, rows) : rows.map((r) => ({ criterion: r[0] || "", row: r }));
+      const trs = pairs.map(({ criterion, row }) =>
+        `<tr><td>${inl(criterion)}</td><td>${row ? inl(row[1] || "") : "none"}</td><td>${row ? inl(row[2] || "") : "not checked"}</td></tr>`).join("\n");
+      const prose = (ls) => (ls.join("\n").trim() ? md(ls.join("\n")) : "");
+      coverHtml = `<h2>Does the plan cover the brief?</h2>\n${prose(before)}\n<table>\n<thead><tr><th>Acceptance criterion</th><th>Covered by</th><th>Verdict</th></tr></thead>\n<tbody>\n${trs}\n</tbody>\n</table>\n${prose(after)}`;
+    }
+  }
+
   const earlierHtml = earlier.length ? `<h2>Already answered</h2>\n<ul class="earlier">\n${earlier.map((d) =>
-    `<li>${inl(d.question || "")} → <strong>${esc(d.answer)}</strong>${d.note ? ` (${esc(d.note)})` : ""} <span class="small">${esc(d.id)}</span></li>`).join("\n")}\n</ul>` : "";
+    `<li id="decision-${esc(d.id)}">${inl(d.question || "")} → <strong>${esc(d.answer)}</strong>${d.note ? ` (${esc(d.note)})` : ""} <span class="small">${esc(d.id)}</span></li>`).join("\n")}\n</ul>` : "";
 
   const pending = gate.decisions.map((d) => {
     const cards = (d.options || []).map((o) => {
       const explain = isIntent ? INTENT_EXPLAIN[o] : null;
-      return `<div class="option" data-plan-option="${esc(o)}"><strong>${esc(o)}</strong>${explain ? `<p>${esc(explain)}</p>` : ""}</div>`;
+      return `<div class="option" data-plan-option="${esc(o)}"><div class="o-name">${esc(o)}</div>${explain ? `<div class="o-note">${esc(explain)}</div>` : ""}</div>`;
     }).join("\n");
-    return `<div data-plan-question="${esc(d.id)}">
+    return `<div id="decision-${esc(d.id)}" data-plan-question="${esc(d.id)}">
 <p class="q-label">${inl(d.question || "")}</p>
 ${d.context ? `<p class="small">Context: ${esc(d.context)}</p>` : ""}
 <div class="options">
 ${cards}
 </div>
-<p class="small">${esc(d.id)} · recommended option: no recommendation given</p>
+<p class="small">${esc(d.id)}${isIntent ? "" : " · recommended option: no recommendation given"}</p>
 </div>`;
   }).join("\n");
 
   const rawHtml = docs.map((d) => {
-    const body = md(d.src, { idPrefix: d.prefix });
+    const body = md(d.src, { idPrefix: d.prefix, refs: rawRefs });
     return `<details${d.open ? " open" : ""}><summary>${esc(d.rel)}</summary>\n<article class="doc">\n${body}\n</article></details>`;
   }).join("\n");
 
@@ -308,6 +375,7 @@ ${goal}
 ${planHtml ? `<section id="plan">\n${planHtml}\n</section>` : ""}
 ${isIntent ? "" : accessSection}
 ${earlierHtml ? `<section id="earlier">\n${earlierHtml}\n</section>` : ""}
+${coverHtml ? `<section id="cover">\n${coverHtml}\n</section>` : ""}
 <section id="decide">
 <h2>What you are deciding</h2>
 ${pending}

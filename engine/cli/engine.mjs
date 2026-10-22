@@ -70,7 +70,7 @@ const STAGE_END_GATES = {
     playbook: "plan-review",
     blocks: ["implement"],
     question:
-      "Intent gate: does plan/plan.md faithfully implement brief.md (goal, acceptance criteria, constraints)? Approve to unlock implement; revise to loop back to plan.",
+      "Does this plan do what the brief asks, and nothing it does not ask for?",
     options: ["approve", "revise"],
     context: "plan/plan.md",
   },

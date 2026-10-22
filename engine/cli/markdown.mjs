@@ -38,8 +38,8 @@ function inline(raw, opts = {}) {
   }
   if (opts.refs) {
     s = s.replace(DECISION_REF, (id) => {
-      const note = opts.refs(id);
-      return note ? hold(`${id}<span class="dref"> (${note})</span>`) : id;
+      const html = opts.refs(id);
+      return html ? hold(html) : id;
     });
   }
   s = escape(s);
@@ -186,7 +186,7 @@ function anchorFor(text, ctx) {
  * Options (all off by default): `breaks` keeps line breaks inside a paragraph; `tasks` turns GFM task
  * items into ticks (`"all"` ticks every list item); `idPrefix` and `onAnchor` publish heading and
  * leading-id anchors (F2, R1); `cite(file, anchor)` returns an href for `[file#anchor]` or null;
- * `refs(id)` returns safe HTML that follows a `D-nnn` mention.
+ * `refs(id)` returns the safe HTML that replaces a `D-nnn` mention, or null to leave it.
  */
 export function renderMarkdown(src, opts = {}) {
   const ctx = { opts, seen: new Map() };
