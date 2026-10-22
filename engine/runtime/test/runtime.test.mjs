@@ -26,7 +26,7 @@ test("resolveRuntimeName: an unregistered or empty name throws UnknownRuntimeErr
   for (const args of [{ env: { DETENT_RUNTIME: "nope" } }, { env: { DETENT_RUNTIME: "" } }, { flag: "", env: {} }, { flag: "nope", env: {} }]) {
     assert.throws(() => resolveRuntimeName(args), (e) => {
       assert.ok(e instanceof UnknownRuntimeError);
-      assert.deepEqual(e.known, ["claude-code"]);
+      assert.deepEqual(e.known, ["claude-code", "openai-compatible"]);
       assert.equal(e.requested, args.flag !== undefined ? args.flag : args.env.DETENT_RUNTIME);
       assert.match(e.message, /claude-code/);
       return true;

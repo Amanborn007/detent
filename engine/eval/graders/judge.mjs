@@ -8,8 +8,10 @@
  * is parsed back out of the executor's stdout.
  *
  * Every call to the model goes through an INJECTABLE `executor` function
- * (`{prompt, timeoutMs} => {stdout}`), defaulting to `spawnSync("claude",
- * ["-p"], {input: prompt})` — the prompt is piped over STDIN, never as an
+ * (`{prompt, timeoutMs} => {stdout}`), defaulting to the runtime port
+ * (DETENT_RUNTIME: claude-code runs `claude -p`, openai-compatible calls the
+ * configured endpoint; scores are not comparable across runtimes). The
+ * prompt is piped over STDIN, never as an
  * argv element (a prompt beginning with `-` must never be parsable as a
  * `claude` CLI flag, e.g. `--dangerously-skip-permissions`). Tests always
  * inject a fake executor — this module never spawns a real model in
@@ -50,7 +52,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { medianOf, spreadOf } from "../verdict.mjs";
-import { getRuntime } from "../../runtime/runtime.mjs";
+import { getRuntime, resolveRuntimeName } from "../../runtime/runtime.mjs";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -154,18 +156,28 @@ export function claudeOnPath(exec = spawnSync) {
 }
 
 // ---------------------------------------------------------------------------
-// Default executor — real `claude -p <prompt>` spawn. Only ever reached when
-// no executor was injected AND claudeOnPath() found a binary; see runJudgeCase.
+// Default executor — one prompt through the runtime port (DETENT_RUNTIME,
+// default claude-code). Only ever reached when no executor was injected; for
+// claude-code runJudgeCase also checks claudeOnPath() first.
 // ---------------------------------------------------------------------------
 
+// The request each runtime gets. claude-code keeps today's inherit-everything call;
+// a runtime without a profile is refused rather than guessed at.
+const JUDGE_REQUEST = Object.freeze({
+  "claude-code": Object.freeze({ tools: "inherit", mcp: "inherit", settings: Object.freeze({ sources: "inherit" }) }),
+  "openai-compatible": Object.freeze({ tools: "none", mcp: "none", settings: Object.freeze({ sources: "none" }) }),
+});
+
 function defaultExecutor({ prompt, timeoutMs }) {
-  // Prompt goes over STDIN, never argv — a prompt beginning with `-` (e.g.
-  // "--dangerously-skip-permissions") must never be parsed as a `claude` CLI
-  // flag. See HIGH-1 in the PR #44 principal review.
-  const res = getRuntime({ name: "claude-code" }).run({
-    prompt, cwd: process.cwd(), output: "text", tools: "inherit", mcp: "inherit",
-    settings: { sources: "inherit" }, timeout_ms: timeoutMs ?? DEFAULT_TIMEOUT_MS,
+  const runtime = resolveRuntimeName();
+  const profile = JUDGE_REQUEST[runtime];
+  if (!profile) throw new Error(`judge has no request profile for runtime ${runtime}`);
+  // Prompt goes over STDIN inside the port, never argv — a prompt beginning with `-` (e.g.
+  // "--dangerously-skip-permissions") must never be parsed as a CLI flag. See HIGH-1 in the PR #44 principal review.
+  const res = getRuntime({ name: runtime }).run({
+    prompt, cwd: process.cwd(), output: "text", ...profile, timeout_ms: timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
+  if (runtime !== "claude-code" && res.error) throw new Error(`${runtime} ${res.error.kind}: ${res.error.message}`);
   if (res.error && (res.error.kind === "spawn" || res.error.kind === "timeout")) throw new Error(res.error.message);
   if (res.error) {
     throw new Error(`claude -p exited ${res.raw.exit_code}: ${(res.raw.stderr || res.raw.stdout || "").slice(0, 300)}`);
@@ -293,8 +305,12 @@ export function runJudgeCase(caseSpec, opts = {}) {
     return skip(`--no-judge set (case ${caseId})`);
   }
   if (!executor) {
-    const found = typeof hasClaude === "function" ? hasClaude() : claudeOnPath();
-    if (!found) return skip(`claude not found on PATH (case ${caseId})`);
+    let runtime;
+    try { runtime = resolveRuntimeName(); } catch (e) { return skip(`${e.message} (case ${caseId})`); }
+    if (runtime === "claude-code") {
+      const found = typeof hasClaude === "function" ? hasClaude() : claudeOnPath();
+      if (!found) return skip(`claude not found on PATH (case ${caseId})`);
+    }
   }
   try {
     return judgeCase(caseSpec, { executor, k, timeoutMs, bands });

@@ -3,11 +3,12 @@
 import { spawnSync } from "node:child_process";
 import { isAbsolute } from "node:path";
 import claudeCode from "./adapters/claude-code.mjs";
-import { RuntimeError, UnknownRuntimeError, RuntimeRequestError, CapabilityError } from "./errors.mjs";
+import openaiCompatible from "./adapters/openai-compatible.mjs";
+import { RuntimeError, UnknownRuntimeError, RuntimeRequestError, CapabilityError, RuntimeConfigError } from "./errors.mjs";
 
-export { RuntimeError, UnknownRuntimeError, RuntimeRequestError, CapabilityError };
+export { RuntimeError, UnknownRuntimeError, RuntimeRequestError, CapabilityError, RuntimeConfigError };
 
-const REGISTRY = Object.freeze({ [claudeCode.name]: claudeCode });
+const REGISTRY = Object.freeze({ [claudeCode.name]: claudeCode, [openaiCompatible.name]: openaiCompatible });
 const DEFAULT_RUNTIME = "claude-code";
 const MAX_BUFFER = 64 * 1024 * 1024;
 
@@ -65,15 +66,15 @@ export function requireCapabilities(caps, req, runtime) {
   for (const k of RESERVED) if (req[k] !== undefined) need(k, caps[k] === true, req[k]);
 }
 
-/** Wrap an adapter {name, bin, capabilities(), plan(req), parse(native, req)}. `bin` overrides the adapter's binary. */
-export function createRuntime(adapter, { bin } = {}) {
+/** Wrap an adapter {name, capabilities(), plan(req, env), parse(native, req)}. `bin` overrides the adapter's binary. */
+export function createRuntime(adapter, { bin, env = process.env } = {}) {
   const runtime = {
     name: adapter.name,
     capabilities: () => adapter.capabilities(),
     plan(req) {
       validateRequest(req);
       requireCapabilities(adapter.capabilities(), req, adapter.name);
-      const planned = adapter.plan(req);
+      const planned = adapter.plan(req, env);
       return bin === undefined ? planned : { ...planned, bin };
     },
     parse: (native, req) => adapter.parse(native, req),
@@ -81,7 +82,9 @@ export function createRuntime(adapter, { bin } = {}) {
       const p = runtime.plan(req);
       const native = spawnSync(p.bin, p.args, {
         cwd: p.cwd, input: req.prompt, encoding: "utf8", timeout: req.timeout_ms, maxBuffer: MAX_BUFFER,
+        ...(p.env ? { env: p.env } : {}),
       });
+      if (p.echo_stderr && native.stderr) process.stderr.write(native.stderr);
       return adapter.parse(native, req);
     },
   };
@@ -89,7 +92,7 @@ export function createRuntime(adapter, { bin } = {}) {
 }
 
 /** bins maps a runtime name to a binary path and applies only to that runtime. */
-export function getRuntime({ name, bins = {} } = {}) {
-  const resolved = name === undefined ? resolveRuntimeName() : resolveRuntimeName({ flag: name });
-  return createRuntime(REGISTRY[resolved], { bin: bins[resolved] });
+export function getRuntime({ name, bins = {}, env = process.env } = {}) {
+  const resolved = name === undefined ? resolveRuntimeName({ env }) : resolveRuntimeName({ flag: name, env });
+  return createRuntime(REGISTRY[resolved], { bin: bins[resolved], env });
 }

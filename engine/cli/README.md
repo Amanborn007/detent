@@ -227,9 +227,9 @@ The stdout line carries only codes and paths. Anything the child wrote (result t
 
 ### `engine runtime run [--runtime <name>] [--bin <path>]` / `engine runtime capabilities [--runtime <name>]`
 
-Runs one prompt through a model runtime and reports the result in one shape. The request JSON comes on stdin (`prompt`, `cwd`, `output`, `tools`, `mcp` and `settings` are required, and the rest is in `engine/runtime/CONTRACT.md`). The runtime is `--runtime`, else `DETENT_RUNTIME`, else `claude-code`. `--bin` overrides that runtime's binary.
+Runs one prompt through a model runtime and reports the result in one shape. The request JSON comes on stdin (`prompt`, `cwd`, `output`, `tools`, `mcp` and `settings` are required, and the rest is in `engine/runtime/CONTRACT.md`). The runtime is `--runtime`, else `DETENT_RUNTIME`, else `claude-code`; `openai-compatible` is the other one. `--bin` overrides that runtime's binary (for `openai-compatible` it replaces `node`). `openai-compatible` reads `DETENT_OPENAI_BASE_URL` (required), `DETENT_OPENAI_MODEL` and `DETENT_OPENAI_API_KEY_ENV` (the name of the variable that holds the key); see CONTRACT.md.
 
-Exit 0 prints `{ok:true, ...response, next_step}` for stop `ok`, `budget` or `turns`. Exit 1 prints `{ok:false, reason, next_step, response}` for stop `error` or `timeout`, with the child's output under `response.raw`. Exit 2 refuses bad stdin JSON, an unknown request key, an unknown runtime, or a field the runtime does not declare, and `reason` names the field and the runtime. Nothing is spawned on exit 2. `capabilities` prints what the runtime declares.
+Exit 0 prints `{ok:true, ...response, next_step}` for stop `ok`, `budget` or `turns`. Exit 1 prints `{ok:false, reason, next_step, response}` for stop `error` or `timeout`, with the child's output under `response.raw`. Exit 2 refuses bad stdin JSON, an unknown request key, an unknown runtime, a field the runtime does not declare, or missing runtime config such as `DETENT_OPENAI_BASE_URL`, and `reason` names the field and the runtime. Nothing is spawned on exit 2. `capabilities` prints what the runtime declares.
 
 ### `engine dashboard`
 

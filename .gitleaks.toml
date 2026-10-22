@@ -1,0 +1,9 @@
+# Default rules, plus an allowlist for the fake keys the runtime tests use.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "fake keys in engine/runtime tests"
+paths = ['''^engine/runtime/test/''']
+regexes = ['''sk-sentinel-[0-9a-f]+''']
+condition = "AND"
