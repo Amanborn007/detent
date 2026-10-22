@@ -170,7 +170,7 @@ process.stdout.write(JSON.stringify({ type: "result", subtype: "success", is_err
 `);
   chmodSync(bin, 0o755);
   const rt = getRuntime({ name: "claude-code", bins: { "claude-code": bin } });
-  const r = rt.run(req({ env: { ONLY_THIS: "1", PATH: process.env.PATH } }));
+  const r = rt.run(baseRequest(dir, { env: { ONLY_THIS: "1", PATH: process.env.PATH } }));
   assert.equal(r.stop, "ok");
   const seen = JSON.parse(readFileSync(join(dir, "env.json"), "utf8"));
   assert.equal(seen.ONLY_THIS, "1");
