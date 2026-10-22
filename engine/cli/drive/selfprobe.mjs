@@ -39,7 +39,7 @@ const E = {
 // opts: platform, clone, drivePid, denyTargets[], canaries[{path, nonce, volPath?}], writeAllowed[],
 // writeDenied[], toolchain[], envAllow?[]. The script reads $1 (canary tcp port) and $2 (canary unix socket).
 export function buildSelfProbe(opts) {
-  const { platform, clone, drivePid, denyTargets = [], canaries = [], writeAllowed = [], writeDenied = [], toolchain = [], envAllow } = opts;
+  const { platform, clone, drivePid, denyTargets = [], canaries = [], writeAllowed = [], writeDenied = [], toolchain = [], envAllow, claudeTmp, denyClaudeUidTmp = false } = opts;
   if (platform !== "darwin") throw new Error(`selfprobe: no probe for platform ${platform}; the capture-and-replay gate covers macOS only`);
   if (!isAbsolute(clone)) throw new Error("selfprobe: clone must be an absolute path");
   if (!Number.isInteger(drivePid)) throw new Error("selfprobe: drivePid must be an integer");
@@ -120,6 +120,12 @@ export function buildSelfProbe(opts) {
   L.push(...V);
   envScript = `${['r() { echo "$1=$2"; }', ...V].join("\n")}\n`;
   L.push(`D=/private/tmp/claude-$(id -u); if [ -d "$D" ]; then ( : > "$D/.detent-probe-${nonce}" ) >/dev/null 2>&1; rc=$?; rm -f "$D/.detent-probe-${nonce}" >/dev/null 2>&1; r claude_uid_tmp_writable $rc; else r claude_uid_tmp_writable 2; fi`);
+  if (denyClaudeUidTmp) expect.claude_uid_tmp_writable = E.rcNot0();
+  if (claudeTmp) {
+    if (!isAbsolute(claudeTmp)) throw new Error("selfprobe: claudeTmp must be an absolute path");
+    // A realpath mismatch means claude fell back to the shared /tmp/claude-<uid>.
+    add("claude_tmpdir_matches", `A=$(cd "$TMPDIR" 2>/dev/null && pwd -P); B=$(cd ${sq(`${claudeTmp}/claude-`)}$(id -u) 2>/dev/null && pwd -P); [ -n "$A" ] && [ "$A" = "$B" ]; r claude_tmpdir_matches $?`, E.rc0());
+  }
   count("ps_parent_secret", `ps -E -ww -p ${drivePid} -o command= 2>/dev/null | tr ' ' '\\n' | grep -cE '^[A-Za-z0-9_]*(${SECRET_NAMES})[A-Za-z0-9_]*='`, E.zero());
   for (const t of toolchain) {
     add(`tool_${t}`, `command -v ${sq(t)} >/dev/null 2>&1 && ${sq(t)} ${VERSION_FLAG[t] ?? "--version"} >/dev/null 2>&1; r tool_${t} $?`, { k: "sameAsControl", control: `tool_${t}_rc` });
@@ -220,6 +226,7 @@ export function evaluateSelfProbe(report) {
   const knownLimits = [];
   const calls = report.calls ?? 0;
   const toolUses = report.toolUses ?? 0;
+  if (/falls back to|too long for AF_UNIX/i.test(report.stderr ?? "")) failures.push(`claude_tmp_fallback: claude reported it fell back to the shared per-uid tmp dir: ${String(report.stderr).slice(0, 200)}`);
   let discard = false;
   if (report.platform === "darwin") knownLimits.push("procargs: a sandboxed command on macOS can read the exec-time env and argv of same-user processes (KERN_PROCARGS2); the check passes when drive's own env holds no secret-shaped name");
   if (!report.captured) {
