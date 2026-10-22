@@ -1,0 +1,322 @@
+// The page a human reads before answering a gate. Pure: reads the run directory, returns html and the
+// warnings the caller records. Page order follows engine/stages/plan/SKILL.md step 6.
+import { existsSync, readFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { renderMarkdown, renderInline, slugify } from "./markdown.mjs";
+
+const THEME_FILE = join(dirname(fileURLToPath(import.meta.url)), "..", "curator", "theme.html");
+const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESC[c]);
+
+const INTENT_EXPLAIN = {
+  approve: "Unlocks implementation.",
+  revise: "Sends the plan back to planning with your note.",
+};
+
+const EXTRA_CSS = `
+  :root { color-scheme: light; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark; } }
+  :root[data-theme="dark"] { color-scheme: dark; --paper:#14181c; --paper-2:#1b2026; --ink:#e8e6e2;
+    --muted:#98a2af; --soft:#b8c2cf; --rule:#2b3037; --accent:#7fc3cd; --accent-tint:#1d3a40; }
+  h1 { font-size:26px; }
+  h2 { margin-top:48px; }
+  .small { font-family:var(--mono); font-size:11px; color:var(--muted); letter-spacing:.02em; }
+  .dref { color:var(--muted); font-size:.9em; }
+  .box.notice { border-left-color:var(--accent); }
+  .checks { list-style:none; padding-left:0; }
+  .checks li { display:flex; gap:.5rem; }
+  .tick { font-family:var(--mono); color:var(--accent); flex:none; }
+  .steps li { margin:.9rem 0; }
+  .step-meta { font-size:14px; color:var(--soft); margin-top:.15rem; }
+  .step-meta .k { font-family:var(--mono); font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+  .earlier { list-style:none; padding-left:0; }
+  .earlier li { padding:.5rem 0; border-bottom:1px solid var(--rule); }
+  .q-label { font-weight:600; margin-bottom:.2rem; }
+  .options { display:grid; grid-template-columns:repeat(auto-fit,minmax(14rem,1fr)); gap:.7rem; margin:.8rem 0 .4rem; }
+  .option { border:1px solid var(--rule); border-radius:6px; padding:.7rem 1rem; cursor:pointer; background:var(--paper-2); }
+  .option:hover { border-color:var(--accent); }
+  .option p { margin:.25rem 0 0; font-size:14px; color:var(--soft); }
+  [data-curator-chosen] { border-color:var(--accent); background:var(--accent-tint); }
+  details { margin:.8rem 0; }
+  summary { cursor:pointer; font-family:var(--mono); font-size:13px; }
+  .doc { border-left:3px solid var(--rule); padding:.2rem 0 .2rem 1.2rem; margin:.5rem 0 1.5rem; font-size:15px; }
+  .doc h3 { font-size:1.15rem; margin:1.2rem 0 .4rem; }
+  .doc h4 { font-size:1rem; margin:1.4rem 0 .4rem; }
+  .doc h5, .doc h6 { font-size:.95rem; margin:1rem 0 .3rem; }
+`;
+
+function themeCss() {
+  if (!existsSync(THEME_FILE)) throw new Error(`gate page needs the curator theme at ${THEME_FILE}, and it is missing`);
+  const m = /<style>([\s\S]*?)<\/style>/.exec(readFileSync(THEME_FILE, "utf8"));
+  if (!m) throw new Error(`no <style> block in ${THEME_FILE}`);
+  return m[1];
+}
+
+// The text under the first heading matching titleRe, up to the next heading of the same or higher level.
+function sectionOf(md, titleRe) {
+  const lines = String(md).replace(/\r\n?/g, "\n").split("\n");
+  let fence = false;
+  let start = -1;
+  let level = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s{0,3}(```|~~~)/.test(lines[i])) { fence = !fence; continue; }
+    if (fence) continue;
+    const h = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/.exec(lines[i]);
+    if (!h) continue;
+    if (start < 0) {
+      if (titleRe.test(h[2])) { start = i + 1; level = h[1].length; }
+    } else if (h[1].length <= level) {
+      return lines.slice(start, i).join("\n").trim();
+    }
+  }
+  return start < 0 ? null : lines.slice(start).join("\n").trim();
+}
+
+function parseSteps(body) {
+  const steps = [];
+  for (const line of String(body).split("\n")) {
+    const m = /^\s{0,3}(\d+)[.)]\s+(.*)$/.exec(line);
+    if (m) steps.push(m[2].trim());
+    else if (steps.length && /^\s{2,}\S/.test(line)) steps[steps.length - 1] += ` ${line.trim()}`;
+  }
+  return steps.map((text) => {
+    const v = /\bVerify:\s*(.+)$/.exec(text);
+    const head = v ? text.slice(0, v.index) : text;
+    const f = /\bFiles?:\s*(.+?)\s*$/.exec(head);
+    const trim = (x) => x.replace(/\s+$/, "").replace(/\.$/, "");
+    return {
+      text: (f ? head.slice(0, f.index) : head).trim(),
+      files: f ? trim(f[1]) : null,
+      verify: v ? trim(v[1]) : null,
+    };
+  });
+}
+
+// A decision can block a name that is not a stage ("pr"); it belongs to the stage that pushes.
+const STAGE_FOR_BLOCK = { pr: "ship" };
+
+function resolveStage(gate, stages) {
+  const candidates = [gate.stage, ...gate.decisions.flatMap((d) => [...(d.blocks || []), d.raised_by])];
+  for (const c of candidates) {
+    const stage = STAGE_FOR_BLOCK[c] || c;
+    if (stages.includes(stage)) return stage;
+  }
+  return null;
+}
+
+// Returns { html, warnings }; the caller writes the file and records each warning.
+export function buildGatePage(run, gate, model) {
+  const { runId, runDir } = run;
+  const { stages, stageArtifacts } = model;
+  const warnings = [];
+  const read = (rel) => (existsSync(join(runDir, rel)) ? readFileSync(join(runDir, rel), "utf8") : null);
+  const resolved = resolveStage(gate, stages);
+  if (!resolved) {
+    warnings.push({ code: "gate_page_stage_unknown", file: "decisions.json", section: null,
+      detail: `gate '${gate.name}' names no known stage (${gate.stage}); every artifact is shown` });
+  }
+  const stage = resolved || stages[stages.length - 1];
+  const stageIdx = stages.indexOf(stage);
+  const atPlan = stageIdx >= stages.indexOf("plan");
+  const atResearch = stageIdx >= stages.indexOf("research");
+
+  let runJson = {};
+  try { runJson = JSON.parse(read("run.json") || "{}"); } catch { warnings.push({ code: "gate_page_unreadable", file: "run.json", section: null, detail: "run.json is not valid JSON; the page names the run id instead of the ticket" }); }
+  const ref = runJson.ticket_ref || runId;
+  const brief = read("brief.md");
+  const plan = read("plan/plan.md");
+
+  let title = null;
+  const ticketJson = read("ticket.json");
+  if (ticketJson) {
+    try { title = JSON.parse(ticketJson).title || null; } catch { warnings.push({ code: "gate_page_unreadable", file: "ticket.json", section: null, detail: "ticket.json is not valid JSON" }); }
+  }
+  if (!title && brief) {
+    const h = /^#\s+Brief:\s*\S+?\s+(?:-|:|—)\s+(.+)$/m.exec(brief);
+    if (h) title = h[1].trim();
+  }
+  const ticketLabel = title ? `${esc(ref)}, “${esc(title)}”,` : esc(ref);
+
+  const known = new Map();
+  for (const d of [...(gate.earlier || []), ...gate.decisions]) known.set(d.id, d);
+  const short = (q) => (String(q).length > 90 ? `${String(q).slice(0, 90).trimEnd()}...` : String(q));
+  const refs = (id) => {
+    const d = known.get(id);
+    if (!d) return null;
+    const state = d.status === "answered" ? `answered: ${esc(d.answer)}` : "open";
+    return `“${esc(short(d.question || ""))}” ${state}`;
+  };
+
+  // Only stages at or before the gate's; the access report is a table, never a dump.
+  const docs = [];
+  for (const s of stages.slice(0, stageIdx + 1)) {
+    for (const rel of stageArtifacts[s] || []) {
+      if (rel === "access-report.json") continue;
+      const src = read(rel);
+      if (src !== null) docs.push({ rel, src, open: false, prefix: `doc-${slugify(rel.replace(/[./]/g, "-"))}-`, anchors: new Set() });
+    }
+  }
+  const mdBase = { breaks: true, tasks: true, refs };
+  for (const d of docs) renderMarkdown(d.src, { ...mdBase, idPrefix: d.prefix, onAnchor: (a) => d.anchors.add(a) });
+  const cite = (file, anchor) => {
+    const d = docs.find((x) => x.rel === file || basename(x.rel) === file);
+    const a = anchor.toLowerCase();
+    return d && d.anchors.has(a) ? `#${d.prefix}${a}` : null;
+  };
+  const md = (src, extra = {}) => renderMarkdown(src, { ...mdBase, cite, ...extra });
+  const inl = (raw) => renderInline(raw, { refs, cite });
+
+  const notice = (rel, section, text) => {
+    const doc = docs.find((d) => d.rel === rel);
+    if (doc) doc.open = true;
+    warnings.push({ code: "gate_page_section_missing", file: rel, section, detail: text });
+    return `<div class="box notice" role="note"><p>${esc(text)}</p></div>`;
+  };
+  const missingFile = (rel, why) => {
+    warnings.push({ code: "gate_page_file_missing", file: rel, section: null, detail: why });
+    return `<div class="box notice" role="note"><p>${esc(why)}</p></div>`;
+  };
+
+  const isIntent = gate.name === "intent";
+  const n = gate.decisions.length;
+  let verdict;
+  let lede;
+  if (isIntent) {
+    verdict = `You are deciding whether the plan for ${ticketLabel} is ready to implement.`;
+    lede = "Approve unlocks implementation; Revise sends the plan back with your note.";
+  } else if (stage === "ship") {
+    verdict = `You are deciding whether ${ticketLabel} may be pushed as a draft pull request.`;
+    lede = "Your answers decide whether the engine will push the branch and open a draft pull request; nothing is pushed until every question here is answered.";
+  } else {
+    verdict = `You are answering ${n} open question${n === 1 ? "" : "s"} that block the ${esc(stage)} stage for ${ticketLabel}.`;
+    lede = `The ${stage} stage does not start until every question on this page is answered.`;
+  }
+
+  let access = "";
+  if (atResearch) {
+    const raw = read("access-report.json");
+    if (raw === null) {
+      access = missingFile("access-report.json", "access-report.json is missing, so the page cannot say which sources were reachable.");
+    } else {
+      let rows = null;
+      try { rows = JSON.parse(raw); } catch { rows = null; }
+      if (!Array.isArray(rows)) {
+        warnings.push({ code: "gate_page_unreadable", file: "access-report.json", section: null, detail: "access-report.json is not a JSON list" });
+        access = `<div class="box notice" role="note"><p>access-report.json could not be read as JSON, so the raw file is shown here.</p></div>\n<pre>${esc(raw)}</pre>`;
+      } else if (rows.length === 0) {
+        access = "<p>The access report lists no sources.</p>";
+      } else {
+        const trs = rows.map((r) => {
+          const detail = [r.detail, r.blocked_reason && `Blocked: ${r.blocked_reason}`, r.enable_action && `To unblock: ${r.enable_action}`,
+            r.criticality === "critical" && r.status === "blocked" && "Hard-blocking: implementation cannot start until this is resolved."]
+            .filter(Boolean).join(" ");
+          return `<tr><td>${esc(r.source ?? "")}</td><td>${esc(r.status ?? "")}</td><td>${esc(r.criticality ?? "")}</td><td>${esc(r.needed_for ?? "")}</td><td>${esc(detail)}</td></tr>`;
+        }).join("\n");
+        const bad = rows.filter((r) => r.status !== "reachable").length;
+        const sum = bad === 0 ? `All ${rows.length} sources were reachable, so nothing here blocks your answer.`
+          : `${bad} of ${rows.length} sources were not fully reachable; conclusions that rest on them carry degraded confidence.`;
+        access = `<table>\n<thead><tr><th>Source</th><th>Status</th><th>Criticality</th><th>Needed for</th><th>Detail</th></tr></thead>\n<tbody>\n${trs}\n</tbody>\n</table>\n<p>${esc(sum)}</p>`;
+      }
+    }
+  }
+  const accessSection = access ? `<section id="access">\n<h2>Access and data completeness</h2>\n${access}\n</section>` : "";
+
+  let goal;
+  if (brief === null) {
+    goal = `<h2>Goal</h2>\n${missingFile("brief.md", "brief.md is missing, so the goal and acceptance criteria cannot be shown.")}`;
+  } else {
+    const g = sectionOf(brief, /^goal$/i);
+    const a = sectionOf(brief, /^acceptance criteria$/i);
+    let inner = g ? md(g) : notice("brief.md", "## Goal", "brief.md has no ## Goal section; the raw file is shown below");
+    inner += a ? `\n<h3>Acceptance criteria</h3>\n${md(a, { tasks: "all" })}`
+      : `\n${notice("brief.md", "## Acceptance criteria", "brief.md has no ## Acceptance criteria section; the raw file is shown below")}`;
+    goal = `<h2>Goal</h2>\n${inner}`;
+  }
+
+  let planHtml = "";
+  if (atPlan) {
+    if (plan === null) {
+      planHtml = `<h2>The plan</h2>\n${missingFile("plan/plan.md", "plan/plan.md is missing, so the plan cannot be shown.")}`;
+    } else {
+      let inner = "";
+      const stepsBody = sectionOf(plan, /^(plan )?steps$/i);
+      const steps = stepsBody ? parseSteps(stepsBody) : [];
+      if (steps.length) {
+        const lis = steps.map((st) => `<li>${inl(st.text)}${st.files ? `<div class="step-meta"><span class="k">Files:</span> ${inl(st.files)}</div>` : ""}${st.verify ? `<div class="step-meta"><span class="k">Verify:</span> ${inl(st.verify)}</div>` : ""}</li>`).join("\n");
+        inner += `<h3>Steps</h3>\n<ol class="steps">\n${lis}\n</ol>`;
+      } else {
+        inner += notice("plan/plan.md", "## Steps", stepsBody === null
+          ? "plan/plan.md has no ## Steps section; the raw file is shown below"
+          : "plan/plan.md has a ## Steps section with no numbered steps; the raw file is shown below");
+      }
+      const filesBody = sectionOf(plan, /^files touched$/i);
+      if (filesBody) inner += `\n<h3>Files touched</h3>\n${md(filesBody)}`;
+      else if (steps.some((s) => s.files)) {
+        const all = [...new Set(steps.filter((s) => s.files).map((s) => s.files))];
+        inner += `\n<h3>Files touched</h3>\n<ul>${all.map((f) => `<li>${inl(f)}</li>`).join("")}</ul>`;
+      } else inner += `\n${notice("plan/plan.md", "## Files touched", "plan/plan.md has no ## Files touched section; the raw file is shown below")}`;
+      const risks = sectionOf(plan, /^risks/i);
+      if (risks) inner += `\n<h3>Risks</h3>\n${md(risks)}`;
+      else inner += `\n${notice("plan/plan.md", "## Risks", "plan/plan.md has no ## Risks section; the raw file is shown below")}`;
+      planHtml = `<h2>The plan</h2>\n${inner}`;
+    }
+  }
+
+  // A decision raised by a later stage cannot be "earlier"; engine-raised ones carry no stage and stay.
+  const earlier = (gate.earlier || []).filter((d) => stages.indexOf(d.raised_by) <= stageIdx);
+  const earlierHtml = earlier.length ? `<h2>Already answered</h2>\n<ul class="earlier">\n${earlier.map((d) =>
+    `<li>${inl(d.question || "")} → <strong>${esc(d.answer)}</strong>${d.note ? ` (${esc(d.note)})` : ""} <span class="small">${esc(d.id)}</span></li>`).join("\n")}\n</ul>` : "";
+
+  const pending = gate.decisions.map((d) => {
+    const cards = (d.options || []).map((o) => {
+      const explain = isIntent ? INTENT_EXPLAIN[o] : null;
+      return `<div class="option" data-plan-option="${esc(o)}"><strong>${esc(o)}</strong>${explain ? `<p>${esc(explain)}</p>` : ""}</div>`;
+    }).join("\n");
+    return `<div data-plan-question="${esc(d.id)}">
+<p class="q-label">${inl(d.question || "")}</p>
+${d.context ? `<p class="small">Context: ${esc(d.context)}</p>` : ""}
+<div class="options">
+${cards}
+</div>
+<p class="small">${esc(d.id)} · recommended option: no recommendation given</p>
+</div>`;
+  }).join("\n");
+
+  const rawHtml = docs.map((d) => {
+    const body = md(d.src, { idPrefix: d.prefix });
+    return `<details${d.open ? " open" : ""}><summary>${esc(d.rel)}</summary>\n<article class="doc">\n${body}\n</article></details>`;
+  }).join("\n");
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gate ${esc(gate.name)}</title>
+<style>${themeCss()}${EXTRA_CSS}</style>
+</head>
+<body>
+<main>
+<h1>${verdict}</h1>
+<p class="lede">${esc(lede)}</p>
+${gate.noteHtml || ""}
+${isIntent ? accessSection : ""}
+<section id="goal">
+${goal}
+</section>
+${planHtml ? `<section id="plan">\n${planHtml}\n</section>` : ""}
+${isIntent ? "" : accessSection}
+${earlierHtml ? `<section id="earlier">\n${earlierHtml}\n</section>` : ""}
+<section id="decide">
+<h2>What you are deciding</h2>
+${pending}
+</section>
+${rawHtml ? `<section id="raw">\n<h2>Run artifacts</h2>\n<p class="small">Everything above is drawn from these files, as written.</p>\n${rawHtml}\n</section>` : ""}
+<footer>run ${esc(runId)} · gate ${esc(gate.name)} · stage ${esc(stage)}</footer>
+</main>
+</body>
+</html>
+`;
+  return { html, warnings };
+}

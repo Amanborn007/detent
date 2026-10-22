@@ -21,7 +21,7 @@ function unescape(s) {
 
 /** What a reader sees: one text line per block, tags dropped. */
 function toText(html) {
-  const body = html.replace(/<style[\s\S]*?<\/style>/g, "").replace(/<script[\s\S]*?<\/script>/g, "");
+  const body = html.replace(/<head>[\s\S]*?<\/head>/, "").replace(/<style[\s\S]*?<\/style>/g, "").replace(/<script[\s\S]*?<\/script>/g, "");
   return unescape(body
     .replace(/<br\s*\/?>/g, "\n")
     .replace(/<\/(p|li|h[1-6]|tr|div|section|summary|dt|dd|ul|ol|table|details|header|footer|blockquote|pre)>/g, "\n")
