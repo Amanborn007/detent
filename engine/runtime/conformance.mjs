@@ -7,8 +7,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getRuntime, CapabilityError } from "./runtime.mjs";
 
-const ENUMS = { output: ["text", "json"], tools: ["none", "inherit"], mcp: ["none", "inherit"], settings_sources: ["none", "project", "inherit"] };
+const ENUMS = { output: ["text", "json"], tools: ["none", "inherit"], mcp: ["none", "inherit"], settings_sources: ["none", "project", "inherit"], approvals: ["deny"] };
 const BOOLS = ["settings_file", "model", "persist_session", "timeout", "budget", "add_dirs", "deny_tools", "containment", "env", "tools_allow"];
+const RESERVED_BOOLS = ["budget", "add_dirs", "deny_tools", "containment", "env", "tools_allow"];
 const KEYS = [...Object.keys(ENUMS), "auth", "reports", ...BOOLS].sort();
 const RESPONSE_KEYS = ["cost_usd", "denials", "error", "raw", "runtime", "stop", "text", "turns"];
 const STOPS = ["ok", "budget", "turns", "timeout", "error"];
@@ -88,7 +89,10 @@ export function conformanceSuite(fixture) {
         assert.throws(() => rt.run(baseRequest(dir, over)), CapabilityError, `${k}=${v}`);
       }
     }
-    assert.ok(probed > 0, "the probe table exercised nothing");
+    const undeclaredProbes = PROBES.filter(({ capability }) => c[capability] === false).length;
+    const undeclaredValues = Object.entries(ENUMS).reduce((n, [k, all]) => n + all.filter((x) => !c[k].includes(x)).length, 0);
+    assert.equal(probed, undeclaredProbes + undeclaredValues, "every undeclared probe and enum value was exercised");
+    assert.deepEqual(RESERVED_BOOLS.filter((k) => !PROBES.some(({ capability }) => capability === k)), [], "PROBES covers every reserved capability");
     assert.equal(existsSync(join(dir, "spawned")), false);
   });
 
