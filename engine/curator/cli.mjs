@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // curator CLI — agent-ergonomic: every outcome is a single JSON line on
 // stdout with a next_step field. Exit 0 on success, 1 on error.
-// Commands: open | poll | reply | end | status | log
+// Commands: open | poll | reply | end | status | log | stop
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -20,7 +20,7 @@ const STATE_FILE = path.join(STATE_DIR, 'state.json');
 const POLL_FAILURES_FILE = path.join(STATE_DIR, 'poll-failures.json');
 
 const USAGE =
-  'Usage: curator open <file.html> | curator check <file.html> | curator poll <file> | curator drain [<file>...] | curator reply <file> -m "<msg>" | curator log <file> -m "<entry>" | curator answer <file> --question <id> --answer <value> [--note <text>] | curator end <file> | curator status';
+  'Usage: curator open <file.html> | curator check <file.html> | curator poll <file> | curator drain [<file>...] | curator reply <file> -m "<msg>" | curator log <file> -m "<entry>" | curator answer <file> --question <id> --answer <value> [--note <text>] | curator end <file> | curator status | curator stop';
 
 function out(obj) {
   process.stdout.write(JSON.stringify(obj) + '\n');
@@ -281,7 +281,16 @@ function failUnreachable({ state, cause, command, consecutive, counterError }) {
   process.exit(1);
 }
 
+// node --test sets NODE_TEST_CONTEXT; a test reaching a real browser or an unscoped daemon leaks both onto the owner's machine.
+function inTestProcess() {
+  return Boolean(process.env.NODE_TEST_CONTEXT) && process.env.CURATOR_ALLOW_BROWSER !== '1';
+}
+
 function spawnServer() {
+  if (inTestProcess() && !process.env.CURATOR_STATE_DIR) {
+    fail('curator: refusing to start a daemon from a test process without an explicit CURATOR_STATE_DIR',
+      'set CURATOR_STATE_DIR to a temp dir, or CURATOR_ALLOW_BROWSER=1');
+  }
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [SERVER_PATH, '--daemon'], {
       detached: true,
@@ -396,6 +405,9 @@ async function cmdOpen(args) {
   const file = canonicalFile(positionals[0], { mustExist: true });
   if (!fs.statSync(file).isFile()) fail(`not a file: ${file}`, 'Point curator open at a self-contained .html artifact.');
   const checked = enforceArtifactCheck(file);
+  if (inTestProcess() && !process.env.CURATOR_NO_BROWSER) {
+    fail('curator: refusing to open a browser from a test process; set CURATOR_NO_BROWSER=1 or CURATOR_ALLOW_BROWSER=1');
+  }
   const warnings = await retireLegacyServer();
   let resolved = await resolveServer();
   if (resolved.status === 'unreachable') {
@@ -922,9 +934,25 @@ async function cmdStatus(args) {
   }
 }
 
+async function cmdStop(args) {
+  parseArgs(args, {});
+  const state = readState();
+  if (!state || !state.pid || !pidAlive(state.pid)) {
+    out({ status: 'not running', next_step: 'Nothing to stop.' });
+    return;
+  }
+  const cmd = commandOf(state.pid);
+  if (cmd === null || !cmd.endsWith(` ${SERVER_PATH} --daemon`)) {
+    fail(`pid ${state.pid} in ${STATE_FILE} is not a curator daemon started from this clone, so it was not stopped`,
+      `Check CURATOR_STATE_DIR (${STATE_DIR}).`);
+  }
+  await terminate(state.pid);
+  out({ status: 'stopped', pid: state.pid, next_step: 'Run: curator open <file.html> to start a new server.' });
+}
+
 // --- dispatch ----------------------------------------------------------------
 const [cmd, ...rest] = process.argv.slice(2);
-const commands = { open: cmdOpen, check: cmdCheck, poll: cmdPoll, drain: cmdDrain, reply: cmdReply, end: cmdEnd, status: cmdStatus, log: cmdLog, answer: cmdAnswer };
+const commands = { open: cmdOpen, check: cmdCheck, poll: cmdPoll, drain: cmdDrain, reply: cmdReply, end: cmdEnd, status: cmdStatus, stop: cmdStop, log: cmdLog, answer: cmdAnswer };
 
 if (!cmd || !commands[cmd]) {
   fail(cmd ? `unknown command: ${cmd}` : 'missing command', USAGE);
