@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { engine, mkCuratorClone, mkRun, readJson, writeJson, writeArtifact, eventsOf, ENGINE, assertCuratorOpened } from "./helpers.mjs";
+import { engine, mkCuratorClone, mkRun, readJson, writeJson, writeArtifact, eventsOf, ENGINE, assertCuratorOpened, trackCuratorStateDir } from "./helpers.mjs";
 
 const CURATOR_CLI = join(fileURLToPath(import.meta.url), "..", "..", "..", "curator", "cli.mjs");
 const BARE_PATH = "/usr/bin:/bin";
@@ -659,8 +659,11 @@ async function signalRun(sig, cfg) {
   const t = setup();
   throughIntake(t);
   setMode(t, { sleep: true, ...cfg });
+  const { TEST_CLONE, ...childEnv } = driveEnv(t); // TEST_CLONE is for engine(); this runs the real ENGINE
+  const curatorState = join(t.home, ".local", "curator");
+  trackCuratorStateDir(curatorState);
   const child = spawn(process.execPath, [ENGINE, ...driveArgs(t, ["--max-steps", "1"])], {
-    env: { ...process.env, DETENT_ROOT: t.home, CURATOR_NO_BROWSER: "1", CURATOR_STATE_DIR: join(t.home, ".local", "curator"), ...driveEnv(t) },
+    env: { ...process.env, DETENT_ROOT: t.home, CURATOR_NO_BROWSER: "1", CURATOR_STATE_DIR: curatorState, CURATOR_OWNER_PID: String(process.pid), ...childEnv },
     stdio: ["ignore", "pipe", "pipe"],
   });
   const exited = new Promise((res) => child.on("close", (code, s) => res({ code, s })));
@@ -670,6 +673,7 @@ async function signalRun(sig, cfg) {
   const pids = readJson(pf);
   child.kill(sig);
   const res = await Promise.race([exited, new Promise((r) => setTimeout(() => r("timeout"), 15000))]);
+  if (res === "timeout") child.kill("SIGKILL");
   return { t, res, pids };
 }
 

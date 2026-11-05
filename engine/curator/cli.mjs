@@ -200,6 +200,8 @@ async function retireLegacyServer() {
 // The keys must never reach an argv, where any process can read them. The browser opens a local file that redirects.
 function launchBrowser(url) {
   if (process.env.CURATOR_NO_BROWSER) return;
+  // BROWSER is the convention for "do not open"; none/true/false/empty all mean it.
+  if (process.env.BROWSER !== undefined && ['', 'none', 'true', 'false'].includes(process.env.BROWSER.trim().toLowerCase())) return;
   const opener = process.platform === 'darwin' ? 'open' : process.platform === 'linux' ? 'xdg-open' : null;
   if (!opener) return;
   const launcher = path.join(STATE_DIR, `open-${crypto.randomBytes(8).toString('hex')}.html`);
@@ -286,16 +288,23 @@ function inTestProcess() {
   return Boolean(process.env.NODE_TEST_CONTEXT) && process.env.CURATOR_ALLOW_BROWSER !== '1';
 }
 
+// CURATOR_OWNER_PID makes the daemon exit with its owner. Only a test helper may set it: a user's daemon must outlive their shell.
+function daemonEnv() {
+  const env = { ...process.env, CURATOR_STATE_DIR: STATE_DIR };
+  if (!process.env.NODE_TEST_CONTEXT) delete env.CURATOR_OWNER_PID;
+  return env;
+}
+
 function spawnServer() {
-  if (inTestProcess() && !process.env.CURATOR_STATE_DIR) {
-    fail('curator: refusing to start a daemon from a test process without an explicit CURATOR_STATE_DIR',
-      'set CURATOR_STATE_DIR to a temp dir, or CURATOR_ALLOW_BROWSER=1');
+  if (process.env.NODE_TEST_CONTEXT && process.env.CURATOR_ALLOW_DAEMON !== '1') {
+    fail('curator: refusing to start a daemon from a test process; set CURATOR_ALLOW_DAEMON=1 in a test that needs one',
+      'Pair it with an explicit CURATOR_STATE_DIR in a temp dir, and stop the daemon when the test ends.');
   }
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [SERVER_PATH, '--daemon'], {
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, CURATOR_STATE_DIR: STATE_DIR },
+      env: daemonEnv(),
     });
     let buf = '';
     let errBuf = '';
@@ -407,6 +416,10 @@ async function cmdOpen(args) {
   const checked = enforceArtifactCheck(file);
   if (inTestProcess() && !process.env.CURATOR_NO_BROWSER) {
     fail('curator: refusing to open a browser from a test process; set CURATOR_NO_BROWSER=1 or CURATOR_ALLOW_BROWSER=1');
+  }
+  if (inTestProcess() && !process.env.CURATOR_STATE_DIR) {
+    fail('curator: refusing to open from a test process without an explicit CURATOR_STATE_DIR, which could be a developer\'s live daemon',
+      'set CURATOR_STATE_DIR to a temp dir, or CURATOR_ALLOW_BROWSER=1');
   }
   const warnings = await retireLegacyServer();
   let resolved = await resolveServer();

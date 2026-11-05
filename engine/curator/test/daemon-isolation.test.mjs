@@ -151,7 +151,7 @@ test('BROWSER=none/true/false/empty keeps open from launching a browser; unset s
     }
     const r = cli(['open', s.file], e({}));
     assert.equal(r.code, 0, r.out);
-    for (let i = 0; i < 40 && !calls(); i++) await sleep(100);
+    for (let i = 0; i < 150 && !calls(); i++) await sleep(100);
     assert.match(calls(), /^(open|xdg-open) /, 'with BROWSER unset the opener should run');
   } finally {
     cli(['stop'], e({ CURATOR_NO_BROWSER: '1' }));

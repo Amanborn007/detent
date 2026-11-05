@@ -6,6 +6,7 @@
 // drains it, so a session the agent never armed (or one whose background poll
 // was killed) keeps its feedback queued forever. `drain` polls ONLY sessions
 // with pending>0 — those polls resolve immediately — so it can never block.
+import "./daemon-env.mjs";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, realpathSync, mkdirSync } from 'node:fs';
