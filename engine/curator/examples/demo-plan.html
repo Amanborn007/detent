@@ -30,17 +30,6 @@
   .phase b { flex: none; width: 72px; font-variant-numeric: tabular-nums; }
   .risk { border-left: 4px solid var(--bad); background: var(--chip); border-radius: 6px; padding: 10px 12px; margin: 8px 0; }
   .risk.medium { border-left-color: var(--warn); }
-  .risk .sev { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--bad); }
-  .risk.medium .sev { color: var(--warn); }
-  .options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  @media (max-width: 620px) { .options { grid-template-columns: 1fr; } }
-  .option { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
-  .option h3 { margin: 0 0 6px; font-size: 15px; }
-  .option ul { margin: 6px 0 0; padding-left: 18px; }
-  .option li { margin: 3px 0; }
-  .pro { color: var(--good); } .con { color: var(--bad); }
-  .q-label { font-weight: 600; margin-bottom: 10px; }
-  .hint { font-size: 12.5px; color: var(--muted); font-style: italic; }
   button.custom {
     border: 1px solid var(--accent); color: var(--accent); background: none;
     border-radius: 8px; padding: 8px 14px; font: 600 13px inherit; cursor: pointer;
@@ -49,17 +38,37 @@
 </head>
 <body>
 <main>
-  <header>
-    <h1>Migrating product search to the new index</h1>
-    <p class="meta">Draft plan for review · alt-click anything to annotate · select text to comment · click an option card to decide</p>
-  </header>
+  <h1>Product search can move to the new index without downtime</h1>
 
-  <section id="summary">
-    <h2>Summary</h2>
-    <p>Move product search off the legacy inverted index onto the new vector-hybrid index.
-       The legacy cluster is EOL in Q4; query latency at p99 has degraded 30% year over year.
-       Scope: query path, indexing pipeline, and relevance tests. Out of scope: autocomplete.</p>
+  <section data-plan-brief>
+    <p data-brief="goal"><b>What we are trying to do:</b> Move product search off the legacy index, which reaches end of life next quarter.</p>
+    <p data-brief="done"><b>What is already done:</b> Dual writes have run for two weeks and the backfill has finished.</p>
+    <p data-brief="ask"><b>What i need from you:</b> Two decisions, how real traffic moves across and how long the old cluster stays up.</p>
+    <p data-brief="next"><b>What happens after you answer:</b> I start the traffic ramp this week and schedule the shutdown date.</p>
   </section>
+
+  <div data-plan-question="rollout-strategy" data-plan-recommended="ramp" data-plan-required data-plan-shape="pick-one">
+    <h3>Should real traffic move to the new index in steps?</h3>
+    <p data-plan-why-now>Why now: the shadow-read week ends on Friday, and the ramp needs a flag deployed first.</p>
+    <p data-plan-reason>Recommended: ramp, because a bad ranking never shows up in health checks and a step limits who sees it.</p>
+    <div data-plan-option="ramp"><strong>Percentage ramp</strong>
+      <p data-plan-consequence>Each step (1, 5, 25, then 100 percent) caps who sees a bad ranking, and two code paths stay live for about two weeks.</p>
+      <p data-plan-then>If chosen: I add the ramp flag and check relevance diffs between steps.</p></div>
+    <div data-plan-option="cutover"><strong>Cutover with instant rollback</strong>
+      <p data-plan-consequence>One switch and one code path, done in a day, but all traffic sees any regression nobody has noticed.</p>
+      <p data-plan-then>If chosen: I schedule the switch for a low-traffic hour.</p></div>
+  </div>
+
+  <div data-plan-question="legacy-cluster" data-plan-no-recommendation="both fit and the call depends on how much double infra cost you will accept" data-plan-shape="pick-one">
+    <h3>After cutover, should the legacy cluster stay up for two weeks?</h3>
+    <p data-plan-why-now>Why now: the shutdown date has to be booked with infra before the ramp finishes.</p>
+    <div data-plan-option="warm"><strong>Keep it warm for two weeks</strong>
+      <p data-plan-consequence>Rollback stays instant if relevance problems show up late, at the cost of two more weeks of double infra spend.</p>
+      <p data-plan-then>If chosen: I book the shutdown for two weeks after 100 percent.</p></div>
+    <div data-plan-option="shutdown"><strong>Decommission immediately</strong>
+      <p data-plan-consequence>Savings start in week 6, and rollback turns into a multi-day re-provision.</p>
+      <p data-plan-then>If chosen: I book the shutdown for the day after 100 percent.</p></div>
+  </div>
 
   <section id="phases">
     <h2>Phases</h2>
@@ -74,63 +83,12 @@
   <section id="risks">
     <h2>Risks</h2>
     <div class="risk">
-      <span class="sev">High</span>
-      <p>Relevance regressions are invisible to health checks — a bad ranking ships silently.
+      <p><strong>High.</strong> Relevance regressions are invisible to health checks, so a bad ranking ships silently.
          Mitigation: offline diff of top-10 results on the 500 highest-volume queries before every ramp step.</p>
     </div>
     <div class="risk medium">
-      <span class="sev">Medium</span>
-      <p>Dual-write doubles indexing cost for ~5 weeks. Acceptable, but the backfill must be
-         throttled so it never starves live indexing.</p>
-    </div>
-  </section>
-
-  <section id="decision-rollout">
-    <h2>Decision needed: rollout strategy</h2>
-    <div data-plan-question="rollout-strategy">
-      <p class="q-label">How should real traffic move to the new index?</p>
-      <div class="options">
-        <div class="option" data-plan-option="Percentage ramp">
-          <h3>Percentage ramp</h3>
-          <ul>
-            <li class="pro">Blast radius capped at each step (1 → 5 → 25 → 100)</li>
-            <li class="pro">Relevance diffs checked between steps</li>
-            <li class="con">Two code paths live for ~2 weeks</li>
-          </ul>
-        </div>
-        <div class="option" data-plan-option="Cutover with instant rollback">
-          <h3>Cutover with instant rollback</h3>
-          <ul>
-            <li class="pro">One switch, one code path, done in a day</li>
-            <li class="con">Full traffic exposed to any unnoticed regression</li>
-            <li class="con">Rollback restores latency, not user trust</li>
-          </ul>
-        </div>
-      </div>
-      <p class="hint">Click a card to choose — your answer is queued for the agent (re-clicking replaces it).</p>
-    </div>
-  </section>
-
-  <section id="decision-legacy">
-    <h2>Decision needed: legacy cluster</h2>
-    <div data-plan-question="legacy-cluster">
-      <p class="q-label">After cutover, what happens to the legacy cluster?</p>
-      <div class="options">
-        <div class="option" data-plan-option="Keep 2 weeks warm">
-          <h3>Keep warm 2 weeks</h3>
-          <ul>
-            <li class="pro">Instant rollback target if relevance issues surface late</li>
-            <li class="con">Two more weeks of double infra cost</li>
-          </ul>
-        </div>
-        <div class="option" data-plan-option="Decommission immediately">
-          <h3>Decommission immediately</h3>
-          <ul>
-            <li class="pro">Cost savings land in week 6</li>
-            <li class="con">Rollback becomes a multi-day re-provision</li>
-          </ul>
-        </div>
-      </div>
+      <p><strong>Medium.</strong> Dual-write doubles indexing cost for about 5 weeks. Acceptable, but the backfill
+         must be throttled so it never starves live indexing.</p>
     </div>
   </section>
 
