@@ -1,12 +1,51 @@
 # Block library
 
-A curator screen is an ordered selection of the blocks below, and it may carry as many jobs as the work actually has. There is no page type to pick: a runbook that also settles four decisions and maps two flows is one screen carrying a verdict, a steps block, four decision blocks and two mechanism blocks, in the order a reader needs them. The only fixed rule of composition is that Verdict comes first and appears on every screen. Everything else earns its place by having something to say; a block with nothing in it is left out rather than filled with a placeholder.
+A curator screen is an ordered selection of the blocks below, and it may carry as many jobs as the work actually has. A runbook that also settles four decisions and maps two flows is one screen carrying a verdict, a brief, four decision blocks and two mechanism blocks. A block with nothing in it is left out rather than filled with a placeholder.
 
-Recipes name a default starting set of blocks for a kind of work. They are starting sets, not walls — add a block a recipe does not list the moment the work has that content.
+One order is fixed. The `<h1>` states the finding in one line, the brief comes right after it, every decision comes after the brief, and everything else (evidence, access panel, diagrams) comes after the last decision under a `Background` heading. A reader who stops after the decisions has still been asked everything.
+
+Recipes name a default starting set of blocks for a kind of work. They are starting sets, not walls. Add a block a recipe does not list the moment the work has that content.
+
+## The decision page skeleton
+
+Use this shape exactly. `engine/curator/contract.mjs` checks it, and `theme.html` carries it as a component.
+
+```html
+<h1>{finding in one line}</h1>
+<section data-plan-brief>
+  <p data-brief="goal"><b>What we are trying to do:</b> …</p>
+  <p data-brief="done"><b>What is already done:</b> …</p>
+  <p data-brief="ask"><b>What i need from you:</b> …</p>
+  <p data-brief="next"><b>What happens after you answer:</b> …</p>
+</section>
+<div data-plan-question="rollout" data-plan-recommended="phased" data-plan-required data-plan-shape="pick-one">
+  <h3>Should we …?</h3>
+  <p data-plan-why-now>Why now: …</p>
+  <p data-plan-reason>Recommended: phased, because …</p>
+  <div data-plan-option="phased"><strong>Phased rollout</strong>
+    <p data-plan-consequence>…</p>
+    <p data-plan-then>If chosen: …</p></div>
+  …
+</div>
+<h2>Background</h2>
+```
+
+What the contract requires of every page that has a decision:
+
+- Brief: all four parts, each a whole sentence of at least 5 words after its label, none only a path or URL. It is the first element after the `<h1>`.
+- No more than 250 words of visible text before the first decision.
+- Question: the first `h2` to `h4` inside the block, 40 words or fewer, ending in "?".
+- Recommendation: `data-plan-recommended` names an option key and a `data-plan-reason` gives at least 5 words of reason. With no recommendation, write `data-plan-no-recommendation="{why}"` in at least 5 words.
+- Each option has a `<strong>` label that reads as words (not the key again) and a `data-plan-consequence` of at least 4 words saying what happens if it is chosen. Escape hatches such as "Other" or "Skip" need no consequence.
+- Context is the excerpt text itself. "Context: c" or a bare file path tells the reader nothing.
+- Warnings: an ID like `DUNE-35` with no `<abbr title>` or `[data-plan-glossary]` entry, more than 7 decisions on one page, and any text telling the reader to alt-click or click an option. Annotation instructions belong to the shell, not the page.
+
+The option key (`data-plan-option="phased"`) is the answer string sent back to you. The label is for the reader. Keep the key short and stable, and write the label and consequence in full.
 
 | Block | Diagram obligation |
 | --- | --- |
 | Verdict | none |
+| Brief | none |
 | Decisions needed | none |
 | Decision change log | none |
 | Mechanism / walkthrough | required, one per distinct flow |
@@ -27,7 +66,7 @@ Recipes name a default starting set of blocks for a kind of work. They are start
 
 Gives the reader the answer in the first line so they can stop reading and act.
 
-Must contain one sentence stating the answer, the recommendation, or the state of the work, at the top of the screen. Where the answer is conditional, the condition sits in the same sentence.
+Must contain one sentence stating the answer, the recommendation, or the state of the work. It is the page's `<h1>`. Where the answer is conditional, the condition sits in the same sentence.
 
 Must not contain a preamble, a scope statement, a list of what the screen covers, or a restatement of the question. It is not a summary of the screen; it is the conclusion of the screen.
 
@@ -35,17 +74,31 @@ No diagram.
 
 Commonly got wrong by opening with status instead of the answer. "Investigated the retry path across three services" is a status line. "The retries are safe to enable, the duplicate risk is in the ledger write and not the retry itself" is a verdict.
 
-## Decisions needed
+## Brief
 
-Collects the asks that need the reader to click, so the run can continue.
+Tells a reader who has never seen this work what is going on and what you want, in four short parts.
 
-Must contain one entry per ask, each stating what is being decided, what happens once it is answered, and which of the five decision shapes it uses: pick one, approve each, order these, gate, or open ask. Each clickable entry carries options the reader can actually choose between.
+Must contain `goal`, `done`, `ask` and `next`, in that order, each one whole sentence of at least 5 words after its bold label. It sits right after the `<h1>`.
 
-Must not contain questions the author can answer alone, rhetorical framing, or an entry whose options are all the same action in different words. It must not contain open asks that need a person to act elsewhere — those go to "What needs you".
+Must not contain a path or URL standing in for a sentence, a list of what the page covers, or status. The `ask` part says how many decisions there are and what they are about.
 
 No diagram.
 
-Commonly got wrong by rendering every ask as pick-one because that is curator's oldest primitive. A list where each line needs its own yes or no is approve-each; a choice about sequence is order-these; a proceed, park or stop for the whole run is a gate. Using pick-one for all four loses the shape of the question.
+Commonly got wrong by writing the brief as a pointer ("see plan.md") so the reader has to open another file before they can decide.
+
+## Decisions needed
+
+Collects the asks that need the reader to click, so the run can continue. They come straight after the brief, before any background.
+
+Must contain one block per ask in the skeleton above: a question ending in "?", why it is being asked now, a recommendation with its reason (or an explicit statement that there is none, and why), and for each option a label, the consequence of choosing it, and what you do next. Pick one of the five decision shapes: pick one, approve each, order these, gate, or open ask, and set it in `data-plan-shape`. Mark a decision `data-plan-required` when the run cannot continue without it.
+
+Must not contain questions the author can answer alone, rhetorical framing, or an entry whose options are all the same action in different words. Open asks that need a person to act elsewhere go to "What needs you".
+
+A comparison table of the options is allowed after the option cards, never in place of them.
+
+No diagram.
+
+Commonly got wrong by rendering every ask as pick-one because that is curator's oldest primitive. A list where each line needs its own yes or no is approve-each; a choice about sequence is order-these; a proceed, park or stop for the whole run is a gate. It is also got wrong by listing options with no consequences, so the reader has to guess what each click does.
 
 ## Decision change log
 
@@ -81,7 +134,7 @@ Must not contain a recommendation buried in the third option — the recommendat
 
 **Diagram required when there are 3 or more options** — a quadrant of cost against precedent, so the reader sees the spread rather than reading four blocks and holding them in their head.
 
-Commonly got wrong by collapsing the options into a comparison table. A table of options flattens cost, precedent and breakage into cells that all look equally weighted, and it hides the thing the reader needs, which is what each option does to the system.
+Commonly got wrong by replacing the option cards with a comparison table. A table flattens cost, precedent and breakage into cells that all look equally weighted, and it hides what each option does to the system. Put the cards first and the table after them.
 
 ## What I would refuse
 
@@ -152,7 +205,7 @@ Names what could go wrong and what it would take to notice.
 
 Must contain each risk, what it would break, and how it would be detected.
 
-Must not contain severity chips, likelihood ratings, or badge rows. Say how bad it is and how likely it is in the sentence.
+Must not contain severity chips, colored markers, likelihood ratings, or badge rows. Say how bad it is and how likely it is in the sentence, in plain words.
 
 No diagram.
 

@@ -61,7 +61,8 @@ stage skills restate this rule at every gate (see `engine/stages/CONTRACT.md`,
   default order in [`engine/curator/recipes.md`](../../engine/curator/recipes.md)
   (decide · investigate · track · explain · run · research) and add or cut.
   Decisions turn up on most pages, and often several per page, so a decision
-  is a component rather than a kind of page.
+  is a component rather than a kind of page. Whatever the blocks, the brief and
+  the decisions come first.
 - DIAGRAMS: the question is **how many**, never whether. One drawing per
   distinct flow, per comparison of three or more options, per set of counts or
   percentages, per before-and-after, per branching step sequence, per ranking.
@@ -138,21 +139,52 @@ stage skills restate this rule at every gate (see `engine/stages/CONTRACT.md`,
     [docs/guide-artifact-template.md](../../docs/guide-artifact-template.md).
     Everything else — plans, gate artifacts, reports, comparisons — uses this
     theme.
-- Make every decision you need from the user EXPLICIT as a decision block:
+- **Decisions come first.** Open the page with the finding as the `<h1>`, the
+  four-part brief, then every decision, then `Background` (evidence, access
+  panel, diagrams). Make every decision you need from the user an explicit
+  block, exactly in this shape:
 
   ```html
-  <div data-plan-question="rollout-strategy">
-    <div data-plan-option="Phased">Phased — pros/cons ...</div>
-    <div data-plan-option="Big-bang">Big-bang — pros/cons ...</div>
+  <h1>{finding in one line}</h1>
+  <section data-plan-brief>
+    <p data-brief="goal"><b>What we are trying to do:</b> …</p>
+    <p data-brief="done"><b>What is already done:</b> …</p>
+    <p data-brief="ask"><b>What i need from you:</b> …</p>
+    <p data-brief="next"><b>What happens after you answer:</b> …</p>
+  </section>
+  <div data-plan-question="rollout" data-plan-recommended="phased" data-plan-required data-plan-shape="pick-one">
+    <h3>Should we …?</h3>
+    <p data-plan-why-now>Why now: …</p>
+    <p data-plan-reason>Recommended: phased, because …</p>
+    <div data-plan-option="phased"><strong>Phased rollout</strong>
+      <p data-plan-consequence>…</p>
+      <p data-plan-then>If chosen: …</p></div>
+    …
   </div>
+  <h2>Background</h2>
   ```
 
-  curator makes the options clickable and queues exactly one answer per
-  question. One `data-plan-question` per decision; option values should be
-  short, unambiguous answer strings.
-- Visual hierarchy: risks get colored severity markers, tradeoffs go in
-  side-by-side pro/con cards, decisions get their own clearly-labeled
-  sections. Lead with a short summary; details below.
+  The rules, each checked by `engine/curator/contract.mjs`:
+  - The brief has all four parts, each a whole sentence of 5+ words, none only a path
+    or URL, and no more than 250 words come before the first decision.
+  - The question ends in "?" and is 40 words or fewer.
+  - Recommend one option with a reason of 5+ words, or write
+    `data-plan-no-recommendation="{why}"` in 5+ words.
+  - Every option has a `<strong>` label (not the key again) and a
+    `data-plan-consequence` of 4+ words. Escape hatches like "Other" are exempt.
+  - Context is excerpt text. A bare path, URL, ID or "Context: c" is not context.
+  - Explain IDs like `DUNE-35` with `<abbr title>`, keep to 7 decisions or fewer, and put
+    no alt-click or "click an option" hints on the page. The shell owns annotation
+    instructions.
+
+  curator draws the options as cards, queues exactly one answer per question, and
+  marks the recommendation. The option key is the answer string you receive, so keep it
+  short and stable; the label and consequence are for the reader. A comparison table is
+  fine after the option cards, never instead of them. Today the contract reports as
+  warnings; treat them as failures.
+- Visual hierarchy: say risk severity in plain words in the sentence ("high, because
+  a bad ranking ships silently"), not with colored markers. Tradeoffs go in the option
+  cards, decisions go before everything else, and details go under Background.
 - Optional escape hatch: a button calling
   `window.curator.queuePrompt('...')` for canned feedback like
   "rethink the approach". See `engine/curator/examples/demo-plan.html` for a
@@ -197,12 +229,13 @@ Worked BAD→GOOD example: see "Writing style (mandatory)" in
       section needing a second read to parse is rewritten before opening.
 - [ ] No horizontal overflow: `* { box-sizing: border-box; min-width: 0; }` —
       the `min-width: 0` matters on nested flex/grid children.
-- [ ] Every decision you need answered is a `data-plan-question` block; state
-      explicitly in the artifact which decisions you need answered.
+- [ ] Every decision you need answered is a `data-plan-question` block right after
+      the brief, each with a recommendation and a consequence per option.
+- [ ] `node engine/curator/contract.mjs --page .plans/<slug>.html` prints no warnings.
 - [ ] No external URLs anywhere (fonts, CSS, JS, images). System fonts only.
 - [ ] Readable in light and dark (`color-scheme: light dark` + a
       `prefers-color-scheme` media query, or neutral colors that work in both).
-- [ ] A one-line hint that alt-click annotates and text selection comments.
+- [ ] No annotation hint on the page. The shell tells the reader how to annotate.
 
 ## 2. Open and poll
 

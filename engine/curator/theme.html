@@ -38,7 +38,10 @@
   .eyebrow { font-family:var(--mono); font-size:9px; letter-spacing:.16em;
              text-transform:uppercase; color:var(--muted); margin:0 0 10px; }
   h1 { font-family:var(--serif); font-weight:400; font-size:34px; line-height:1.2; margin:0 0 12px; }
-  .lede { color:var(--soft); margin:0 0 8px; }
+  [data-plan-brief] { margin:0 0 28px; padding:16px 20px; background:var(--paper-2); border-radius:8px; }
+  [data-plan-brief] [data-brief] { margin:.5rem 0; }
+  [data-plan-brief] b { display:block; font-family:var(--mono); font-size:10px; font-weight:400;
+                        letter-spacing:.1em; text-transform:uppercase; color:var(--muted); }
 
   /* Sections: serif, hairline under. Generous space above — the gap is what
      makes a long artifact skimmable. */
@@ -87,13 +90,36 @@
 
 <p class="eyebrow">TICKET OR TOPIC · THE ONE-LINE IDENTIFIER</p>
 <h1>A title that states the finding, not the subject</h1>
-<p class="lede">One or two sentences a reader can stop at and still be right.</p>
+<!-- Component: decision page. The brief and every decision come before any background.
+     Four brief parts, each a whole sentence of at least 5 words after its label. Each decision
+     carries a question ending in "?", a recommendation with its reason (or
+     data-plan-no-recommendation="why"), and for every option a label and a consequence.
+     Context is excerpt text, never a bare path. Annotation hints belong to the shell. -->
+<section data-plan-brief>
+  <p data-brief="goal"><b>What we are trying to do:</b> Replace the placeholder text below with the goal in one plain sentence.</p>
+  <p data-brief="done"><b>What is already done:</b> Say what is finished, so the reader does not redo it.</p>
+  <p data-brief="ask"><b>What i need from you:</b> Name the decision on this page and how many there are.</p>
+  <p data-brief="next"><b>What happens after you answer:</b> Say what you will do once the answer arrives.</p>
+</section>
 
-<h2>1 · The short version</h2>
+<div data-plan-question="which-option" data-plan-recommended="obvious" data-plan-required data-plan-shape="pick-one">
+  <h3>Should we do the obvious thing or the clever thing?</h3>
+  <p data-plan-why-now>Why now: the next release branch is cut on Friday, so this blocks it.</p>
+  <p data-plan-reason>Recommended: obvious, because three services already run it this way.</p>
+  <div data-plan-option="obvious"><strong>Do the obvious thing</strong>
+    <p data-plan-consequence>Cheap and precedented, and it takes about 80% of the win.</p>
+    <p data-plan-then>If chosen: I start on it today.</p></div>
+  <div data-plan-option="clever"><strong>Do the clever thing</strong>
+    <p data-plan-consequence>Full win with no precedent, and review takes noticeably longer.</p>
+    <p data-plan-then>If chosen: I write the design note first.</p></div>
+</div>
+
+<h2>Background</h2>
 <p><strong>Bolded takeaway first.</strong> Then the reasoning, in whole short
-sentences. Lead with the answer, never the status.</p>
+sentences. Lead with the answer, never the status. Evidence, the access panel and diagrams
+all come here, after every decision.</p>
 
-<h2>2 · Evidence</h2>
+<h2>Evidence</h2>
 <p>Put the finding in the sentence and the anchor at the end of it, like this:
 the pill comes from one field only, <code>mapper.go:890</code>. Never a column
 of bare file anchors carrying the meaning.</p>
@@ -105,9 +131,9 @@ of bare file anchors carrying the meaning.</p>
 which is not the main line.</p>
 </div>
 
-<h2>3 · Options</h2>
-<p>A table only where the shape carries the meaning. Comparing options across
-the same few dimensions is exactly that shape.</p>
+<h2>Options compared</h2>
+<p>A comparison table goes after the option cards, never instead of them. It earns its
+place when the options share the same few dimensions.</p>
 
 <table>
   <tr><th>Option</th><th>Cost</th><th>Precedent</th><th>Where it lands</th></tr>
@@ -120,7 +146,7 @@ the same few dimensions is exactly that shape.</p>
 <p class="verdict"><strong>Recommendation, in one line,</strong> with the reason
 in the same breath if it changes what the reader does.</p>
 
-<h2>4 · A diagram</h2>
+<h2>A diagram</h2>
 <p>Every fill and stroke reads a token, so the diagram follows the page into
 dark mode. Copy this shape; do not paste hex literals into an SVG.</p>
 
@@ -147,14 +173,6 @@ dark mode. Copy this shape; do not paste hex literals into an SVG.</p>
         font-family="-apple-system, system-ui, sans-serif" text-anchor="middle">the focal one</text>
 </svg>
 <p class="caption">FIG 1 · CAPTION IN MONO, STATING WHAT THE READER SHOULD TAKE</p>
-
-<h2>5 · The decision</h2>
-<p>Every decision you need is an explicit block. One block per decision.</p>
-
-<div data-plan-question="which-option">
-  <div data-plan-option="Obvious">Obvious — cheap, precedented, 80% of the win</div>
-  <div data-plan-option="Clever">Clever — full win, no precedent, slower review</div>
-</div>
 
 <footer>PROJECT · SOURCE OF ANY TOKENS · DATE</footer>
 
