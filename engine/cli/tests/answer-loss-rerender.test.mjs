@@ -83,3 +83,35 @@ test("changed stage artifact text re-renders the page", () => {
   assert.match(html, /now with a new section/);
   assert.match(html, /decided to split step 3/);
 });
+
+const DEGRADED = "proceed degraded (accept degraded confidence)";
+
+function collect(ctx, items) {
+  const f = join(mkdtempSync(join(tmpdir(), "rerender-fb-")), "feedback.json");
+  writeJson(f, items);
+  return engine(["gate", "collect", "--run", ctx.runId, "--file", f], { env: { PATH: BARE_PATH } });
+}
+
+test("a refused answer is not left showing as Answered on the next gate open", () => {
+  const g = atPlanGate();
+  marked(g);
+  collect(g.ctx, [{ type: "decision", question: g.gate.id, answer: "not-an-option" }]);
+  g.open();
+  const html = readFileSync(g.html, "utf8");
+  assert.doesNotMatch(html, /data-curator-answered="/);
+  assert.doesNotMatch(html, /data-curator-answered-option/);
+  assert.match(html, /decided to split step 3/);
+});
+
+test("a rejected proceed-degraded answer on a judgment decision rewrites the page even though the hash matches", () => {
+  const g = atPlanGate();
+  const p = join(g.ctx.runDir, "decisions.json");
+  writeJson(p, readJson(p).map((d) => (d.id === g.gate.id ? { ...d, cause: "judgment", options: [...d.options, DEGRADED] } : d)));
+  g.open();
+  curator(["answer", g.html, "--question", g.gate.id, "--answer", DEGRADED]);
+  assert.match(readFileSync(g.html, "utf8"), /data-curator-answered=/);
+  const r = collect(g.ctx, [{ type: "decision", question: g.gate.id, answer: DEGRADED }]);
+  assert.deepEqual(r.json.answered, []);
+  g.open();
+  assert.doesNotMatch(readFileSync(g.html, "utf8"), /data-curator-answered="/);
+});
