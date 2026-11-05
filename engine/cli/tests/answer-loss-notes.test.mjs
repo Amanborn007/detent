@@ -63,6 +63,13 @@ test("the outbox refuses a child-written human_notes", () => {
   assert.equal(r.reason, "forbidden_key");
 });
 
+test("the outbox refuses a child-written rejected_answer", () => {
+  const r = validateDecisions([{ key: "u1", question: "Which?", options: ["a", "b"], blocks: ["implement"], cause: "judgment", rejected_answer: { answer: "a", at: "2026-11-05T00:00:00Z" } }],
+    { stage: "plan", stages: STAGES });
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, "forbidden_key");
+});
+
 /** A clone whose curator stub prints STUB_DRAIN on `drain` (and nothing when unset) or fails when STUB_FAIL is set. */
 function stubDrain(t) {
   t.curatorDir = mkdtempSync(join(tmpdir(), "drive-drain-"));
