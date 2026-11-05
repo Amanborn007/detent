@@ -1204,6 +1204,13 @@ function pendingFor(decisions, decision) {
     (d.id === decision.id || (Array.isArray(d.blocks) && d.blocks.some((b) => blocks.has(b)))));
 }
 
+function humanNotesHtml(d) {
+  if (!Array.isArray(d.human_notes) || d.human_notes.length === 0) return "";
+  const items = d.human_notes.map((n) =>
+    `<li>${escapeHtml(n.at || "")}${n.answer_if_any ? ` (leaning ${escapeHtml(n.answer_if_any)})` : ""}: ${escapeHtml(n.note || "")}</li>`).join("");
+  return `<div class="human-notes"><p class="sub">Notes you left on this decision</p><ul>${items}</ul></div>`;
+}
+
 function renderGateArtifact({ runId, runDir }, gate) {
   const plansDir = join(detentRoot(), ".plans");
   mkdirSync(plansDir, { recursive: true });
@@ -1225,6 +1232,7 @@ function renderGateArtifact({ runId, runDir }, gate) {
 <div data-plan-question="${escapeHtml(d.id)}">
 <p class="q-label">${escapeHtml(d.question || "")}</p>
 ${d.context ? `<p class="sub">Context: ${escapeHtml(d.context)}</p>` : ""}
+${humanNotesHtml(d)}
 <div class="options">
 ${options}
 </div>
@@ -1359,6 +1367,13 @@ function drainCuratorFor(runId, runDir) {
   return { items, ...(stampErrors.length ? { stampErrors } : {}) };
 }
 
+function recordHumanNote(d, item) {
+  const entry = { note: item.note ?? null, answer_if_any: item.answer ?? null };
+  const notes = d.human_notes || (d.human_notes = []);
+  if (notes.some((n) => n.note === entry.note && n.answer_if_any === entry.answer_if_any)) return;
+  notes.push({ ...entry, at: new Date().toISOString() });
+}
+
 function applyFeedback(runDir, items) {
   const decisions = loadDecisions(runDir);
   const answered = [];
@@ -1372,14 +1387,19 @@ function applyFeedback(runDir, items) {
     }
     const d = decisions.find((x) => x.id === item.question);
     const base = { id: item.question, answer: item.answer ?? null, ...(item.note ? { note: item.note } : {}) };
+    // The curator drain empties its queue, so an unresolved item survives only if it is recorded here.
+    const keep = (reason) => {
+      unresolved.push({ ...base, reason });
+      if (d && (item.note || item.answer != null)) recordHumanNote(d, item);
+    };
     if (!d) { unresolved.push({ ...base, reason: "no such decision" }); continue; }
-    if (d.status !== "pending" && !isUnresolvedJudgment(d)) { unresolved.push({ ...base, reason: `decision is ${d.status}, not pending` }); continue; }
+    if (d.status !== "pending" && !isUnresolvedJudgment(d)) { keep(`decision is ${d.status}, not pending`); continue; }
     if (typeof item.answer !== "string" || !Array.isArray(d.options) || !d.options.includes(item.answer)) {
-      unresolved.push({ ...base, reason: item.answer == null ? "no option chosen" : `'${item.answer}' is not one of the options` });
+      keep(item.answer == null ? "no option chosen" : `'${item.answer}' is not one of the options`);
       continue;
     }
     if (isUnresolvedJudgment({ cause: d.cause, answer: item.answer })) {
-      unresolved.push({ ...base, reason: "a judgment decision cannot be resolved by the proceed-degraded answer" });
+      keep("a judgment decision cannot be resolved by the proceed-degraded answer");
       continue;
     }
     Object.assign(d, {
@@ -1388,7 +1408,7 @@ function applyFeedback(runDir, items) {
     });
     answered.push(d.id);
   }
-  if (answered.length) saveDecisions(runDir, decisions);
+  saveDecisions(runDir, decisions);
   syncGateAnsweredEvents(runDir, decisions);
   releaseAnsweredBlocks(runDir, decisions);
   return { answered, unresolved, feedback, pending: decisions.filter((d) => d.status === "pending" || isUnresolvedJudgment(d)).map((d) => d.id) };
