@@ -6,7 +6,7 @@
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { git, gitOk, resolveGit, testHooksEnabled } from "./gitsafe.mjs";
 import {
@@ -24,7 +24,6 @@ import {
 import { buildChildEnv, buildChildSettings } from "./profile.mjs";
 
 const sha256 = (b) => createHash("sha256").update(b).digest("hex");
-const IDENTITY = Object.freeze({ name: "detent implement", email: "implement@detent.invalid" });
 const BASH_KEYS = new Set(["command", "description", "timeout"]);
 const LOG_TAIL = 8 * 1024;
 const RECHECK_TEXT_CAP = 64 * 1024;
@@ -127,6 +126,17 @@ export function parseImplementTranscript(stdout) {
   return { bash, problems, result };
 }
 
+// Claude runs a Bash tool use as `... && eval '<command>' [< /dev/null] && pwd -P >| <file>`, with each `'` in the command as `'"'"'`.
+const EVAL_WRAP = /&& eval '((?:[^']|'"'"')*)'(?: < \/dev\/null)? && pwd -P >\| [^\s']+$/;
+
+// A -c string in claude's shape must carry exactly the command; any other shape falls back to a word-boundary match.
+function matchesCommand(cmd, command) {
+  if (!command) return false;
+  if (!cmd.includes("&& eval '")) return containsCommand(cmd, command);
+  const m = EVAL_WRAP.exec(cmd);
+  return m !== null && m[1].replaceAll(`'"'"'`, "'") === command;
+}
+
 // A verbatim match that does not start or end in the middle of a word, so `ls` is not found inside `else`.
 function containsCommand(cmd, command) {
   if (!command) return false;
@@ -142,10 +152,18 @@ function containsCommand(cmd, command) {
 export function checkShimCalls({ callLog, bash }) {
   const problems = [];
   const calls = [];
+  const setup = [];
   for (const raw of String(callLog).split("\n")) {
     if (!raw.trim()) continue;
     let o;
     try { o = JSON.parse(raw); } catch { problems.push(`bad_log_line: ${raw.slice(0, 80)}`); continue; }
+    if (o !== null && typeof o === "object" && !Array.isArray(o) && o.ev === "setup") {
+      if (o.kind !== "env" && o.kind !== "snapshot") problems.push(`bad_setup: kind ${String(o.kind).slice(0, 40)}`);
+      else if (calls.length) problems.push(`setup_after_call: ${o.kind}`);
+      else if (setup.includes(o.kind)) problems.push(`setup_duplicate: ${o.kind}`);
+      else setup.push(o.kind);
+      continue;
+    }
     if (o === null || typeof o !== "object" || Array.isArray(o) || o.ev !== "call" || typeof o.cmd !== "string" || typeof o.cmd_sha256 !== "string") {
       problems.push(`bad_call_shape: ${raw.slice(0, 80)}`);
       continue;
@@ -155,10 +173,10 @@ export function checkShimCalls({ callLog, bash }) {
   }
   if (calls.length !== bash.length) problems.push(`count_mismatch: the shim logged ${calls.length} call(s) for ${bash.length} Bash tool use(s)`);
   calls.slice(0, bash.length).forEach((c, i) => {
-    if (!containsCommand(c.cmd, bash[i].command)) problems.push(`command_not_in_cmd: log line ${i + 1} does not contain the command of tool use ${bash[i].id}`);
+    if (!matchesCommand(c.cmd, bash[i].command)) problems.push(`command_not_in_cmd: log line ${i + 1} does not contain the command of tool use ${bash[i].id}`);
     if (sha256(c.cmd) !== c.cmd_sha256) problems.push(`hash_mismatch: log line ${i + 1}`);
   });
-  return { problems, calls };
+  return { problems, calls, setup };
 }
 
 export function checkSentinel(path) {
@@ -176,6 +194,37 @@ function refOid(repo, ref) {
   if (r.status !== 0) return null;
   const oid = r.stdout.toString().trim();
   return OID.test(oid) ? oid : null;
+}
+
+// The user's own git identity, read on the host: the source repo's config, then ~/.gitconfig and the XDG file.
+// gitsafe turns the global config off, so those files are read explicitly and only when HOME is set.
+function configValue(repo, key) {
+  const local = git(["config", "--local", "--get", key], { repo });
+  if (local.status === 0) return local.stdout.toString("utf8").replace(/\n$/, "");
+  if (local.status !== 1) throw new Error(`git config --local ${key} exited ${local.status}: ${local.stderr.toString("utf8").trim()}`);
+  const home = process.env.HOME;
+  if (!home || !isAbsolute(home)) return null;
+  const xdg = process.env.XDG_CONFIG_HOME && isAbsolute(process.env.XDG_CONFIG_HOME) ? process.env.XDG_CONFIG_HOME : join(home, ".config");
+  for (const file of [join(home, ".gitconfig"), join(xdg, "git", "config")]) {
+    if (!existsSync(file)) continue;
+    const g = git(["config", "--file", file, "--includes", "--get", key], { repo });
+    if (g.status === 0) return g.stdout.toString("utf8").replace(/\n$/, "");
+    if (g.status !== 1) throw new Error(`git config --file ${file} ${key} exited ${g.status}: ${g.stderr.toString("utf8").trim()}`);
+  }
+  return null;
+}
+
+function readHostIdentity(repo) {
+  const out = { missing: [], invalid: [], identity: null };
+  const vals = {};
+  for (const key of ["user.name", "user.email"]) {
+    const v = (configValue(repo, key) ?? "").trim();
+    if (!v) out.missing.push(key);
+    else if (/[<>\r\n\0]/.test(v)) out.invalid.push(key);
+    else vals[key] = v;
+  }
+  if (!out.missing.length && !out.invalid.length) out.identity = { name: vals["user.name"], email: vals["user.email"] };
+  return out;
 }
 
 function safeRelPath(p) {
@@ -291,6 +340,12 @@ export async function runImplementStep(H) {
   const expectOld = refOid(repo, srcDetent);
   const sourceRef = expectOld ? srcDetent : `refs/heads/sdlc/${runId}`;
   if (!expectOld && !refOid(repo, sourceRef)) return fail("source_ref_missing", "the run's sdlc branch is gone: recreate it or start a new run", sourceRef);
+  const idr = readHostIdentity(repo);
+  if (idr.missing.length) {
+    return fail("git_identity_missing", `set ${idr.missing.map((k) => `git config ${k} <value>`).join(" and ")} (in the repo or globally), then re-run: ${rerun}`, `no ${idr.missing.join(" or ")} in the repo's git config or the global one`);
+  }
+  if (idr.invalid.length) return fail("git_identity_invalid", `fix ${idr.invalid.join(" and ")} in your git config, then re-run: ${rerun}`, `${idr.invalid.join(", ")} holds a character git does not accept in an author line`);
+  const identity = idr.identity;
 
   const stepRoot = join(H.sroot, "steps", `impl-${H.stepN}`);
   mkdirSync(stepRoot, { recursive: true, mode: 0o700 });
@@ -314,7 +369,7 @@ export async function runImplementStep(H) {
   try {
     claudeTmp = createClaudeTmp();
     ictx.claudeTmp = claudeTmp;
-    const { base_sha: base, branch } = makeWorkClone({ repo, sourceRef, dest: ictx.clone, identity: IDENTITY });
+    const { base_sha: base, branch } = makeWorkClone({ repo, sourceRef, dest: ictx.clone, identity });
     const bundleBranch = `refs/heads/${branch}`;
     const exportBox = deps.createBox({ parent: boxParent });
 
@@ -395,7 +450,7 @@ export async function runImplementStep(H) {
     if (st === "error_max_turns") return fail("child_max_turns", "the implement child ran out of turns and nothing was imported; inspect drive-last.json");
     if (T.result.is_error === true || String(st || "").startsWith("error")) return fail("child_error", "read drive-last.json, fix, then re-run", `subtype ${st}`);
 
-    return await bundleAndVerify({ H, ictx, boxParent, exportBox, base, bundleBranch, expectOld, verifyCmd, run, rerun, fail });
+    return await bundleAndVerify({ H, ictx, boxParent, exportBox, base, bundleBranch, expectOld, verifyCmd, run, rerun, fail, identity });
   } finally {
     if (shimUp) uninstallShim(ictx.shimDir);
     H.forceRemove(stepDir);
@@ -403,7 +458,7 @@ export async function runImplementStep(H) {
   }
 }
 
-async function bundleAndVerify({ H, ictx, boxParent, exportBox, base, bundleBranch, expectOld, verifyCmd, run, rerun, fail }) {
+async function bundleAndVerify({ H, ictx, boxParent, exportBox, base, bundleBranch, expectOld, verifyCmd, run, rerun, fail, identity }) {
   const { E, ctx, deps } = H;
   const { runId, runDir, repo } = ctx;
   const newBox = () => deps.createBox({ parent: boxParent });
@@ -421,7 +476,7 @@ async function bundleAndVerify({ H, ictx, boxParent, exportBox, base, bundleBran
 
   let verified;
   try {
-    verified = verifyBundle({ bundlePath, repo, base, branch: bundleBranch, identity: IDENTITY, scratch: join(ictx.stepDir, "scratch"), step: `s${H.stepN}` });
+    verified = verifyBundle({ bundlePath, repo, base, branch: bundleBranch, identity, scratch: join(ictx.stepDir, "scratch"), step: `s${H.stepN}` });
   } catch (e) {
     if (e instanceof BundleReject) return fail("bundle_rejected", "the child's bundle failed verification and nothing was imported", `${e.code}: ${JSON.stringify(e.detail)}`, { code: e.code });
     throw e;

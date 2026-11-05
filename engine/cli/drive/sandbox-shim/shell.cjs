@@ -38,7 +38,37 @@ function sandboxed() {
   }
 }
 
+// Measured on claude 2.1.x: before any tool call it runs `-c env` and `-c -l <snapshot script>` through the shell.
+const SNAPSHOT_CREATE = 'echo "# Snapshot file" >| "$SNAPSHOT_FILE"';
+
+function setupKind() {
+  if (argv.length === 2 && argv[0] === "-c" && argv[1] === "env") return "env";
+  if (argv.length === 3 && argv[0] === "-c" && argv[1] === "-l" && argv[2].startsWith("SNAPSHOT_FILE=") && argv[2].includes(SNAPSHOT_CREATE)) return "snapshot";
+  return null;
+}
+
+// A setup call is accepted once per kind and only before the first tool call, so a command cannot borrow its shape.
+function logSetup(kind) {
+  let prior;
+  let fd;
+  try {
+    prior = fs.readFileSync(sh.callLog, "utf8");
+    fd = fs.openSync(sh.callLog, "a");
+  } catch (e) { return refuse(`cannot read and append to the call log ${sh.callLog}: ${e.code || e.message}`); }
+  for (const raw of prior.split("\n")) {
+    if (!raw.trim()) continue;
+    let o;
+    try { o = JSON.parse(raw); } catch { return refuse("the call log holds an unreadable line"); }
+    if (o && o.ev === "call") return refuse(`a ${kind} setup call after a tool call`);
+    if (o && o.ev === "setup" && o.kind === kind) return refuse(`a second ${kind} setup call`);
+  }
+  fs.writeSync(fd, `${JSON.stringify({ ev: "setup", kind, ts: Date.now() })}\n`);
+  fs.closeSync(fd);
+}
+
 function main() {
+  const kind = setupKind();
+  if (kind) { logSetup(kind); return runReal(); }
   if (!sandboxed()) return runReal();
   const ci = argv.indexOf("-c");
   if (ci < 0 || typeof argv[ci + 1] !== "string") return refuse("the shim shell only runs `-c <command>`");
