@@ -342,11 +342,11 @@ export function buildGatePage(run, gate, model) {
     }).join("\n");
     return `<div id="decision-${esc(d.id)}" data-plan-question="${esc(d.id)}">
 <p class="q-label">${inl(d.question || "")}</p>
-${d.context ? `<p class="small">Context: ${esc(d.context)}</p>` : ""}
+${d.context && !isIntent ? `<p class="small">Context: ${esc(d.context)}</p>` : ""}
 <div class="options">
 ${cards}
 </div>
-<p class="small">${esc(d.id)}${isIntent ? "" : " · recommended option: no recommendation given"}</p>
+${isIntent ? "" : `<p class="small">${esc(d.id)} · recommended option: no recommendation given</p>`}
 </div>`;
   }).join("\n");
 
