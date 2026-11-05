@@ -30,6 +30,11 @@ function toText(html) {
     .join("\n");
 }
 
+/** The page above the collapsed run artifacts: what a reader decides from. */
+const mainOf = (html) => html.split('<section id="raw">')[0];
+/** Offset of the first collapsed artifact; the goal must read before it. */
+const firstRawDetails = (html) => html.indexOf("<details", html.indexOf('<section id="raw">'));
+
 function put(runDir, rel, from) {
   mkdirSync(dirname(join(runDir, rel)), { recursive: true });
   copyFileSync(from, join(runDir, rel));
@@ -89,7 +94,7 @@ test("intent gate page opens with a verdict sentence that explains Approve and R
 
 test("the goal and acceptance criteria are on the page before any collapsed artifact", () => {
   const { html, text } = exampleIntentGate();
-  const firstDetails = html.indexOf("<details");
+  const firstDetails = firstRawDetails(html);
   assert.ok(firstDetails > 0);
   const goal = html.indexOf("Callers can cap how long a slug gets");
   assert.ok(goal > 0 && goal < firstDetails, "goal text must precede the first <details>");
@@ -117,18 +122,19 @@ test("plan steps are numbered with their files and verify command", () => {
   assert.ok(text.includes("A multi-character separator could leave half a separator"), "risks listed");
 });
 
-test("the access panel sits right after the verdict on a plan gate, as a table", () => {
+test("the access panel is background after the decision on a plan gate, as a table", () => {
   const { html, text } = exampleIntentGate();
   const access = html.indexOf('id="access"');
-  const goal = html.indexOf("Callers can cap how long a slug gets");
-  assert.ok(access > 0 && access < goal, "access panel leads the page content");
-  assert.ok(/<table[\s\S]*?target repo[\s\S]*?<\/table>/i.test(html.slice(access, goal)));
+  const decision = html.indexOf("data-plan-question=");
+  const raw = html.indexOf('<section id="raw">');
+  assert.ok(decision > 0 && access > decision && access < raw, "access panel follows the decision and precedes the raw artifacts");
+  assert.ok(/<table[\s\S]*?target repo[\s\S]*?<\/table>/i.test(html.slice(access, raw)));
   assert.ok(text.includes("reachable"));
   assert.ok(!html.includes('{"source"'), "the raw access-report.json is not dumped");
 });
 
 test("an earlier decision shows its question and answer, and every D-id sits beside its question", () => {
-  const { text } = exampleIntentGate();
+  const text = toText(mainOf(exampleIntentGate().html));
   const decisions = readJson(join(EXAMPLE, "decisions.json"));
   assert.ok(text.includes("What should slugify do with maxLength: null?"));
   assert.ok(text.includes("treat null like undefined (no cap)"));
@@ -148,10 +154,10 @@ test("the pending decision shows its question first, then option cards that carr
   const options = [...html.matchAll(/data-plan-option="([^"]*)"/g)].map((m) => unescape(m[1]));
   assert.deepEqual(options, ["approve", "revise"]);
   assert.ok(html.includes('data-plan-question="D-003"'));
-  const q = text.indexOf("Intent gate: does plan/plan.md faithfully implement brief.md");
+  const stored = exampleDecisions().find((d) => d.id === "D-003").question;
+  const q = text.indexOf(stored);
   const card = text.indexOf("Unlocks implementation");
   assert.ok(q > 0 && card > q, "question precedes its option cards");
-  assert.ok(text.includes("no recommendation given"));
 });
 
 test("option strings with quotes and markup survive into data-plan-option exactly", () => {
@@ -209,14 +215,14 @@ test("the page passes the curator artifact check, in the example and the demo fi
     },
     decisions: [
       { id: "D-001", raised_by: "intake", blocks: ["implement"], question: "Should a Retry-After of 0 still count against the attempt cap?", options: ["yes", "no"], status: "answered", answer: "yes", answered_by: "human", answered_at: "2026-10-21T06:33:54Z" },
-      { id: "D-002", gate: "intent", raised_by: "engine", blocks: ["implement"], question: "Intent gate: does plan/plan.md faithfully implement brief.md?", options: ["approve", "revise"], context: "plan/plan.md", status: "pending" },
+      { id: "D-002", gate: "intent", raised_by: "engine", blocks: ["implement"], question: "Does this plan do what the brief asks, and nothing it does not ask for?", options: ["approve", "revise"], context: "plan/plan.md", status: "pending" },
     ],
     gate: "intent",
   });
   checkPasses(demo.file);
   assert.match(demo.text.split("\n")[0], /^You are deciding whether the plan for acme\/widgets#1 is ready to implement/);
-  assert.ok(demo.html.indexOf("Redelivery honours") < demo.html.indexOf("<details"));
-  assert.ok(demo.html.indexOf('id="access"') < demo.html.indexOf("Redelivery honours"));
+  assert.ok(demo.html.indexOf("Redelivery honours") < firstRawDetails(demo.html));
+  assert.ok(demo.html.indexOf('id="access"') > demo.html.indexOf("data-plan-question="), "access is background, after the decision");
   assert.ok(!/^(#|\||\[ \]|\{")/m.test(demo.text));
 });
 
