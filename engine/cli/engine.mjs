@@ -1205,6 +1205,9 @@ function pendingFor(decisions, decision) {
     (d.id === decision.id || (Array.isArray(d.blocks) && d.blocks.some((b) => blocks.has(b)))));
 }
 
+// Bump when renderGateArtifact's markup changes, so existing pages re-render.
+const GATE_TEMPLATE_VERSION = 1;
+
 function humanNotesHtml(d) {
   if (!Array.isArray(d.human_notes) || d.human_notes.length === 0) return "";
   const items = d.human_notes.map((n) =>
@@ -1240,7 +1243,7 @@ ${options}
 </div>
 </section>`;
   }).join("\n");
-  const hash = createHash("sha256").update(JSON.stringify({ runId, name: gate.name, stage: gate.stage || null,
+  const hash = createHash("sha256").update(JSON.stringify({ tpl: GATE_TEMPLATE_VERSION, runId, name: gate.name, stage: gate.stage || null,
     decisions: gate.decisions, noteHtml: gate.noteHtml || "", docHtml })).digest("hex");
   const prior = existsSync(file) ? readFileSync(file, "utf8") : null;
   if (prior !== null && prior.includes(`<meta name="detent-gate-hash" content="${hash}">`)) return file;
@@ -1412,10 +1415,13 @@ function drainCuratorFor(runId, runDir) {
   return { items, ...(stampErrors.length ? { stampErrors } : {}) };
 }
 
-function recordHumanNote(d, item) {
+// `seen` scopes the dedupe to one drain: the same note left later is a new note.
+function recordHumanNote(d, item, seen) {
   const entry = { note: item.note ?? null, answer_if_any: item.answer ?? null };
   const notes = d.human_notes || (d.human_notes = []);
-  if (notes.some((n) => n.note === entry.note && n.answer_if_any === entry.answer_if_any)) return;
+  const key = JSON.stringify([d.id, entry.note, entry.answer_if_any]);
+  if (seen.has(key)) return;
+  seen.add(key);
   notes.push({ ...entry, at: new Date().toISOString() });
 }
 
@@ -1423,6 +1429,7 @@ function applyFeedback(runDir, items) {
   const decisions = loadDecisions(runDir);
   const answered = [];
   const unresolved = [];
+  const seenNotes = new Set();
   let feedback = 0;
   for (const item of items) {
     if (!item || typeof item !== "object") throw new Error(`feedback item is not an object: ${JSON.stringify(item)}`);
@@ -1434,7 +1441,7 @@ function applyFeedback(runDir, items) {
     const base = { id: item.question, answer: item.answer ?? null, ...(item.note ? { note: item.note } : {}) };
     // The curator drain empties its queue, so an unresolved item survives only if it is recorded here.
     const keep = (reason, record) => {
-      if (record && (item.note || item.answer != null)) recordHumanNote(d, item);
+      if (record && (item.note || item.answer != null)) recordHumanNote(d, item, seenNotes);
       unresolved.push({ ...base, reason, ...(record ? { recorded: true } : {}) });
     };
     if (!d) { unresolved.push({ ...base, reason: "no such decision" }); continue; }
