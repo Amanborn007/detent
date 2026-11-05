@@ -107,11 +107,11 @@ test("a plan step that depends on an open decision says it waits", () => {
   assert.ok(mainText.includes("Waits on D-001 (open, below)"), mainText);
 });
 
-test("the intent gate shows plan.md's Intent check as coverage, right before the decision", () => {
+test("the intent gate shows plan.md's Intent check as coverage, in the background after the decision", () => {
   const { mainHtml, mainText } = example();
   const h = mainText.indexOf("Does the plan cover the brief?");
-  const decide = mainText.indexOf("What you are deciding");
-  assert.ok(h > 0 && h < decide, "coverage heading precedes the decision");
+  const decide = mainText.indexOf(NEW_QUESTION);
+  assert.ok(decide > 0 && h > decide, "coverage heading follows the decision");
   const rows = [...mainHtml.matchAll(/<tr><td>(.*?)<\/td><td>(.*?)<\/td><td>(.*?)<\/td><\/tr>/g)].map((m) => m.slice(1).map((c) => unescape(c.replace(/<[^>]+>/g, ""))));
   const cover = rows.filter((r) => /^(covered|not checked|partial|missing)/i.test(r[2]));
   assert.equal(cover.length, 7, JSON.stringify(rows));
@@ -184,7 +184,7 @@ test("a fully reachable access report is one sentence with the table collapsed",
   assert.match(section, /<details>\s*<summary[^>]*>[^<]*<\/summary>\s*<table/);
 });
 
-test("a blocked source keeps the access table open and ahead of the goal", () => {
+test("a blocked source keeps the access table open and ahead of the background plan", () => {
   const { html } = openGate({
     ticket: "octo/repo#24",
     files: {
@@ -200,7 +200,7 @@ test("a blocked source keeps the access table open and ahead of the goal", () =>
   const section = html.slice(start, html.indexOf("</section>", start));
   assert.ok(!section.includes("<details"), "no collapse when something is blocked");
   assert.ok(section.includes("<table") && section.includes("vpn down"));
-  assert.ok(start < html.indexOf("GOALTEXT"));
+  assert.ok(start > html.indexOf("data-plan-question=") && start < html.indexOf('id="plan"'));
 });
 
 test("run artifacts are all collapsed, and option cards keep label and consequence apart", () => {

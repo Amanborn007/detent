@@ -250,6 +250,7 @@ export function buildGatePage(run, gate, model) {
   }
 
   let access = "";
+  let accessBlocked = false;
   if (atResearch) {
     const raw = read("access-report.json");
     if (raw === null) {
@@ -271,6 +272,7 @@ export function buildGatePage(run, gate, model) {
         }).join("\n");
         const bad = rows.filter((r) => r.status !== "reachable").length;
         const table = `<table>\n<thead><tr><th>Source</th><th>Status</th><th>Criticality</th><th>Needed for</th><th>Detail</th></tr></thead>\n<tbody>\n${trs}\n</tbody>\n</table>`;
+        accessBlocked = bad > 0;
         access = bad === 0
           ? `<p>All ${rows.length} sources were reachable, so nothing blocks this decision.</p>\n<details><summary>Source table</summary>\n${table}\n</details>`
           : `${table}\n<p>${bad} of ${rows.length} sources were not fully reachable; conclusions that rest on them carry degraded confidence.</p>`;
@@ -414,11 +416,12 @@ ${pending}
 <section id="background">
 <h2>Background</h2>
 ${gate.noteHtml || ""}
+${accessBlocked ? accessSection : ""}
 ${goal ? `<section id="goal">\n${goal}\n</section>` : ""}
 ${planHtml ? `<section id="plan">\n${planHtml}\n</section>` : ""}
 ${earlierHtml ? `<section id="earlier">\n${earlierHtml}\n</section>` : ""}
 ${coverHtml ? `<section id="cover">\n${coverHtml}\n</section>` : ""}
-${accessSection}
+${accessBlocked ? "" : accessSection}
 </section>
 ${rawHtml ? `<section id="raw">\n<h2>Run artifacts</h2>\n<p class="small">Everything above is drawn from these files, as written.</p>\n${rawHtml}\n</section>` : ""}
 <footer>run ${esc(runId)} · gate ${esc(gate.name)} · stage ${esc(stage)}</footer>
