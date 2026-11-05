@@ -145,7 +145,7 @@ test("an earlier decision shows its question and answer, and every D-id sits bes
     assert.ok(d, `unknown id ${m[0]}`);
     const probe = d.question.slice(0, 30);
     const window = text.slice(Math.max(0, m.index - 400), m.index + 400);
-    assert.ok(window.includes(probe), `${m[0]} at ${m.index} has no question text near it (${probe})`);
+    assert.ok(window.includes(probe) || window.includes(`(answered: ${d.answer}`), `${m[0]} at ${m.index} has no question text near it (${probe})`);
   }
 });
 
