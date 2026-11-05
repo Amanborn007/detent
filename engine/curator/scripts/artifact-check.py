@@ -848,7 +848,11 @@ def check_file(path):
     markup = blank_spans(text, [(m.start(1), m.end(1)) for m in STYLE_BLOCK.finditer(text)])
 
     global PAGE_HATCH_KEYS
-    contract_problems, PAGE_HATCH_KEYS = run_contract(path)
+    # The contract only applies to a page with a decision, so other pages need no node.
+    if QUESTION.search(markup):
+        contract_problems, PAGE_HATCH_KEYS = run_contract(path)
+    else:
+        contract_problems, PAGE_HATCH_KEYS = [], frozenset()
     problems = check_required(markup, text, active) + contract_problems
     for check in BESPOKE:
         if BADGE_CHECKS.get(check) and BADGE_CHECKS[check] not in active:

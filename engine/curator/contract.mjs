@@ -27,6 +27,11 @@ const words = (s) => (String(s).match(/\S+/g) || []).length;
 const squash = (s) => String(s).replace(/\s+/g, ' ').trim();
 const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '');
 
+// Ticket-style IDs only (DUNE-35, D-001); UTF-8 and SHA-256 are names a reader knows.
+const ID_TOKEN = /\b(?:[A-Z]{2,10}-\d+|D-\d+)\b/g;
+const NOT_AN_ID = new Set(['UTF-8', 'UTF-16', 'UTF-32', 'SHA-1', 'SHA-256', 'SHA-512', 'ISO-8601', 'TLS-1']);
+const idsIn = (text) => (String(text).match(ID_TOKEN) || []).filter((t) => !NOT_AN_ID.has(t));
+
 // A path, URL or bare ID carries no context for someone who has not opened it.
 const POINTER_TOKEN = /^(?:[a-z][a-z0-9+.-]*:\/\/\S+|[~.]?\/?[\w@.-]+(?:\/[\w@.%-]+)+\/?(?::\d+)?|[\w-]+\.(?:mjs|js|ts|tsx|py|go|md|json|ya?ml|html|java|sh)(?::\d+)?|[A-Za-z]{1,10}-\d+)$/;
 export const isPointer = (text) => {
@@ -139,21 +144,22 @@ function checkQuestion(q, report) {
 
   for (const o of q.options) {
     const where = o.line || line;
-    if (!isHatch(o.key) && !isHatch(o.label || '')) {
-      if (words(o.consequence || '') < 4) E('C5', where, `option "${o.key}" needs a consequence of at least 4 words`);
-    }
+    if (isHatchOption(o)) continue;
+    if (words(o.consequence || '') < 4) E('C5', where, `option "${o.key}" needs a consequence of at least 4 words`);
     if (!o.label || !o.label.trim()) E('C6', where, `option "${o.key}" has no label; add a <strong> that reads as words`);
     else if (norm(o.label) === norm(o.key)) E('C6', where, `option "${o.key}" has a label identical to its key; write the label for a reader`);
   }
 
   const ctx = [['why-now', q.whyNow], ['context', q.context]];
-  for (const o of q.options) ctx.push([`consequence of "${o.key}"`, o.consequence]);
+  for (const o of q.options) if (!isHatchOption(o)) ctx.push([`consequence of "${o.key}"`, o.consequence]);
   for (const [name, text] of ctx) {
     if (text === null || text === undefined || text === '') continue;
     const body = squash(String(text).replace(/^\s*why now\s*:/i, ''));
     if (isPointer(body) || words(body) < 3) E('C7', line, `the ${name} is a bare pointer or fragment; write the excerpt itself in 3+ words`);
   }
 }
+
+const isHatchOption = (o) => isHatch(o.key) || isHatch(o.label || '');
 
 function emptyResult() { return { errors: [], warnings: [] }; }
 
@@ -225,14 +231,14 @@ export function checkPage(html, opts) {
   const covered = new Set();
   const covText = [...all.filter((n) => n.tag === 'abbr' && n.attrs.title).map(visible),
     ...all.filter((n) => has(n, 'data-plan-glossary')).map(visible)].join(' ');
-  for (const t of covText.match(/\b[A-Z]{1,4}-?\d{1,4}\b/g) || []) covered.add(t);
+  for (const t of idsIn(covText)) covered.add(t);
   const seen = new Set();
   (function scan(n, inLink) {
     for (const k of n.kids) {
       if (!isEl(k)) {
         if (inLink) continue;
-        for (const m of k.text.matchAll(/\b[A-Z]{1,4}-?\d{1,4}\b/g)) {
-          if (!covered.has(m[0]) && !seen.has(m[0])) {
+        for (const m of k.text.matchAll(ID_TOKEN)) {
+          if (!NOT_AN_ID.has(m[0]) && !covered.has(m[0]) && !seen.has(m[0])) {
             seen.add(m[0]);
             W('C8', lineOf(src, k.start + m.index), `"${m[0]}" is an ID with no explanation; wrap it in <abbr title="..."> or add a [data-plan-glossary] entry`);
           }

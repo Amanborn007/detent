@@ -215,7 +215,9 @@
       var p = document.createElement('p');
       p.setAttribute('data-curator-no-rec', '');
       p.textContent = 'No recommendation: ' + none;
-      qEl.insertBefore(p, qEl.querySelector('[data-plan-option]'));
+      var firstOpt = qEl.querySelector('[data-plan-option]');
+      if (firstOpt) firstOpt.parentNode.insertBefore(p, firstOpt);
+      else qEl.appendChild(p);
     }
   }
 
@@ -252,9 +254,6 @@
       // badge text (not colour alone) says both halves are true at once.
       '[data-plan-question][' + ANSWERED + ']:has([' + CHOSEN + '])::before{' +
       'content:"Answered, new answer queued";background:rgba(217,119,6,.16);color:#b45309;}' +
-      // Doubled attribute: the answered rules above weigh the same and must lose to this one.
-      '[data-plan-question][' + SENT + '][' + SENT + ']::before{content:"Sent — awaiting agent";' +
-      'background:' + tint(14) + ';color:' + A + ';}' +
       '[' + ANSWERED_NOTE_TEXT + ']{font-style:italic;opacity:.75;}' +
       '@media (prefers-color-scheme: dark){' +
       '[data-plan-question]{border-color:rgba(122,169,255,.42);border-left-color:var(--accent,#7aa9ff);background:rgba(122,169,255,.07);}' +
@@ -265,6 +264,9 @@
       'background:rgba(148,152,160,.2);color:#c2c6cf;}' +
       '[data-plan-question][' + ANSWERED + ']:has([' + CHOSEN + '])::before{background:rgba(251,191,36,.2);color:#fbbf24;}' +
       '[data-plan-option]:hover{outline-color:var(--accent,#7aa9ff);}}' +
+      // After the dark block and doubled: the answered rules, light and dark, weigh the same.
+      '[data-plan-question][' + SENT + '][' + SENT + ']::before{content:"Sent — awaiting agent";' +
+      'background:' + tint(14) + ';color:' + A + ';}' +
       '[data-plan-option]{cursor:pointer;display:flex;flex-direction:column;gap:6px;padding:12px 14px;' +
       'border:1px solid ' + LINE + ';border-radius:10px;background:var(--paper,transparent);' +
       'transition:outline-color .1s, box-shadow .1s;}' +
@@ -284,12 +286,6 @@
       'padding:6px 8px;font:13px/1.4 -apple-system,system-ui,sans-serif;background:rgba(128,128,128,.06);color:inherit;}' +
       '[' + NOTE + ']:focus{outline:2px solid ' + A + ';outline-offset:0;}';
     (document.head || document.documentElement).appendChild(style);
-
-    Array.prototype.forEach.call(document.querySelectorAll('[data-plan-question]'), function (qEl, n) {
-      enhanceQuestion(qEl, n);
-      ensureNoteField(qEl);
-      renderAnswered(qEl);
-    });
 
     document.addEventListener('click', function (e) {
       if (e.altKey) return; // alt-click is annotation
@@ -319,6 +315,13 @@
       var qEl = t.closest('[data-plan-question]');
       if (!qEl) return;
       emitDecision(qEl, chosenAnswer(qEl));
+    });
+
+    // Last, so a malformed block cannot stop the listeners above from attaching.
+    Array.prototype.forEach.call(document.querySelectorAll('[data-plan-question]'), function (qEl, n) {
+      enhanceQuestion(qEl, n);
+      ensureNoteField(qEl);
+      renderAnswered(qEl);
     });
   }
 
