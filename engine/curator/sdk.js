@@ -87,7 +87,7 @@
       floatBtn.setAttribute('data-curator-ui', '');
       floatBtn.style.cssText =
         'position:fixed;z-index:2147483647;padding:4px 10px;font:600 12px -apple-system,system-ui,sans-serif;' +
-        'background:#2563c9;color:#fff;border:0;border-radius:6px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3);' +
+        'background:var(--accent,#2563c9);color:#fff;border:0;border-radius:6px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3);' +
         'left:' + Math.max(4, Math.min(window.innerWidth - 90, rect.left + rect.width / 2 - 40)) + 'px;' +
         'top:' + Math.max(4, rect.top - 32) + 'px;';
       floatBtn.addEventListener('mousedown', function (ev) { ev.preventDefault(); }); // keep selection
@@ -115,6 +115,7 @@
   var ANSWERED_NOTE = 'data-curator-answered-note';
   var ANSWERED_NOTE_TEXT = 'data-curator-answered-note-text'; // the rendered child, not the attribute carrier
   var ANSWERED_OPTION = 'data-curator-answered-option';
+  var SENT = 'data-curator-sent'; // the shell has delivered this decision to the agent
 
   // Attach an optional free-text note field under a decision block, unless the
   // author already supplied one (any [data-curator-note] element inside it).
@@ -182,16 +183,65 @@
     post(msg);
   }
 
+  function enhanceQuestion(qEl, n) {
+    qEl.setAttribute('role', 'radiogroup');
+    var head = qEl.querySelector('h2, h3, h4');
+    if (head) {
+      if (!head.id) head.id = 'curator-q-' + n;
+      qEl.setAttribute('aria-labelledby', head.id);
+    }
+    var rec = qEl.getAttribute('data-plan-recommended');
+    var reasonEl = qEl.querySelector('[data-plan-reason]');
+    Array.prototype.forEach.call(qEl.querySelectorAll('[data-plan-option]'), function (o) {
+      o.setAttribute('role', 'radio');
+      o.setAttribute('tabindex', '0');
+      o.setAttribute('aria-checked', 'false');
+      if (!rec || o.getAttribute('data-plan-option') !== rec) return;
+      var box = document.createElement('div');
+      box.setAttribute('data-curator-rec', '');
+      var tag = document.createElement('b');
+      tag.textContent = 'Recommended';
+      box.appendChild(tag);
+      if (reasonEl) {
+        var why = document.createElement('span');
+        why.textContent = (reasonEl.textContent || '').replace(/\s+/g, ' ').trim().replace(/^recommended\s*:\s*/i, '');
+        box.appendChild(why);
+        reasonEl.setAttribute('data-curator-moved', '');
+      }
+      o.insertBefore(box, o.firstChild);
+    });
+    var none = qEl.getAttribute('data-plan-no-recommendation');
+    if (none) {
+      var p = document.createElement('p');
+      p.setAttribute('data-curator-no-rec', '');
+      p.textContent = 'No recommendation: ' + none;
+      qEl.insertBefore(p, qEl.querySelector('[data-plan-option]'));
+    }
+  }
+
   function initDecisions() {
     var style = document.createElement('style');
+    var A = 'var(--accent,#2563c9)';
+    var LINE = 'var(--line,rgba(128,128,128,.4))';
+    var tint = function (pct) { return 'color-mix(in srgb,' + A + ' ' + pct + '%,transparent)'; };
     style.textContent =
+      // The brief is the first thing read, so it is larger than body text and has its own box.
+      '[data-plan-brief]{margin:0 0 24px;padding:18px 20px;border:1px solid ' + LINE + ';border-radius:12px;' +
+      'background:var(--chip,rgba(128,128,128,.07));font-size:1.06em;line-height:1.55;}' +
+      '[data-plan-brief] [data-brief]{margin:0 0 10px;}[data-plan-brief] [data-brief]:last-child{margin-bottom:0;}' +
+      '[data-plan-brief] [data-brief] b{display:block;font:700 11px/1.3 -apple-system,system-ui,sans-serif;' +
+      'letter-spacing:.08em;text-transform:uppercase;opacity:.68;}' +
+      '[data-plan-brief] [data-brief="ask"]{font-weight:600;}' +
       // A decision is the one thing on the page that needs an action, so it reads
-      // as a panel rather than as more prose.
-      '[data-plan-question]{position:relative;margin:22px 0;padding:16px 18px 14px;border-radius:10px;' +
-      'border:1px solid rgba(37,99,201,.34);border-left:4px solid #2563c9;background:rgba(37,99,201,.055);}' +
-      '[data-plan-question]::before{content:"Decision needed";display:inline-block;margin-bottom:10px;' +
-      'padding:3px 9px;border-radius:999px;background:rgba(37,99,201,.14);color:#2563c9;' +
+      // as a panel rather than as more prose. Options sit side by side as cards.
+      '[data-plan-question]{position:relative;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));' +
+      'gap:12px;margin:22px 0;padding:16px 18px 14px;border-radius:10px;' +
+      'border:1px solid ' + tint(34) + ';border-left:4px solid var(--accent,#2563c9);background:' + tint(6) + ';}' +
+      '[data-plan-question]>*{margin:0;}[data-plan-question]>:not([data-plan-option]){grid-column:1/-1;}' +
+      '[data-plan-question]::before{content:"Decision needed";grid-column:1/-1;justify-self:start;' +
+      'padding:3px 9px;border-radius:999px;background:' + tint(14) + ';color:' + A + ';' +
       'font:700 10px/1.35 -apple-system,system-ui,sans-serif;letter-spacing:.09em;text-transform:uppercase;}' +
+      '[data-plan-question][data-plan-required]::before{content:"Decision needed \\00b7  Required";}' +
       // Answered, nothing queued on top of it: the record is settled, so the
       // panel reads as settled rather than as still asking for a click.
       '[data-plan-question][' + ANSWERED + ']:not(:has([' + CHOSEN + '])){border-color:rgba(120,124,132,.32);' +
@@ -202,28 +252,41 @@
       // badge text (not colour alone) says both halves are true at once.
       '[data-plan-question][' + ANSWERED + ']:has([' + CHOSEN + '])::before{' +
       'content:"Answered, new answer queued";background:rgba(217,119,6,.16);color:#b45309;}' +
-      '[' + ANSWERED_NOTE_TEXT + ']{margin:0 0 10px;font-style:italic;opacity:.75;}' +
+      // Doubled attribute: the answered rules above weigh the same and must lose to this one.
+      '[data-plan-question][' + SENT + '][' + SENT + ']::before{content:"Sent — awaiting agent";' +
+      'background:' + tint(14) + ';color:' + A + ';}' +
+      '[' + ANSWERED_NOTE_TEXT + ']{font-style:italic;opacity:.75;}' +
       '@media (prefers-color-scheme: dark){' +
-      '[data-plan-question]{border-color:rgba(122,169,255,.42);border-left-color:#7aa9ff;background:rgba(122,169,255,.07);}' +
-      '[data-plan-question]::before{background:rgba(122,169,255,.16);color:#9dc0ff;}' +
+      '[data-plan-question]{border-color:rgba(122,169,255,.42);border-left-color:var(--accent,#7aa9ff);background:rgba(122,169,255,.07);}' +
+      '[data-plan-question]::before{background:rgba(122,169,255,.16);color:var(--accent,#9dc0ff);}' +
       '[data-plan-question][' + ANSWERED + ']:not(:has([' + CHOSEN + '])){border-color:rgba(148,152,160,.4);' +
       'border-left-color:#9298a2;background:rgba(148,152,160,.08);}' +
       '[data-plan-question][' + ANSWERED + ']:not(:has([' + CHOSEN + ']))::before{' +
       'background:rgba(148,152,160,.2);color:#c2c6cf;}' +
       '[data-plan-question][' + ANSWERED + ']:has([' + CHOSEN + '])::before{background:rgba(251,191,36,.2);color:#fbbf24;}' +
-      '[data-plan-option]:hover{outline-color:#7aa9ff;}}' +
-      '[data-plan-option]{cursor:pointer;border-radius:6px;transition:outline-color .1s, box-shadow .1s;}' +
-      '[data-plan-option]:hover{outline:2px dashed #2563c9;outline-offset:2px;}' +
+      '[data-plan-option]:hover{outline-color:var(--accent,#7aa9ff);}}' +
+      '[data-plan-option]{cursor:pointer;display:flex;flex-direction:column;gap:6px;padding:12px 14px;' +
+      'border:1px solid ' + LINE + ';border-radius:10px;background:var(--paper,transparent);' +
+      'transition:outline-color .1s, box-shadow .1s;}' +
+      '[data-plan-option]>*{margin:0;}[data-plan-option] strong{font-size:1.05em;}' +
+      '[data-plan-then]{font-size:.9em;opacity:.75;}' +
+      '[data-plan-option]:hover{outline:2px solid var(--accent,#2563c9);outline-offset:2px;}' +
+      '[data-plan-option]:focus-visible{outline:3px solid var(--accent,#2563c9);outline-offset:2px;}' +
       '[' + CHOSEN + ']{outline:3px solid #2fa34f !important;outline-offset:2px;box-shadow:0 0 0 4px rgba(47,163,79,.18);}' +
       '[' + ANSWERED_OPTION + ']:not([' + CHOSEN + ']){outline:2px solid rgba(47,163,79,.55);outline-offset:2px;}' +
-      '[data-curator-note-field]{margin-top:12px;display:flex;flex-direction:column;gap:4px;}' +
+      '[data-curator-rec]{display:flex;flex-direction:column;gap:2px;padding:6px 8px;border-radius:6px;background:' + tint(10) + ';}' +
+      '[data-curator-rec] b{font:700 10px/1.35 -apple-system,system-ui,sans-serif;letter-spacing:.09em;' +
+      'text-transform:uppercase;color:' + A + ';}' +
+      '[data-curator-moved]{display:none;}' +
+      '[data-curator-note-field]{display:flex;flex-direction:column;gap:4px;}' +
       '[data-curator-note-label]{font:600 11px/1.3 -apple-system,system-ui,sans-serif;letter-spacing:.03em;text-transform:uppercase;opacity:.62;}' +
       '[' + NOTE + ']{width:100%;min-height:42px;resize:vertical;border:1px solid rgba(128,128,128,.45);border-radius:6px;' +
       'padding:6px 8px;font:13px/1.4 -apple-system,system-ui,sans-serif;background:rgba(128,128,128,.06);color:inherit;}' +
-      '[' + NOTE + ']:focus{outline:2px solid #2563c9;outline-offset:0;}';
+      '[' + NOTE + ']:focus{outline:2px solid ' + A + ';outline-offset:0;}';
     (document.head || document.documentElement).appendChild(style);
 
-    Array.prototype.forEach.call(document.querySelectorAll('[data-plan-question]'), function (qEl) {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-plan-question]'), function (qEl, n) {
+      enhanceQuestion(qEl, n);
       ensureNoteField(qEl);
       renderAnswered(qEl);
     });
@@ -235,8 +298,17 @@
       var qEl = el.closest('[data-plan-question]');
       if (!qEl) return;
       e.preventDefault();
-      var answer = el.getAttribute('data-plan-option') || textOf(el);
-      emitDecision(qEl, answer);
+      emitDecision(qEl, el.getAttribute('data-plan-option') || textOf(el));
+    });
+
+    // Enter or Space on a focused card chooses it, same as a click.
+    document.addEventListener('keydown', function (e) {
+      if (!(e.key === 'Enter' || e.key === ' ')) return;
+      var el = e.target instanceof Element && e.target.hasAttribute('data-plan-option') ? e.target : null;
+      var qEl = el && el.closest('[data-plan-question]');
+      if (!qEl) return;
+      e.preventDefault();
+      emitDecision(qEl, el.getAttribute('data-plan-option') || textOf(el));
     });
 
     // Typing in a note keeps the queued decision in sync, with or without a
@@ -272,7 +344,16 @@
       });
       if (target) target.setAttribute(CHOSEN, '');
     }
+    Array.prototype.forEach.call(qEl.querySelectorAll('[data-plan-option]'), function (o) {
+      o.setAttribute('aria-checked', o === target ? 'true' : 'false');
+    });
+    qEl.removeAttribute(SENT); // a new answer or a retraction is not sent yet
     updateNoteHint(qEl);
+  }
+
+  function markSent(question) {
+    var qEl = document.querySelector('[data-plan-question="' + cssEscape(question) + '"]');
+    if (qEl) qEl.setAttribute(SENT, '');
   }
 
   // Keeps the artifact's textarea in step when the note is edited from the queue,
@@ -294,6 +375,8 @@
       // the box reads as queued and a later keystroke would resurrect it.
       setNote(d.question, '');
       markChosen(d.question, null);
+    } else if (d.action === 'decision-sent') {
+      markSent(d.question);
     } else if (d.action === 'note-set') setNote(d.question, d.note);
   });
 
