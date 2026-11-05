@@ -26,6 +26,7 @@
 //     connect attempt gets ECONNREFUSED. This simulates OS pid reuse: state
 //     still has some old pid that now belongs to an unrelated process, and
 //     must be treated as "down", not "unreachable".
+import "./daemon-env.mjs";
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, realpathSync, mkdirSync } from 'node:fs';
