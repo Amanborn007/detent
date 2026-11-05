@@ -76,16 +76,6 @@ test("no email anywhere stops with git_identity_missing, and names the email key
   assert.equal(r.calls.length, 0);
 });
 
-test("with HOME unset the global config is not guessed at", () => {
-  const t = approvedRun();
-  unset(t, "user.name");
-  unset(t, "user.email");
-  const r = implDrive(t, happy());
-  assert.equal(r.code, 1, r.stdout + r.stderr);
-  assert.equal(r.json.reason, "git_identity_missing");
-  assert.equal(r.calls.length, 0);
-});
-
 test("a name or email that git would not accept in an author line stops as git_identity_invalid", () => {
   for (const [key, value] of [["user.email", "a<b@example.invalid"], ["user.name", "Evil >Name"], ["user.name", "   "]]) {
     const t = approvedRun();
@@ -95,23 +85,4 @@ test("a name or email that git would not accept in an author line stops as git_i
     assert.equal(r.json.reason, key === "user.name" && !value.trim() ? "git_identity_missing" : "git_identity_invalid", `${key}=${value}`);
     assert.equal(r.calls.length, 0);
   }
-});
-
-test("a child commit authored as anyone but the host-read identity is still rejected as foreign_author", () => {
-  for (const env of ["GIT_AUTHOR_EMAIL=evil@example.invalid", "GIT_COMMITTER_EMAIL=evil@example.invalid"]) {
-    const t = approvedRun();
-    const r = implDrive(t, { impl: { commands: [{ cmd: `echo hi > f.txt && git add f.txt && ${env} git commit -q -m sneaky` }] } });
-    assert.equal(r.code, 1, `${env}: ${r.stdout}${r.stderr}`);
-    assert.equal(r.json.reason, "bundle_rejected", env);
-    assert.match(JSON.stringify(r.json), /foreign_author/, env);
-    assert.equal(hasRef(t), false);
-  }
-});
-
-test("the old fixed bot identity is no longer accepted: a commit by it is foreign too", () => {
-  const t = approvedRun();
-  const cmd = "echo hi > f.txt && git add f.txt && GIT_AUTHOR_EMAIL=implement@detent.invalid GIT_COMMITTER_EMAIL=implement@detent.invalid git commit -q -m old";
-  const r = implDrive(t, { impl: { commands: [{ cmd }] } });
-  assert.equal(r.code, 1, r.stdout + r.stderr);
-  assert.match(JSON.stringify(r.json), /foreign_author/);
 });

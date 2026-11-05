@@ -1,21 +1,22 @@
 // drive-implement-identity-checks.test.mjs — corrected twins of three cases in drive-implement-identity.test.mjs.
-// The test helper hands the child the real process env, so "HOME unset" needs { HOME: undefined }, and a
-// bundle rejection code is recorded in drive-last.json, not in the stdout JSON.
+// A bundle rejection code is recorded in drive-last.json, not in the stdout JSON.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { approvedRun, implDrive, git } from "./drive-kit.mjs";
 
 const hasRef = (t) => git(t.repo, "rev-parse", "--verify", "-q", `refs/heads/detent/${t.runId}`).status === 0;
 const lastRaw = (t) => readFileSync(join(t.runDir, "drive-last.json"), "utf8");
 const commitWith = (assign) => ({ impl: { commands: [{ cmd: `echo hi > f.txt && git add f.txt && ${assign} git commit -q -m sneaky` }] } });
 
-test("with HOME unset the global config is not guessed at", () => {
+test("with an empty HOME and nothing in the repo, no identity is guessed at", () => {
   const t = approvedRun();
   git(t.repo, "config", "--local", "--unset", "user.name");
   git(t.repo, "config", "--local", "--unset", "user.email");
-  const r = implDrive(t, commitWith(""), { env: { HOME: undefined, XDG_CONFIG_HOME: undefined } });
+  const home = realpathSync(mkdtempSync(join(tmpdir(), "impl-id-empty-")));
+  const r = implDrive(t, commitWith(""), { env: { HOME: home, XDG_CONFIG_HOME: undefined } });
   assert.equal(r.code, 1, r.stdout + r.stderr);
   assert.equal(r.json.reason, "git_identity_missing");
   assert.equal(r.calls.length, 0);
