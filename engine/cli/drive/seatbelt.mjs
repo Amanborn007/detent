@@ -2,8 +2,9 @@
 // ported from Claude Code 2.1.306's own macOS template, minus the mach
 // services that reach the keychain daemon and Launch Services.
 import { realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { posix } from "node:path";
-import { detectToolchainRoots, implementPathEntries } from "./implement-profile.mjs";
+import { detectToolchainRoots, implementDenyRead, implementPathEntries } from "./implement-profile.mjs";
 
 export const CLAUDE_BASE_VERSION = "2.1.306";
 
@@ -60,7 +61,7 @@ const DEVICE_IOCTL = ["/dev/null", "/dev/zero", "/dev/random", "/dev/urandom", "
 
 export function sbplString(p, what = "path") {
   if (typeof p !== "string" || !p.startsWith("/")) throw new Error(`${what} must be an absolute path: ${String(p)}`);
-  if (/["\\\n\r\0]/.test(p)) throw new Error(`${what} contains a character that is not allowed in a profile`);
+  if (/[\x00-\x1f\x7f"\\]/.test(p)) throw new Error(`${what} contains a character that is not allowed in a profile`);
   if (posix.normalize(p) !== p && p !== "/") throw new Error(`${what} is not normalized: ${p}`);
   return JSON.stringify(p);
 }
@@ -135,20 +136,21 @@ export function buildProbeProfile({ scratch, loopbackPort, denyRead = [], reallo
   return out.join("\n") + "\n";
 }
 
-const SHARED_TMP = ["/tmp/claude", "/private/tmp/claude"];
-
 function realOr(p) {
   try { return realpathSync(p); } catch { return p; }
 }
 
 const within = (p, root) => p === root || p.startsWith(root.endsWith("/") ? root : root + "/");
 
-// The host box profile: HOME and the shared claude tmps are denied wholesale, then only readOnly,
+// A setsid()/setpgid() child leaves the process group the run is killed through.
+const DENY_SESSION_SYSCALLS = "(deny syscall-unix (syscall-number SYS_setsid SYS_setpgid))";
+
+// The host box profile: HOME, the user temp dir and the claude tmps are denied wholesale, then only readOnly,
 // the detected toolchain roots, the xcode allows and the box itself are read again. The box is
 // the only write root; loopbackPort null leaves the network fully closed.
 export function buildSeatbeltProfile({
   scratch, home, readOnly = [], writable = [], denyRead = [], loopbackPort = null, toolchainRoots,
-  logTag = "detent-hostbox",
+  userTmp = realOr(tmpdir()), uid = process.getuid(), logTag = "detent-hostbox",
 }) {
   sbplString(scratch, "scratch");
   sbplString(home, "home");
@@ -159,14 +161,15 @@ export function buildSeatbeltProfile({
   const roots = toolchainRoots ?? detectToolchainRoots(home, { path: implementPathEntries(process.env.PATH) });
   for (const p of readOnly) sbplString(p, "readOnly");
   for (const p of roots) sbplString(p, "toolchain root");
-  const homes = [...new Set([home, realOr(home)])];
+  const tmpDeny = implementDenyRead({ platform: "darwin", home, sroot: home, userTmp, uid });
   const reallow = [...new Set([...readOnly, ...roots, scratch, XCODE_SELECT_LINK, XCODE_LICENSE_PLIST])];
-  return buildProbeProfile({
+  const profile = buildProbeProfile({
     scratch,
     loopbackPort,
     logTag,
-    denyRead: [...new Set([...defaultDenyRead(home), ...homes, ...SHARED_TMP, ...denyRead])],
+    denyRead: [...new Set([...defaultDenyRead(home), ...tmpDeny, ...denyRead])],
     reallowRead: reallow,
     denyWrite: readOnly.filter((p) => within(p, scratch)),
   });
+  return profile + DENY_SESSION_SYSCALLS + "\n";
 }
