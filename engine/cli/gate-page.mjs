@@ -13,6 +13,11 @@ const INTENT_EXPLAIN = {
   approve: "Unlocks implementation.",
   revise: "Sends the plan back to planning with your note.",
 };
+const INTENT_THEN = {
+  approve: "Then the implement stage runs the plan steps.",
+  revise: "Then the plan stage reruns with your note.",
+};
+const INTENT_NO_RECOMMENDATION = "the engine has no recommendation here, you are the check on whether the plan matches the brief";
 
 const EXTRA_CSS = `
   :root { color-scheme: light; }
@@ -32,7 +37,11 @@ const EXTRA_CSS = `
   .step-meta .k { font-family:var(--mono); font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
   .earlier { list-style:none; padding-left:0; }
   .earlier li { padding:.5rem 0; border-bottom:1px solid var(--rule); }
-  .q-label { font-weight:600; margin-bottom:.2rem; }
+  .brief { border-left:3px solid var(--accent); padding:.1rem 0 .1rem 1rem; margin:1rem 0 2rem; }
+  .brief p { margin:.35rem 0; }
+  .q-label { font-size:1.15rem; margin:.2rem 0; }
+  .o-then { color:var(--muted); }
+  .option strong { font-weight:600; }
   .options { display:grid; grid-template-columns:repeat(auto-fit,minmax(14rem,1fr)); gap:.7rem; margin:.8rem 0 .4rem; }
   .option { border:1px solid var(--rule); border-radius:6px; padding:.7rem 1rem; cursor:pointer; background:var(--paper-2); }
   .option:hover { border-color:var(--accent); }
@@ -224,16 +233,20 @@ export function buildGatePage(run, gate, model) {
   const isIntent = gate.name === "intent";
   const n = gate.decisions.length;
   let verdict;
-  let lede;
+  let ask;
+  let next;
   if (isIntent) {
     verdict = `You are deciding whether the plan for ${ticketLabel} is ready to implement.`;
-    lede = "Approve unlocks implementation; Revise sends the plan back with your note.";
+    ask = "Decide whether the plan is ready to implement. Approve unlocks implementation; Revise sends the plan back with your note.";
+    next = "If you approve, the implement stage runs the plan steps; if you revise, the plan stage reruns with your note.";
   } else if (stage === "ship") {
     verdict = `You are deciding whether ${ticketLabel} may be pushed as a draft pull request.`;
-    lede = "Your answers decide whether the engine will push the branch and open a draft pull request; nothing is pushed until every question here is answered.";
+    ask = "Answer every question below; your answers decide whether the engine will push the branch and open a draft pull request.";
+    next = "Nothing is pushed until every question here is answered, then the engine pushes the branch and opens a draft pull request.";
   } else {
     verdict = `You are answering ${n} open question${n === 1 ? "" : "s"} that block the ${esc(stage)} stage for ${ticketLabel}.`;
-    lede = `The ${stage} stage does not start until every question on this page is answered.`;
+    ask = `Answer the ${n === 1 ? "question" : `${n} questions`} below so the ${stage} stage can start.`;
+    next = `The ${stage} stage does not start until every question on this page is answered, then the run continues.`;
   }
 
   let access = "";
@@ -267,17 +280,23 @@ export function buildGatePage(run, gate, model) {
   const accessSection = access ? `<section id="access">\n<h2>Access and data completeness</h2>\n${access}\n</section>` : "";
 
   const intentCheck = isIntent && plan !== null ? sectionOf(plan, /^intent check$/i) : null;
-  let goal;
+  let goalText;
+  let goal = "";
   if (brief === null) {
-    goal = `<h2>Goal</h2>\n${missingFile("brief.md", "brief.md is missing, so the goal and acceptance criteria cannot be shown.")}`;
+    goalText = "The brief is missing, so this page cannot state the goal.";
+    goal = missingFile("brief.md", "brief.md is missing, so the goal and acceptance criteria cannot be shown.");
   } else {
     const g = sectionOf(brief, /^goal$/i);
     const a = sectionOf(brief, /^acceptance criteria$/i);
-    let inner = g ? md(g) : notice("brief.md", "## Goal", "brief.md has no ## Goal section; the raw file is shown below");
-    inner += a ? (intentCheck !== null ? "" : `\n<h3>Acceptance criteria</h3>\n${md(a, { tasks: "all" })}`)
-      : `\n${notice("brief.md", "## Acceptance criteria", "brief.md has no ## Acceptance criteria section; the raw file is shown below")}`;
-    goal = `<h2>Goal</h2>\n${inner}`;
+    if (g) goalText = g.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/[`*_]/g, "").replace(/\s+/g, " ").trim();
+    else {
+      goalText = "The brief has no Goal section, so the goal is not stated here.";
+      goal = notice("brief.md", "## Goal", "brief.md has no ## Goal section; the raw file is shown below");
+    }
+    if (a) goal += intentCheck !== null ? "" : `\n<h3>Acceptance criteria</h3>\n${md(a, { tasks: "all" })}`;
+    else goal += `\n${notice("brief.md", "## Acceptance criteria", "brief.md has no ## Acceptance criteria section; the raw file is shown below")}`;
   }
+  goal = goal.trim() ? `<h2>The brief</h2>\n${goal}` : "";
 
   let planHtml = "";
   if (atPlan) {
@@ -336,19 +355,36 @@ export function buildGatePage(run, gate, model) {
     `<li id="decision-${esc(d.id)}">${inl(d.question || "")} → <strong>${esc(d.answer)}</strong>${d.note ? ` (${esc(d.note)})` : ""} <span class="small">${esc(d.id)}</span></li>`).join("\n")}\n</ul>` : "";
 
   const pending = gate.decisions.map((d) => {
+    const intentOpts = isIntent && d.gate === "intent";
+    const rec = typeof d.recommended === "string" && (d.options || []).includes(d.recommended) ? d.recommended : null;
+    const blocks = [...new Set((d.blocks || []).map((b) => STAGE_FOR_BLOCK[b] || b))];
+    const whyNow = intentOpts ? "Implementation cannot start until the plan is approved or sent back."
+      : blocks.length ? `The ${blocks.join(" and ")} stage cannot start until this is answered.` : "The run is waiting on this answer.";
+    const attrs = rec ? `data-plan-recommended="${esc(rec)}"`
+      : `data-plan-no-recommendation="${esc(intentOpts ? INTENT_NO_RECOMMENDATION : "the engine has no recommendation for this question")}"`;
     const cards = (d.options || []).map((o) => {
-      const explain = isIntent ? INTENT_EXPLAIN[o] : null;
-      return `<div class="option" data-plan-option="${esc(o)}"><div class="o-name">${esc(o)}</div>${explain ? `<div class="o-note">${esc(explain)}</div>` : ""}</div>`;
+      const explain = intentOpts ? INTENT_EXPLAIN[o] : null;
+      const then = intentOpts ? INTENT_THEN[o] : null;
+      return `<div class="option" data-plan-option="${esc(o)}"><strong>${esc(o)}</strong>${explain ? `\n<p class="o-note" data-plan-consequence>${esc(explain)}</p>` : ""}${then ? `\n<p class="o-note o-then" data-plan-then>${esc(then)}</p>` : ""}</div>`;
     }).join("\n");
-    return `<div id="decision-${esc(d.id)}" data-plan-question="${esc(d.id)}">
-<p class="q-label">${inl(d.question || "")}</p>
-${d.context && !isIntent ? `<p class="small">Context: ${esc(d.context)}</p>` : ""}
+    return `<div id="decision-${esc(d.id)}" data-plan-question="${esc(d.id)}" data-plan-required data-plan-shape="pick-one" ${attrs}>
+<h3 class="q-label">${inl(d.question || "")}</h3>
+<p class="small" data-plan-why-now>${esc(whyNow)}</p>
+${rec || intentOpts ? "" : `<p class="small">recommended option: no recommendation given</p>`}
+${rec && d.recommendation_reason ? `<p data-plan-reason>${esc(d.recommendation_reason)}</p>` : ""}
 <div class="options">
 ${cards}
 </div>
-${isIntent ? "" : `<p class="small">${esc(d.id)} · recommended option: no recommendation given</p>`}
 </div>`;
   }).join("\n");
+
+  const doneParts = [];
+  if (brief !== null) doneParts.push("the brief is written");
+  if (atResearch && read("research.md") !== null) doneParts.push("research is done");
+  if (atPlan && plan !== null) doneParts.push("the plan is written");
+  const answeredBefore = earlier.filter((d) => d.status === "answered").length;
+  if (answeredBefore) doneParts.push(`${answeredBefore} earlier decision${answeredBefore === 1 ? "" : "s"} answered`);
+  const done = doneParts.length ? `So far ${doneParts.join(", ")}.` : "Nothing earlier in this run has finished yet.";
 
   const rawHtml = docs.map((d) => {
     const body = md(d.src, { idPrefix: d.prefix, refs: rawRefs });
@@ -366,19 +402,23 @@ ${isIntent ? "" : `<p class="small">${esc(d.id)} · recommended option: no recom
 <body>
 <main>
 <h1>${verdict}</h1>
-<p class="lede">${esc(lede)}</p>
-${gate.noteHtml || ""}
-${isIntent ? accessSection : ""}
-<section id="goal">
-${goal}
+<section class="brief" data-plan-brief>
+<p data-brief="goal"><strong>Goal.</strong> ${esc(goalText)}</p>
+<p data-brief="done"><strong>Done so far.</strong> ${esc(done)}</p>
+<p data-brief="ask"><strong>We need from you.</strong> ${esc(ask)}</p>
+<p data-brief="next"><strong>Then.</strong> ${esc(next)}</p>
 </section>
+<section id="decide">
+${pending}
+</section>
+<section id="background">
+<h2>Background</h2>
+${gate.noteHtml || ""}
+${goal ? `<section id="goal">\n${goal}\n</section>` : ""}
 ${planHtml ? `<section id="plan">\n${planHtml}\n</section>` : ""}
-${isIntent ? "" : accessSection}
 ${earlierHtml ? `<section id="earlier">\n${earlierHtml}\n</section>` : ""}
 ${coverHtml ? `<section id="cover">\n${coverHtml}\n</section>` : ""}
-<section id="decide">
-<h2>What you are deciding</h2>
-${pending}
+${accessSection}
 </section>
 ${rawHtml ? `<section id="raw">\n<h2>Run artifacts</h2>\n<p class="small">Everything above is drawn from these files, as written.</p>\n${rawHtml}\n</section>` : ""}
 <footer>run ${esc(runId)} · gate ${esc(gate.name)} · stage ${esc(stage)}</footer>
