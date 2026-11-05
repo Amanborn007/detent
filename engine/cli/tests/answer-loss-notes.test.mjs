@@ -76,7 +76,7 @@ if (a[0] === "drain") {
 `);
 }
 
-test("drive stops loudly on an unresolved curator item, then reaches the gate showing the note", () => {
+test("a recorded note-only reply takes drive to the normal needs_human stop, showing the note", () => {
   const t = setup();
   stubDrain(t);
   const first = drive(t, {});
@@ -85,15 +85,23 @@ test("drive stops loudly on an unresolved curator item, then reaches the gate sh
   const drainLine = JSON.stringify({ key: realpathSync(first.json.html), status: "feedback",
     prompts: [{ type: "decision", question: gate.id, answer: null, note: "hold on, check X" }] });
   const r = drive(t, {}, [], { STUB_DRAIN: drainLine });
-  assert.equal(r.code, 1, r.stdout + r.stderr);
-  assert.equal(r.json.ok, false);
-  assert.equal(r.json.reason, "curator_feedback_unresolved");
-  assert.match(r.json.next_step, /human_notes|decisions\.json/);
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  assert.equal(r.json.stopped, "needs_human");
   const d = readJson(join(t.runDir, "decisions.json")).find((x) => x.id === gate.id);
+  assert.equal(d.status, "pending");
   assert.equal(d.human_notes[0].note, "hold on, check X");
-  const next = drive(t, {});
-  assert.equal(next.json.stopped, "needs_human", next.stdout + next.stderr);
-  assert.match(readFileSync(next.json.html, "utf8"), /hold on, check X/);
+  assert.match(readFileSync(r.json.html, "utf8"), /hold on, check X/);
+});
+
+test("drive still fails loudly on feedback naming an unknown decision", () => {
+  const t = setup();
+  stubDrain(t);
+  const first = drive(t, {});
+  const drainLine = JSON.stringify({ key: realpathSync(first.json.html), status: "feedback",
+    prompts: [{ type: "decision", question: "D-999", answer: "approve" }] });
+  const r = drive(t, {}, [], { STUB_DRAIN: drainLine });
+  assert.equal(r.code, 1, r.stdout + r.stderr);
+  assert.equal(r.json.reason, "curator_feedback_unresolved");
 });
 
 test("drive stops loudly when collecting curator feedback fails", () => {
