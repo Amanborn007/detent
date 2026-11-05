@@ -2,6 +2,7 @@
 // curator open -> curl chrome page + sdk.js + artifact -> assert 200s and
 // exactly one injected script tag -> curator end -> shut the server down.
 // Run: node test/verify-demo.mjs   (uses a throwaway state dir)
+import "./daemon-env.mjs";
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';

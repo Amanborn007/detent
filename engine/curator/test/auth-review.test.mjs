@@ -2,6 +2,7 @@
 //
 //   keys are bound to one server boot:  C = HMAC(S, "curator-session:" + boot + ":" + id), R likewise with
 //   "curator-artifact:". `boot` is the random id GET /healthz reports.
+import "./daemon-env.mjs";
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import {

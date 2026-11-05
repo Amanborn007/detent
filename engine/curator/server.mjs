@@ -882,6 +882,10 @@ function isDirectRun() {
 }
 
 if (isDirectRun() && process.argv.includes('--daemon')) {
+  if (process.env.NODE_TEST_CONTEXT && process.env.CURATOR_ALLOW_DAEMON !== '1') {
+    process.stderr.write('curator: refusing to start a daemon from a test process; set CURATOR_ALLOW_DAEMON=1\n');
+    process.exit(1);
+  }
   const stateDir = resolveStateDir();
   const stateFile = path.join(stateDir, 'state.json');
   let secret;
@@ -914,6 +918,20 @@ if (isDirectRun() && process.argv.includes('--daemon')) {
   };
   process.on('SIGTERM', stop);
   process.on('SIGINT', stop);
+  if (process.env.CURATOR_OWNER_PID !== undefined) {
+    const owner = Number(process.env.CURATOR_OWNER_PID);
+    if (!Number.isInteger(owner) || owner <= 0) {
+      process.stderr.write(`curator: CURATOR_OWNER_PID must be a pid, got "${process.env.CURATOR_OWNER_PID}"\n`);
+      process.exit(1);
+    }
+    setInterval(() => {
+      try {
+        process.kill(owner, 0);
+      } catch (e) {
+        if (e.code === 'ESRCH') stop();
+      }
+    }, 2000);
+  }
   // Idle self-shutdown: no live sessions and no activity for 60 minutes.
   setInterval(() => {
     if (!store.hasLiveSessions() && Date.now() - store.lastActivity > IDLE_SHUTDOWN_MS) stop();
