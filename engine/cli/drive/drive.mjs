@@ -726,10 +726,11 @@ export async function cmdDrive(flags, E) {
     }
     if (d.items.length) {
       const c = E.collectResult(runId, runDir, d.items);
-      if (c.unresolved.length) {
+      const lost = c.unresolved.filter((u) => !u.recorded);
+      if (lost.length) {
         return stopFail(E, ctx, "curator_feedback_unresolved",
-          "curator feedback could not resolve a decision; notes are kept as human_notes in decisions.json and shown on the gate page. Answer the gate with an exact option, then re-run drive",
-          { detail: JSON.stringify(c.unresolved) });
+          "curator feedback could not be recorded (see detail in drive-last.json); answer the gate with an exact option in curator, then re-run drive",
+          { detail: JSON.stringify(lost) });
       }
     }
   }

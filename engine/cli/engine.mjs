@@ -1433,14 +1433,14 @@ function applyFeedback(runDir, items) {
     const d = decisions.find((x) => x.id === item.question);
     const base = { id: item.question, answer: item.answer ?? null, ...(item.note ? { note: item.note } : {}) };
     // The curator drain empties its queue, so an unresolved item survives only if it is recorded here.
-    const keep = (reason) => {
-      unresolved.push({ ...base, reason });
-      if (d && (item.note || item.answer != null)) recordHumanNote(d, item);
+    const keep = (reason, record) => {
+      if (record && (item.note || item.answer != null)) recordHumanNote(d, item);
+      unresolved.push({ ...base, reason, ...(record ? { recorded: true } : {}) });
     };
     if (!d) { unresolved.push({ ...base, reason: "no such decision" }); continue; }
-    if (d.status !== "pending" && !isUnresolvedJudgment(d)) { keep(`decision is ${d.status}, not pending`); continue; }
+    if (d.status !== "pending" && !isUnresolvedJudgment(d)) { keep(`decision is ${d.status}, not pending`, true); continue; }
     if (typeof item.answer !== "string" || !Array.isArray(d.options) || !d.options.includes(item.answer)) {
-      keep(item.answer == null ? "no option chosen" : `'${item.answer}' is not one of the options`);
+      keep(item.answer == null ? "no option chosen" : `'${item.answer}' is not one of the options`, item.answer == null);
       continue;
     }
     if (isUnresolvedJudgment({ cause: d.cause, answer: item.answer })) {
