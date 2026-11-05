@@ -56,7 +56,10 @@ test("every fault class is refused, not just the diagram one", () => {
 });
 
 test("CURATOR_NO_CHECK gets past the gate rather than being refused by it", () => {
-  const { out } = open("diagram-owed.html", { CURATOR_NO_CHECK: "1" });
+  const dir = stateDir();
+  const { out } = open("diagram-owed.html", { CURATOR_NO_CHECK: "1", CURATOR_STATE_DIR: dir });
+  const stop = spawnSync("node", [CLI, "stop"], { encoding: "utf8", env: { ...process.env, CURATOR_STATE_DIR: dir, CURATOR_NO_BROWSER: "1" } });
+  assert.match(stop.stdout, /"status":"(stopped|not running)"/, "a daemon the open started must not outlive the test");
   // What happens after the gate depends on whether this shell can reach loopback, so assert only
   // that the gate did not stop it. Asserting the exit code here made this pass sandboxed (loopback
   // blocked, so the command stopped on an unreachable server) and fail unsandboxed (it spawned one).
