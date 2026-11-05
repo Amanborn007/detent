@@ -21,7 +21,6 @@ export const ENDED_NEXT_STEP =
 export const IDLE_SHUTDOWN_MS = 60 * 60 * 1000; // 60 min with no poll waiter and no request
 export const HEARTBEAT_MS = 15 * 1000;
 const DELIVERED_CAP = 500;
-const SEEN_FLUSH_MS = 5000;
 
 export function idleMsFromEnv(env = process.env) {
   if (env.CURATOR_IDLE_MS === undefined || env.CURATOR_IDLE_MS === '') return IDLE_SHUTDOWN_MS;
@@ -105,7 +104,7 @@ export class SessionStore {
       if (s.pending.length === 0) continue;
       const target = data.sessions[key] ||= {
         id: s.id, file: s.file, createdAt: s.createdAt, pending: [], ended: s.ended, endedBy: s.endedBy,
-        chat: s.chat, delivered: s.delivered, lastSeenAt: s.lastSeenAt,
+        chat: s.chat, delivered: s.delivered,
       };
       for (const item of s.pending) {
         if (!target.pending.some((p) => JSON.stringify(p) === JSON.stringify(item))) target.pending.push(item);
@@ -143,12 +142,15 @@ export class SessionStore {
     this.flush();
   }
 
-  markSeen(key, now = Date.now(), { flush = false } = {}) {
+  // In memory only: a tab's cap is bound to this boot, so a restored value would outlive its tab.
+  markSeen(key, now = Date.now()) {
     const session = this.get(key);
-    if (!session) return;
-    const due = flush || session.lastSeenAt === null || now - session.lastSeenAt >= SEEN_FLUSH_MS;
-    session.lastSeenAt = now;
-    if (due) this.flush();
+    if (session) session.lastSeenAt = now;
+  }
+
+  markGone(key) {
+    const session = this.get(key);
+    if (session) session.lastSeenAt = null;
   }
 
   getById(id) {
@@ -324,7 +326,6 @@ export class SessionStore {
         endedBy: s.endedBy,
         chat: s.chat,
         delivered: s.delivered,
-        lastSeenAt: s.lastSeenAt,
       };
     }
     const data = { ...this.meta, updatedAt: new Date().toISOString(), sessions };
@@ -352,7 +353,7 @@ export class SessionStore {
         version: 0,
         waiters: [],
         delivered: s.delivered || [],
-        lastSeenAt: typeof s.lastSeenAt === 'number' ? s.lastSeenAt : null,
+        lastSeenAt: null,
       });
     }
   }
@@ -892,6 +893,14 @@ export function chromePage(session) {
   }
   frame.addEventListener('load', repostMarks);
 
+  // Hidden tabs get their timers throttled; say so explicitly. Registered before 'message' because
+  // the shell-behavior stub keeps only the last window listener.
+  window.addEventListener('visibilitychange', function () { if (!noKey) tick(); });
+  window.addEventListener('pagehide', function () {
+    if (noKey) return;
+    fetch('/api/gone?s=' + SID, { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json', 'X-Curator-Cap': CAP }, body: '{}' });
+  });
+
   window.addEventListener('message', function (ev) {
     if (ev.source !== frame.contentWindow) return;
     var d = ev.data;
@@ -1252,11 +1261,11 @@ export function createServer(store, { secret } = {}) {
       if (req.method === 'POST') {
         const hasBearer = req.headers.authorization !== undefined;
         const hasCap = req.headers['x-curator-cap'] !== undefined;
-        if (!['/api/open', '/api/send', '/api/end', '/api/reply'].includes(p)) {
+        if (!['/api/open', '/api/send', '/api/end', '/api/reply', '/api/gone'].includes(p)) {
           return sendJson(res, 404, { error: `no route: ${req.method} ${p}`, next_step: 'See engine/curator/README.md for the API.' });
         }
         // /api/end serves both callers; the credential presented says which one this is.
-        const browserRoute = p === '/api/send' || (p === '/api/end' && !hasBearer);
+        const browserRoute = p === '/api/send' || p === '/api/gone' || (p === '/api/end' && !hasBearer);
         let session = null;
         if (browserRoute) {
           if (hasBearer) throw unauthorized();
@@ -1284,6 +1293,11 @@ export function createServer(store, { secret } = {}) {
           }
           const opened = store.open(body.file);
           return sendJson(res, 200, { ok: true, sessionId: opened.id, key: opened.key });
+        }
+
+        if (p === '/api/gone') {
+          store.markGone(session.key);
+          return sendJson(res, 200, { ok: true });
         }
 
         if (p === '/api/send') {
