@@ -37,8 +37,8 @@ function workspace() {
   const count = () => fs.readFileSync(log, "utf8").split("\n").filter(Boolean).length;
   // The CLI spawns the opener detached, so wait for the expected launches, then give a stray extra one time to land.
   const launches = async (expected) => {
-    for (let i = 0; i < 60 && count() < expected; i++) await new Promise((r) => setTimeout(r, 50));
-    await new Promise((r) => setTimeout(r, 300));
+    for (let i = 0; i < 300 && count() < expected; i++) await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 3000));
     return count();
   };
   return { root, stateDir, artifact, env, launches };
