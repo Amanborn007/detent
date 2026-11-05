@@ -49,9 +49,9 @@ from inside Claude's Bash tool with output sent to `/dev/null`.
 
 ## Profile
 
-`seatbelt-deny-default.mjs` generates the profile from Claude Code 2.1.306's own Seatbelt template,
+`engine/cli/drive/seatbelt.mjs` generates the profile from Claude Code 2.1.306's own Seatbelt template,
 without the `com.apple.securityd.xpc`, `com.apple.coreservices.launchservicesd` and
-`com.apple.SecurityServer` mach names. It is unit tested in `engine/cli/tests/drive-probes.test.mjs`,
+`com.apple.SecurityServer` mach names (`seatbelt-deny-default.mjs` here is a re-export of it). It is unit tested in `engine/cli/tests/drive-probes.test.mjs`,
 but the profile has not been applied by `sandbox-exec` yet; the first run on a real terminal is the check
 that it compiles.
 

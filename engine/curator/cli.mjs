@@ -361,7 +361,10 @@ const POLL_HINT = (file) =>
 // rules existed is the case it is there for — and taking it is reported on the success line, never
 // silently.
 function runArtifactCheck(file) {
-  const result = spawnSync('python3', [CHECK_PATH, file], { encoding: 'utf8' });
+  const result = spawnSync('python3', [CHECK_PATH, file], {
+    env: { ...process.env, CURATOR_NODE: process.execPath },
+    encoding: 'utf8',
+  });
   const lines = `${result.stdout || ''}${result.stderr || ''}`.split('\n').filter((l) => l.trim());
   return {
     error: result.error,
