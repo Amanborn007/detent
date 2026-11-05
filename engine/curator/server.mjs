@@ -18,8 +18,31 @@ export const FEEDBACK_NEXT_STEP =
 export const ENDED_NEXT_STEP =
   'The user ended the session. Stop polling. Do not reopen it uninvited; deliver any remaining updates in chat.';
 
-export const IDLE_SHUTDOWN_MS = 60 * 60 * 1000; // 60 min with no sessions/activity
+export const IDLE_SHUTDOWN_MS = 60 * 60 * 1000; // 60 min with no poll waiter and no request
 export const HEARTBEAT_MS = 15 * 1000;
+const DELIVERED_CAP = 500;
+const SEEN_FLUSH_MS = 5000;
+
+export function idleMsFromEnv(env = process.env) {
+  if (env.CURATOR_IDLE_MS === undefined || env.CURATOR_IDLE_MS === '') return IDLE_SHUTDOWN_MS;
+  const ms = Number(env.CURATOR_IDLE_MS);
+  if (!Number.isFinite(ms) || ms <= 0) throw new Error(`CURATOR_IDLE_MS must be a positive number of milliseconds, got ${env.CURATOR_IDLE_MS}`);
+  return ms;
+}
+
+// An open tab ticks every 1.5s, so a live review never reaches the idle window.
+export function shouldIdleExit({ hasWaiters, lastActivity, now, idleMs }) {
+  return !hasWaiters && now - lastActivity > idleMs;
+}
+
+// A daemon whose state file vanished or names another pid is an orphan nobody can find.
+export function shouldExitForState({ stateExists, statePid, ownPid }) {
+  return !stateExists || statePid !== ownPid;
+}
+
+export function shouldPruneSession({ fileExists, pendingCount }) {
+  return !fileExists && pendingCount === 0;
+}
 
 // ---------------------------------------------------------------------------
 // SessionStore: the core queue/poll semantics. Pure logic, unit-testable.
@@ -31,6 +54,8 @@ export class SessionStore {
     this.sessions = new Map(); // key -> session
     this.meta = {}; // pid/port, merged into the state file by the server
     this.lastActivity = Date.now();
+    this.itemIds = new WeakMap();
+    this.busy = 0; // non-poll requests in flight; the daemon never exits mid-request
   }
 
   touch() {
@@ -53,6 +78,8 @@ export class SessionStore {
       chat: existing ? existing.chat : [],
       version: 0,
       waiters: [],
+      delivered: existing ? existing.delivered : [],
+      lastSeenAt: null,
     };
     this.sessions.set(key, session);
     this.flush();
@@ -61,6 +88,41 @@ export class SessionStore {
 
   get(key) {
     return this.sessions.get(key) || null;
+  }
+
+  hasWaiters() {
+    for (const s of this.sessions.values()) if (s.waiters.length > 0) return true;
+    return false;
+  }
+
+  // Items carry no id on the wire (agents deepEqual them), so ids live beside them.
+  idsFor(items) {
+    return items.map((item) => {
+      let id = this.itemIds.get(item);
+      if (!id) {
+        id = crypto.randomBytes(8).toString('hex');
+        this.itemIds.set(item, id);
+      }
+      return id;
+    });
+  }
+
+  // Called once a poll response has been fully written to the agent's socket.
+  recordDelivered(key, prompts) {
+    const session = this.get(key);
+    if (!session || !Array.isArray(prompts) || prompts.length === 0) return;
+    const at = new Date().toISOString();
+    for (const id of this.idsFor(prompts)) session.delivered.push({ id, at });
+    if (session.delivered.length > DELIVERED_CAP) session.delivered.splice(0, session.delivered.length - DELIVERED_CAP);
+    this.flush();
+  }
+
+  markSeen(key, now = Date.now(), { flush = false } = {}) {
+    const session = this.get(key);
+    if (!session) return;
+    const due = flush || session.lastSeenAt === null || now - session.lastSeenAt >= SEEN_FLUSH_MS;
+    session.lastSeenAt = now;
+    if (due) this.flush();
   }
 
   getById(id) {
@@ -114,6 +176,7 @@ export class SessionStore {
     this.touch();
     const session = this.mustGet(key);
     if (session.ended) throw new Error(`session for ${key} already ended`);
+    this.idsFor(items);
     SessionStore.mergeItems(session.pending, items);
     session.version += 1;
     if (session.waiters.length > 0) {
@@ -212,6 +275,7 @@ export class SessionStore {
       ended: s.ended,
       ended_by: s.endedBy,
       pending_feedback_items: s.pending.length,
+      last_seen_at: s.lastSeenAt === null ? null : new Date(s.lastSeenAt).toISOString(),
     }));
   }
 
@@ -233,6 +297,8 @@ export class SessionStore {
         ended: s.ended,
         endedBy: s.endedBy,
         chat: s.chat,
+        delivered: s.delivered,
+        lastSeenAt: s.lastSeenAt,
       };
     }
     const data = { ...this.meta, updatedAt: new Date().toISOString(), sessions };
@@ -242,10 +308,12 @@ export class SessionStore {
     fs.renameSync(tmp, this.stateFile);
   }
 
-  loadState() {
+  // Pruning happens here and nowhere else: a missing file at open() time is routine.
+  loadState({ fileExists = fs.existsSync } = {}) {
     if (!this.stateFile || !fs.existsSync(this.stateFile)) return;
     const data = JSON.parse(fs.readFileSync(this.stateFile, 'utf8'));
     for (const [key, s] of Object.entries(data.sessions || {})) {
+      if (shouldPruneSession({ fileExists: fileExists(s.file), pendingCount: (s.pending || []).length })) continue;
       this.sessions.set(key, {
         id: s.id,
         key,
@@ -257,6 +325,8 @@ export class SessionStore {
         chat: s.chat || [],
         version: 0,
         waiters: [],
+        delivered: s.delivered || [],
+        lastSeenAt: typeof s.lastSeenAt === 'number' ? s.lastSeenAt : null,
       });
     }
   }
@@ -691,6 +761,10 @@ export function createServer(store, { secret } = {}) {
     store.touch();
     const url = new URL(req.url, 'http://127.0.0.1');
     const p = url.pathname;
+    if (p !== '/api/poll') {
+      store.busy += 1;
+      res.on('close', () => { store.busy -= 1; });
+    }
     try {
       // 1. Host: present, loopback, and this server's own port. Defeats DNS rebinding and other-port pages.
       const host = String(req.headers.host || '').toLowerCase();
@@ -748,11 +822,17 @@ export function createServer(store, { secret } = {}) {
       if (req.method === 'GET' && p === '/api/updates') {
         const session = sessionFor(url);
         if (!capOk(session, capOf(req))) throw unauthorized();
+        store.markSeen(session.key);
+        let mtime = null;
+        try { mtime = fs.statSync(session.file).mtimeMs; } catch (e) { if (e.code !== 'ENOENT') throw e; }
         return sendJson(res, 200, {
           version: session.version,
           chat: session.chat,
           ended: session.ended,
           ended_by: session.endedBy,
+          delivered: session.delivered,
+          polling: session.waiters.length > 0,
+          mtime,
         });
       }
 
@@ -784,6 +864,7 @@ export function createServer(store, { secret } = {}) {
           store.requeue(key, payload); // ended payloads can carry prompts too — never lose them
           return;
         }
+        res.on('finish', () => store.recordDelivered(key, payload.prompts));
         return res.end(JSON.stringify(payload));
       }
 
@@ -831,7 +912,7 @@ export function createServer(store, { secret } = {}) {
           }
           const delivered = store.send(session.key, body.items);
           store.addUserChat(session.key, `sent ${body.items.length} item(s) to the agent`);
-          return sendJson(res, 200, { ok: true, delivered });
+          return sendJson(res, 200, { ok: true, delivered, ids: store.idsFor(body.items) });
         }
 
         if (p === '/api/end') {
@@ -914,8 +995,15 @@ if (isDirectRun() && process.argv.includes('--daemon')) {
   };
   process.on('SIGTERM', stop);
   process.on('SIGINT', stop);
-  // Idle self-shutdown: no live sessions and no activity for 60 minutes.
+  // Idle self-shutdown, and exit when another daemon has taken over state.json.
+  const idleMs = idleMsFromEnv();
   setInterval(() => {
-    if (!store.hasLiveSessions() && Date.now() - store.lastActivity > IDLE_SHUTDOWN_MS) stop();
-  }, 60 * 1000);
+    if (store.busy > 0) return;
+    let statePid = null;
+    const stateExists = fs.existsSync(stateFile);
+    if (stateExists) statePid = JSON.parse(fs.readFileSync(stateFile, 'utf8')).pid ?? null;
+    // Not stop(): that would rewrite state.json and clobber the daemon that owns it.
+    if (shouldExitForState({ stateExists, statePid, ownPid: process.pid })) process.exit(0);
+    if (shouldIdleExit({ hasWaiters: store.hasWaiters(), lastActivity: store.lastActivity, now: Date.now(), idleMs })) stop();
+  }, Math.min(60 * 1000, idleMs));
 }
