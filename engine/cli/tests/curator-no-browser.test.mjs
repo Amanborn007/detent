@@ -29,7 +29,7 @@ test("needs_human with the real curator launches no browser and leaves no daemon
   const state = join(detentHome(), ".local", "curator");
   try {
     const r = engine(["drive", "--run", t.runId, "--repo", t.repo, "--claude-bin", t.stub, "--stack", t.stack],
-      { env: { PATH: `${bin}:${BARE_PATH}`, TMPDIR: t.tmp } });
+      { env: { PATH: `${bin}:${BARE_PATH}`, TMPDIR: t.tmp, CURATOR_ALLOW_DAEMON: "1" } });
     assert.equal(r.code, 0, r.stdout + r.stderr);
     assert.equal(r.json.stopped, "needs_human");
     assert.ok(r.json.url, `the real curator did not open the gate page: ${r.stderr}`);

@@ -1,5 +1,6 @@
 // e2e smoke test: real server, real CLI processes, real HTTP — simulating the
 // browser by POSTing the same endpoints sdk.js/the chrome page use.
+import "./daemon-env.mjs";
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, realpathSync } from 'node:fs';

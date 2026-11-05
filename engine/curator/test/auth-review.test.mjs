@@ -2,6 +2,7 @@
 //
 //   keys are bound to one server boot:  C = HMAC(S, "curator-session:" + boot + ":" + id), R likewise with
 //   "curator-artifact:". `boot` is the random id GET /healthz reports.
+import "./daemon-env.mjs";
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -260,7 +261,8 @@ test('the chrome page accepts messages only from its iframe and asks before queu
   try {
     const page = (await raw(port, { path: `/s/${s.id}` })).text;
     assert.match(page, /ev\.source\s*!==\s*frame\.contentWindow/);
-    assert.match(page, /window\.confirm\([^)]*(page|artifact)[^)]*\)[\s\S]{0,200}enqueue\(\{ type: 'prompt'/);
+    assert.match(page, /openModal\(\{[\s\S]{0,200}(page|artifact)[\s\S]{0,300}onOk: function \(\) \{ enqueue\(\{ type: 'prompt'/);
+    assert.doesNotMatch(page, /window\.confirm\(/);
   } finally {
     server.close();
   }

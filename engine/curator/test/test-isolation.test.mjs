@@ -41,7 +41,7 @@ test('open from a test process refuses to start a daemon without an explicit CUR
 
 test('curator stop terminates the daemon recorded in its state dir, and is a no-op when none runs', () => {
   const s = scratch();
-  const env = { CURATOR_STATE_DIR: s.state, CURATOR_NO_BROWSER: '1' };
+  const env = { CURATOR_STATE_DIR: s.state, CURATOR_NO_BROWSER: '1', CURATOR_ALLOW_DAEMON: '1' };
   const idle = cli(['stop'], env);
   assert.equal(idle.code, 0, idle.out);
   const open = cli(['open', s.file], env);
