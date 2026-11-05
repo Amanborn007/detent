@@ -1,5 +1,5 @@
 // implement-profile.mjs — settings, argv and env for the `detent drive
-// --implement` child. Pure functions: no spawning, no writes.
+// --implement` child. Pure functions except the claudeTmp helpers, which make and remove one /tmp dir.
 //
 // Settings key names below were read from the Claude Code 2.1.306 bundle:
 // sandbox.{enabled,failIfUnavailable,allowUnsandboxedCommands,
@@ -8,8 +8,9 @@
 // strictAllowlist}, sandbox.filesystem.{denyRead,allowRead,denyWrite,
 // allowWrite}, plus top-level disableAllHooks, enableAllProjectMcpServers,
 // autoMemoryEnabled.
-import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { randomBytes } from "node:crypto";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 const DATA_TWIN = "/System/Volumes/Data";
 const SHARED_TMP = ["/tmp/claude", "/private/tmp/claude"];
@@ -108,18 +109,20 @@ export function implementDenyRead(ctx) {
   return withTwins(dedupe(base.flatMap(variants)), ctx);
 }
 
-// Claude adds its own tmp dir as a write root and runs Bash with it, so it must be
-// private to this step and nowhere near a shared temp dir.
+// Claude uses <CLAUDE_CODE_TMPDIR>/claude-<uid> only when that path fits an AF_UNIX socket path (44
+// bytes); otherwise it silently falls back to the shared /tmp/claude-<uid>. So claudeTmp is a short dir.
+const SOCKET_PATH_MAX = 44;
+const CLAUDE_TMP_RE = /^dt-[0-9a-f]{6}$/;
+
 function checkClaudeTmp(ctx) {
   const c = ctx.claudeTmp;
   if (typeof c !== "string" || !isAbsolute(c)) throw new Error("claudeTmp must be an absolute path");
-  const ut = userTmpOf(ctx);
-  const shared = ["/tmp", "/private/tmp", ...(ut ? [ut] : [])].flatMap(variants);
-  const roots = [ctx.sroot, real(ctx.sroot)].filter(Boolean);
-  const r = real(c) ?? resolve(c);
-  if (shared.includes(r) || shared.includes(resolve(c))) throw new Error(`claudeTmp ${c} is a shared temp dir`);
-  if (!roots.some((x) => strictlyUnder(resolve(c), x)) || !roots.some((x) => strictlyUnder(r, x))) {
-    throw new Error(`claudeTmp ${c} must be strictly inside the step root ${ctx.sroot}`);
+  if (dirname(c) !== "/tmp" || basename(c).startsWith("claude")) {
+    throw new Error(`claudeTmp ${c} must be a dir directly under /tmp and not named claude*`);
+  }
+  const claudeDir = join(c, `claude-${uidOf(ctx)}`);
+  if (Buffer.byteLength(claudeDir) > SOCKET_PATH_MAX) {
+    throw new Error(`claudeTmp ${c}: ${claudeDir} is ${Buffer.byteLength(claudeDir)} bytes, over the ${SOCKET_PATH_MAX}-byte AF_UNIX limit, so claude would fall back to /tmp/claude-${uidOf(ctx)}`);
   }
   let st;
   try { st = lstatSync(c); } catch (e) { if (e.code === "ENOENT") return; throw e; }
@@ -129,12 +132,34 @@ function checkClaudeTmp(ctx) {
   if (readdirSync(c).length) throw new Error(`claudeTmp ${c} must be empty, a fresh dir`);
 }
 
+export function createClaudeTmp() {
+  for (let i = 0; i < 10; i++) {
+    const d = join("/tmp", `dt-${randomBytes(3).toString("hex")}`);
+    try { mkdirSync(d, { mode: 0o700 }); } catch (e) { if (e.code === "EEXIST") continue; throw e; }
+    chmodSync(d, 0o700);
+    return d;
+  }
+  throw new Error("claudeTmp: could not create a fresh /tmp/dt-* dir after 10 attempts");
+}
+
+export function removeClaudeTmp(d) {
+  if (typeof d !== "string" || !isAbsolute(d) || dirname(d) !== "/tmp" || !CLAUDE_TMP_RE.test(basename(d))) {
+    throw new Error(`claudeTmp: refusing to remove ${d}, not a /tmp/dt-<6 hex> dir`);
+  }
+  rmSync(d, { recursive: true, force: true });
+}
+
+export async function withClaudeTmp(fn) {
+  const d = createClaudeTmp();
+  try { return await fn(d); } finally { removeClaudeTmp(d); }
+}
+
 function gitDenyWrite(ctx) {
   return variants(ctx.clone).flatMap((c) => GIT_INDIRECTION.map((f) => `${c}/.git/${f}`));
 }
 
 function implementDenyWrite(ctx) {
-  return withTwins(dedupe([...gitDenyWrite(ctx), ...SHARED_TMP]), ctx);
+  return withTwins(dedupe([...gitDenyWrite(ctx), ...SHARED_TMP, ...claudeUidTmp(ctx)]), ctx);
 }
 
 function implementAllowRead(ctx) {
@@ -243,6 +268,12 @@ export function validateImplementSettings(s, ctx) {
     for (const t of [...claudeUidTmp(ctx), ...(ut ? [ut] : [])]) {
       if (!list("denyRead").includes(t)) errs.push(`denyRead must include ${t}`);
     }
+    for (const t of claudeUidTmp(ctx)) {
+      for (const p of isDarwin(ctx) ? [t, DATA_TWIN + t] : [t]) {
+        if (!list("denyWrite").includes(p)) errs.push(`denyWrite must include ${p}`);
+      }
+    }
+    if (list("allowWrite").includes(ctx.claudeTmp)) errs.push(`allowWrite must not include claude's tmp ${ctx.claudeTmp}`);
     const protectedDirs = [ctx.home, ctx.sroot].flatMap(variants).flatMap((x) => [x, DATA_TWIN + x]);
     for (const a of list("allowRead")) {
       if (a === "/") errs.push("allowRead must not include /");

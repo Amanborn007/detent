@@ -1,12 +1,17 @@
 // drive-implement-profile-review.test.mjs — findings from the security review
 // of the implement profile (H1, H2, M1, M2, M4, L1, L3, L4).
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, realpathSync, symlinkSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, symlinkSync, writeFileSync, chmodSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
+import { randomBytes } from "node:crypto";
 
 const load = () => import("../drive/implement-profile.mjs");
+const { createClaudeTmp, removeClaudeTmp } = await load();
+const madeTmps = [];
+const freshClaudeTmp = () => { const d = createClaudeTmp(); madeTmps.push(d); return d; };
+after(() => { for (const d of madeTmps) removeClaudeTmp(d); });
 const mk = (...p) => { mkdirSync(join(...p), { recursive: true }); return join(...p); };
 
 function mkCtx(over = {}) {
@@ -16,7 +21,7 @@ function mkCtx(over = {}) {
   return {
     home, sroot,
     clone: join(step, "clone"), inputs: join(step, "inputs"), outbox: join(step, "outbox"),
-    tmp: join(step, "tmp"), claudeTmp: join(step, "claude-tmp"),
+    tmp: join(step, "tmp"), claudeTmp: freshClaudeTmp(),
     settingsPath: join(step, "settings.json"),
     platform: "darwin", uid: 501, userTmp: "/private/var/folders/zz/T",
     path: ["/usr/bin"], model: "m", maxBudgetUsd: 1, maxTurns: 5,
@@ -95,22 +100,24 @@ test("H2: managed permissions.allow and unknown permission keys are refused", as
   assert.doesNotThrow(() => validateManagedSettings({ permissions: { deny: ["A"], ask: ["B"], disableBypassPermissionsMode: "disable" } }));
 });
 
-test("M1: claudeTmp must be a fresh private dir strictly under the step root", async () => {
+// User-approved rewrite of the frozen M1 test: claudeTmp moved from the step root to a short dir
+// directly under /tmp, so claude's <CLAUDE_CODE_TMPDIR>/claude-<uid> fits the AF_UNIX path limit.
+test("M1: claudeTmp must be a fresh private dir directly under /tmp", async () => {
   const { buildImplementEnv } = await load();
   const ctx = mkCtx();
   const env = (over) => buildImplementEnv({ PATH: "/usr/bin", USER: "u" },{ ...ctx, ...over });
-  for (const bad of ["/tmp", "/private/tmp", ctx.userTmp, tmpdir(), ctx.sroot, dirname(ctx.sroot), ctx.home, "relative"]) {
+  for (const bad of ["/tmp", "/private/tmp", ctx.userTmp, tmpdir(), ctx.sroot, dirname(ctx.sroot), ctx.home, "relative", join(ctx.sroot, "ok"), "/tmp/claude-x", "/tmp/claude", "/tmp/a/b"]) {
     assert.throws(() => env({ claudeTmp: bad }), Error, bad);
   }
   assert.throws(() => env({ claudeTmp: "/tmp" }), /claudeTmp/);
-  mk(ctx.sroot, "ok"); chmodSync(join(ctx.sroot, "ok"), 0o700);
-  assert.equal(env({ claudeTmp: join(ctx.sroot, "ok") }).CLAUDE_CODE_TMPDIR, join(ctx.sroot, "ok"));
-  mk(ctx.sroot, "open"); chmodSync(join(ctx.sroot, "open"), 0o755);
-  assert.throws(() => env({ claudeTmp: join(ctx.sroot, "open") }), /0700/);
-  mk(ctx.sroot, "full"); chmodSync(join(ctx.sroot, "full"), 0o700); writeFileSync(join(ctx.sroot, "full/x"), "");
-  assert.throws(() => env({ claudeTmp: join(ctx.sroot, "full") }), /empty|fresh/);
-  symlinkSync(ctx.home, join(ctx.sroot, "sym"));
-  assert.throws(() => env({ claudeTmp: join(ctx.sroot, "sym") }), Error);
+  assert.equal(env({ claudeTmp: ctx.claudeTmp }).CLAUDE_CODE_TMPDIR, ctx.claudeTmp);
+  const open = freshClaudeTmp(); chmodSync(open, 0o755);
+  assert.throws(() => env({ claudeTmp: open }), /0700/);
+  const full = freshClaudeTmp(); writeFileSync(join(full, "x"), "");
+  assert.throws(() => env({ claudeTmp: full }), /empty|fresh/);
+  const sym = join("/tmp", `dt-${randomBytes(3).toString("hex")}`);
+  symlinkSync(ctx.home, sym);
+  try { assert.throws(() => env({ claudeTmp: sym }), /real directory/); } finally { rmSync(sym, { force: true }); }
 });
 
 test("M1: the validator also refuses a bad claudeTmp", async () => {

@@ -1,12 +1,16 @@
 // drive-implement-profile.test.mjs — the sandbox settings, argv and env that
 // `detent drive --implement` hands to the claude child. Pure functions only.
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 const load = () => import("../drive/implement-profile.mjs");
+const { createClaudeTmp, removeClaudeTmp } = await load();
+const madeTmps = [];
+const freshClaudeTmp = () => { const d = createClaudeTmp(); madeTmps.push(d); return d; };
+after(() => { for (const d of madeTmps) removeClaudeTmp(d); });
 
 function mkHome() {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "impl-home-")));
@@ -30,7 +34,7 @@ function mkCtx(over = {}) {
     inputs: join(step, "inputs"),
     outbox: join(step, "outbox"),
     tmp: join(step, "tmp"),
-    claudeTmp: join(step, "claude-tmp"),
+    claudeTmp: freshClaudeTmp(),
     settingsPath: join(step, "settings.json"),
     platform: "darwin",
     path: [join(node, "bin"), join(home, ".cargo/bin"), "/usr/bin", "/bin"],

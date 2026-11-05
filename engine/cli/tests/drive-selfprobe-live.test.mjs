@@ -10,6 +10,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { buildSelfProbe, collectControls, evaluateSelfProbe, installShim, pathWithShim, readShimReport, startCanaryListener, uninstallShim } from "../drive/selfprobe.mjs";
 import { parseTranscript } from "../drive/probes/transcript.mjs";
+import { createClaudeTmp, removeClaudeTmp } from "../drive/implement-profile.mjs";
 
 const CLAUDE = process.env.DETENT_CLAUDE_BIN || "claude";
 const MODEL = "claude-haiku-5-5";
@@ -43,11 +44,14 @@ function fixture() {
   writeFileSync(canary, `${nonce}\n`);
   const st = statSync(canary);
   mkdirSync("/tmp/claude", { recursive: true });
+  const claudeTmp = createClaudeTmp();
+  process.once("exit", () => removeClaudeTmp(claudeTmp));
+  const uidTmp = [`/tmp/claude-${process.getuid()}`, `/private/tmp/claude-${process.getuid()}`];
   const exists = (p) => existsSync(p);
   const denyRead = [dirs.denied, dirs.runDir, join(home, ".ssh"), join(home, ".aws"), join(home, ".claude"), join(home, ".config"), join(home, "Library", "Keychains"), "/Library/Keychains", "/tmp/claude", "/private/tmp/claude"];
   const denyReadAll = [...new Set(denyRead.flatMap((p) => (p.startsWith("/Users/") ? [p, `/System/Volumes/Data${p}`] : [p])))];
-  const denyWrite = ["commondir", "config.worktree", "objects/info/alternates", "objects/info/http-alternates"].map((f) => join(dirs.clone, ".git", f)).concat(["/tmp/claude", "/private/tmp/claude"]);
-  return { root, home, S, dirs, canary, nonce, volPath: `/.vol/${st.dev}/${st.ino}`, denyRead: denyReadAll, denyWrite, existingDeny: denyRead.filter(exists) };
+  const denyWrite = ["commondir", "config.worktree", "objects/info/alternates", "objects/info/http-alternates"].map((f) => join(dirs.clone, ".git", f)).concat(["/tmp/claude", "/private/tmp/claude", ...uidTmp]);
+  return { root, home, S, dirs, claudeTmp, canary, nonce, volPath: `/.vol/${st.dev}/${st.ino}`, denyRead: denyReadAll, denyWrite, existingDeny: denyRead.filter(exists) };
 }
 
 function settingsFor(fx, { weak = false } = {}) {
@@ -74,6 +78,7 @@ async function runStep(fx, { name, weak = false, prompt, mode = "shell" }) {
     writeAllowed: [fx.dirs.outbox, fx.dirs.tmp],
     writeDenied: [fx.home, fx.dirs.runDir, "/tmp/claude", "/private/tmp/claude"],
     toolchain: ["node", "git"],
+    claudeTmp: fx.claudeTmp, denyClaudeUidTmp: true,
   });
   const controls = collectControls(probe.controlScript);
   const canary = await startCanaryListener({ socketPath: join(fx.root, `canary-${name}.sock`) });
@@ -89,7 +94,7 @@ async function runStep(fx, { name, weak = false, prompt, mode = "shell" }) {
   writeFileSync(settingsFile, JSON.stringify(settings, null, 2), { mode: 0o400 });
   const env = {
     PATH: mode === "shell" ? process.env.PATH : pathWithShim(inst.binDir, process.env.PATH), HOME: fx.home, USER: process.env.USER, LOGNAME: process.env.USER, LANG: process.env.LANG || "en_US.UTF-8", TERM: "dumb", SHELL: "/bin/sh",
-    TMPDIR: fx.dirs.tmp, CLAUDE_CODE_TMPDIR: fx.dirs.tmp, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0",
+    TMPDIR: fx.dirs.tmp, CLAUDE_CODE_TMPDIR: fx.claudeTmp, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0",
     CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", DISABLE_TELEMETRY: "1", DISABLE_AUTOUPDATER: "1",
   };
   if (mode === "shell") env.CLAUDE_CODE_SHELL = inst.shellPath;
@@ -108,7 +113,7 @@ async function runStep(fx, { name, weak = false, prompt, mode = "shell" }) {
   const canaryHits = canary.hits();
   await canary.close();
   const transcript = parseTranscript(done.out);
-  const report = { ...readShimReport(shimDir, { mode: mode === "shell" ? "shell" : "env" }), canaryHits, toolUses: transcript.bashUses, platform: "darwin" };
+  const report = { ...readShimReport(shimDir, { mode: mode === "shell" ? "shell" : "env" }), canaryHits, toolUses: transcript.bashUses, platform: "darwin", stderr: done.err };
   return { ...done, transcript, report, evaluation: evaluateSelfProbe(report), shimDir, results: bashResults(done.out) };
 }
 
