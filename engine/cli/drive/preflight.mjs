@@ -196,7 +196,7 @@ export function implementPreflight({
     const bwrap = which("bwrap");
     if (!bwrap) refuse("bwrap_missing", "bubblewrap (bwrap) is not on PATH", "Install bubblewrap, for example apt install bubblewrap.");
     if (!which("socat")) refuse("socat_missing", "socat is not on PATH", "Install socat, for example apt install socat.");
-    const userNsFix = "Enable unprivileged user namespaces, for example sysctl kernel.unprivileged_userns_clone=1, or run on a host that allows them.";
+    const userNsFix = "Enable unprivileged user namespaces: sysctl kernel.unprivileged_userns_clone=1 on Debian, sysctl kernel.apparmor_restrict_unprivileged_userns=0 on Ubuntu 24.04, or run on a host that allows them.";
     if (userns) {
       if (!userns()) refuse("userns_disabled", "unprivileged user namespaces are disabled", userNsFix);
     } else if (bwrap) {

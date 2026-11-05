@@ -63,7 +63,7 @@ function safePath() {
 }
 
 let resolved = null;
-function resolveGit(gitBin) {
+export function resolveGit(gitBin) {
   if (gitBin !== undefined) {
     if (!testHooksEnabled()) throw new GitError("git_forbidden", "gitBin is only available under node --test");
     if (!isAbsolute(gitBin)) throw new GitError("git_forbidden", "gitBin must be an absolute path");
@@ -85,7 +85,7 @@ function resolveGit(gitBin) {
   throw new GitError("git_unavailable", "no git executable in the absolute entries of PATH");
 }
 
-function hardEnv(extra) {
+export function hardEnv(extra) {
   const env = {
     PATH: safePath().join(":") || "/usr/bin:/bin",
     GIT_CONFIG_GLOBAL: "/dev/null",
