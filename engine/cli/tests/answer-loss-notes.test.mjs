@@ -122,3 +122,13 @@ test("a missing curator state dir is not a collect error", () => {
   assert.equal(r.status, 0, r.stderr);
   assert.equal(JSON.parse(r.stdout.trim().split("\n").pop()).status, "idle");
 });
+
+test("the same note left in two separate drains is kept twice, but twice in one drain once", () => {
+  const { ctx, gate } = atPlanGate();
+  const item = { type: "decision", question: gate.id, answer: null, note: "need the rollback plan" };
+  collect(ctx, [item, item]);
+  const notes = () => readJson(join(ctx.runDir, "decisions.json")).find((x) => x.id === gate.id).human_notes;
+  assert.equal(notes().length, 1);
+  collect(ctx, [item]);
+  assert.equal(notes().length, 2);
+});
