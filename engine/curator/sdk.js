@@ -151,7 +151,6 @@
   // `answer` verb stamped to disk, so the recorded note has to be lifted into
   // visible content here or a reload shows just the raw attribute.
   function renderAnswered(qEl) {
-    if (!qEl.hasAttribute(ANSWERED)) return;
     var note = qEl.getAttribute(ANSWERED_NOTE);
     if (!note) return;
     // A distinct attribute from ANSWERED_NOTE: that one sits on the question

@@ -491,7 +491,7 @@ function curatorStateDirFor(E) {
   return join(realpathSync(existing), ...tail);
 }
 
-function stopForHuman(E, ctx, stage, blockers, collectError) {
+function stopForHuman(E, ctx, stage, blockers) {
   const { runId, runDir } = ctx;
   const noteHtml = `<p class="sub">${E.escapeHtml(INTENT_NOTE)}</p>\n${accessPanel(E, runDir)}\n${envPanel(E, runDir)}`;
   const html = E.renderGateArtifact({ runId, runDir }, {
@@ -509,7 +509,7 @@ function stopForHuman(E, ctx, stage, blockers, collectError) {
   }
   const ids = blockers.map((d) => d.id);
   return stopOk(E, ctx, "needs_human", {
-    stage, decisions: ids, html, ...(url ? { url } : {}), ...(collectError ? { collect_error: true } : {}),
+    stage, decisions: ids, html, ...(url ? { url } : {}),
     next_step: process.env.DETENT_VERB
       ? "answer the gate with detent decide (or detent approve / detent revise at your own terminal), then detent continue"
       : `answer in curator${url ? ` (${url})` : ` (open ${html})`}, then run: detent drive --run ${runId}`,
@@ -715,14 +715,23 @@ export async function cmdDrive(flags, E) {
   }
 
   // Curator answers are collected only here, before any child exists.
-  let collectError = false;
   if (E.loadDecisions(runDir).some((d) => d.status === "pending")) {
+    let d;
     try {
-      const d = E.drainCuratorFor(runId, runDir);
-      if (d.items.length) E.collectResult(runId, runDir, d.items);
+      d = E.drainCuratorFor(runId, runDir);
     } catch (e) {
-      collectError = true;
-      process.stderr.write(`drive: collecting curator feedback failed (continuing): ${e.message}\n`);
+      return stopFail(E, ctx, "curator_collect_failed",
+        `collecting curator feedback failed: ${e.message.slice(0, 400)}. Fix it (try \`curator status\`), then re-run drive`,
+        { detail: e.message });
+    }
+    if (d.items.length) {
+      const c = E.collectResult(runId, runDir, d.items);
+      const lost = c.unresolved.filter((u) => !u.recorded);
+      if (lost.length) {
+        return stopFail(E, ctx, "curator_feedback_unresolved",
+          "curator feedback could not be recorded (see detail in drive-last.json); answer the gate with an exact option in curator, then re-run drive",
+          { detail: JSON.stringify(lost) });
+      }
     }
   }
 
@@ -732,7 +741,7 @@ export async function cmdDrive(flags, E) {
     const status = E.loadStatus(runDir);
     const next = nextAction(E, status, decisions, runDir);
     if (next.action === "done") return stopOk(E, ctx, "done", { stage: null, next_step: "all stages are done" });
-    if (next.action === "needs_human") return stopForHuman(E, ctx, next.stage, next.blockers, collectError);
+    if (next.action === "needs_human") return stopForHuman(E, ctx, next.stage, next.blockers);
     if (next.action === "before_implement") {
       return stopOk(E, ctx, "before_implement", {
         stage: next.stage,

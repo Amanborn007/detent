@@ -24,6 +24,7 @@ import { join, resolve, dirname, delimiter, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync, spawn } from "node:child_process";
 import process from "node:process";
+import { createHash } from "node:crypto";
 import { runBenchmark, checkpointBenchmark, ledgerLine } from "../bench/bench.mjs";
 import { runEval, EvalRefusal, resolveEvalRoots } from "../eval/eval.mjs";
 import { loadRoutingConfig, tierOf, advisorConsultEvent } from "../routing/routing.mjs";
@@ -1204,6 +1205,16 @@ function pendingFor(decisions, decision) {
     (d.id === decision.id || (Array.isArray(d.blocks) && d.blocks.some((b) => blocks.has(b)))));
 }
 
+// Bump when renderGateArtifact's markup changes, so existing pages re-render.
+const GATE_TEMPLATE_VERSION = 1;
+
+function humanNotesHtml(d) {
+  if (!Array.isArray(d.human_notes) || d.human_notes.length === 0) return "";
+  const items = d.human_notes.map((n) =>
+    `<li>${escapeHtml(n.at || "")}${n.answer_if_any ? ` (leaning ${escapeHtml(n.answer_if_any)})` : ""}: ${escapeHtml(n.note || "")}</li>`).join("");
+  return `<div class="human-notes"><p class="sub">Notes you left on this decision</p><ul>${items}</ul></div>`;
+}
+
 function renderGateArtifact({ runId, runDir }, gate) {
   const plansDir = join(detentRoot(), ".plans");
   mkdirSync(plansDir, { recursive: true });
@@ -1225,16 +1236,22 @@ function renderGateArtifact({ runId, runDir }, gate) {
 <div data-plan-question="${escapeHtml(d.id)}">
 <p class="q-label">${escapeHtml(d.question || "")}</p>
 ${d.context ? `<p class="sub">Context: ${escapeHtml(d.context)}</p>` : ""}
+${humanNotesHtml(d)}
 <div class="options">
 ${options}
 </div>
 </div>
 </section>`;
   }).join("\n");
-  writeFileSync(file, `<!doctype html>
+  const hash = createHash("sha256").update(JSON.stringify({ tpl: GATE_TEMPLATE_VERSION, runId, name: gate.name, stage: gate.stage || null,
+    decisions: gate.decisions, noteHtml: gate.noteHtml || "", docHtml })).digest("hex");
+  const prior = existsSync(file) ? readFileSync(file, "utf8") : null;
+  if (prior !== null && prior.includes(`<meta name="detent-gate-hash" content="${hash}">`)) return file;
+  const page = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="detent-gate-hash" content="${hash}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gate ${escapeHtml(gate.name)}</title>
 <style>
@@ -1287,8 +1304,38 @@ ${docHtml || `<p class="sub">No stage artifact has been written yet.</p>`}
 </main>
 </body>
 </html>
-`);
+`;
+  writeFileSync(file, prior === null ? page : carryCuratorMarks(prior, page, gate.decisions));
   return file;
+}
+
+// `curator log` and `curator answer` edit the page on disk, so a re-render must not discard them.
+function carryCuratorMarks(prior, page, decisions) {
+  let next = page;
+  const logs = prior.match(/<li data-curator-log-entry>[\s\S]*?<\/li>/g) || [];
+  if (logs.length) {
+    const section = `<section data-curator-changelog>
+  <h2>Decision &amp; Change Log</h2>
+  <ol data-curator-changelog-entries>
+      ${logs.join("\n      ")}
+  </ol>
+</section>
+`;
+    next = next.replace(/<\/body>/i, () => `${section}</body>`);
+  }
+  for (const d of decisions) {
+    const q = `<div data-plan-question="${escapeHtml(d.id)}"`;
+    const oldAt = prior.indexOf(q);
+    const newAt = next.indexOf(q);
+    if (oldAt === -1 || newAt === -1) continue;
+    const oldTag = prior.slice(oldAt, prior.indexOf(">", oldAt) + 1);
+    // A pending decision's answer stamp was refused or never seen by the engine, so only the note survives.
+    const marks = oldTag.match(/\s+data-curator-answered-(?:at|note)="[^"]*"/g);
+    if (!marks) continue;
+    const tagEnd = next.indexOf(">", newAt);
+    next = next.slice(0, tagEnd) + marks.join("") + next.slice(tagEnd);
+  }
+  return next;
 }
 
 // ---------------------------------------------------------------------------
@@ -1341,9 +1388,14 @@ function drainCuratorFor(runId, runDir) {
   if (r.error) throw new Error(`curator drain could not run: ${r.error.message}`);
   if (r.status !== 0) throw new Error(`curator drain exited ${r.status}: ${(r.stdout + r.stderr).trim().slice(-400)}`);
   const items = [];
+  const stampErrors = [];
   for (const line of r.stdout.split("\n").filter((l) => l.trim())) {
     let v;
     try { v = JSON.parse(line); } catch { throw new Error(`curator drain printed non-JSON: ${line.slice(0, 120)}`); }
+    if (v.stamp_error) {
+      stampErrors.push(String(v.stamp_error));
+      process.stderr.write(`engine: curator could not stamp an answer onto the gate page: ${v.stamp_error}\n`);
+    }
     if (!Array.isArray(v.prompts) || v.prompts.length === 0) continue;
     persistFeedback(runDir, v.prompts);
     let key = v.key;
@@ -1351,13 +1403,24 @@ function drainCuratorFor(runId, runDir) {
     if (!htmls.has(key)) throw new Error(`curator drain returned feedback for ${v.key}, which is not one of this run's gate pages`);
     items.push(...v.prompts);
   }
-  return { items };
+  return { items, ...(stampErrors.length ? { stampErrors } : {}) };
+}
+
+// `seen` scopes the dedupe to one drain: the same note left later is a new note.
+function recordHumanNote(d, item, seen) {
+  const entry = { note: item.note ?? null, answer_if_any: item.answer ?? null };
+  const notes = d.human_notes || (d.human_notes = []);
+  const key = JSON.stringify([d.id, entry.note, entry.answer_if_any]);
+  if (seen.has(key)) return;
+  seen.add(key);
+  notes.push({ ...entry, at: new Date().toISOString() });
 }
 
 function applyFeedback(runDir, items) {
   const decisions = loadDecisions(runDir);
   const answered = [];
   const unresolved = [];
+  const seenNotes = new Set();
   let feedback = 0;
   for (const item of items) {
     if (!item || typeof item !== "object") throw new Error(`feedback item is not an object: ${JSON.stringify(item)}`);
@@ -1367,14 +1430,21 @@ function applyFeedback(runDir, items) {
     }
     const d = decisions.find((x) => x.id === item.question);
     const base = { id: item.question, answer: item.answer ?? null, ...(item.note ? { note: item.note } : {}) };
+    // The curator drain empties its queue, so an unresolved item survives only if it is recorded here.
+    const keep = (reason, record) => {
+      // Changes the decision's render hash so the page is rewritten and drops the refused answer stamp.
+      if (d && item.answer != null) d.rejected_answer = { answer: item.answer, at: new Date().toISOString() };
+      if (record && (item.note || item.answer != null)) recordHumanNote(d, item, seenNotes);
+      unresolved.push({ ...base, reason, ...(record ? { recorded: true } : {}) });
+    };
     if (!d) { unresolved.push({ ...base, reason: "no such decision" }); continue; }
-    if (d.status !== "pending" && !isUnresolvedJudgment(d)) { unresolved.push({ ...base, reason: `decision is ${d.status}, not pending` }); continue; }
+    if (d.status !== "pending" && !isUnresolvedJudgment(d)) { keep(`decision is ${d.status}, not pending`, true); continue; }
     if (typeof item.answer !== "string" || !Array.isArray(d.options) || !d.options.includes(item.answer)) {
-      unresolved.push({ ...base, reason: item.answer == null ? "no option chosen" : `'${item.answer}' is not one of the options` });
+      keep(item.answer == null ? "no option chosen" : `'${item.answer}' is not one of the options`, item.answer == null);
       continue;
     }
     if (isUnresolvedJudgment({ cause: d.cause, answer: item.answer })) {
-      unresolved.push({ ...base, reason: "a judgment decision cannot be resolved by the proceed-degraded answer" });
+      keep("a judgment decision cannot be resolved by the proceed-degraded answer");
       continue;
     }
     Object.assign(d, {
@@ -1383,7 +1453,7 @@ function applyFeedback(runDir, items) {
     });
     answered.push(d.id);
   }
-  if (answered.length) saveDecisions(runDir, decisions);
+  saveDecisions(runDir, decisions);
   syncGateAnsweredEvents(runDir, decisions);
   releaseAnsweredBlocks(runDir, decisions);
   return { answered, unresolved, feedback, pending: decisions.filter((d) => d.status === "pending" || isUnresolvedJudgment(d)).map((d) => d.id) };
@@ -1418,7 +1488,7 @@ function cmdGateCollect(flags) {
     try {
       const d = drainCuratorFor(runId, runDir);
       items = d.items;
-      extra = d.note ? { curator: d.note } : {};
+      extra = { ...(d.note ? { curator: d.note } : {}), ...(d.stampErrors ? { stamp_errors: d.stampErrors } : {}) };
     } catch (e) { fail(e.message, "check `curator status`, or pass --file <feedback.json>"); }
   }
   const res = collectResult(runId, runDir, items, extra);
