@@ -29,7 +29,7 @@ Reports about your own provider commands, your own `stack.yaml`, or a third-part
 
 ## The contained `detent drive`
 
-`detent drive` is experimental and covers slice A only: intake, research and plan. It never implements, rechecks or ships, and it refuses `--allow-ship`. It runs on macOS and Linux and spends Claude credit.
+`detent drive` is experimental and spends Claude credit. By default it covers slice A only: intake, research and plan, then it stops at `before_implement`. With `--implement` it also runs the implement step, described in the next section. It never ships, and it refuses `--allow-ship`. Without `--implement` it runs on macOS and Linux.
 
 What is contained:
 
@@ -47,7 +47,31 @@ What is not covered:
 - Curator authentication stops web pages and other users, not a process of yours that can read `secret` (see below). Such a process can also edit `decisions.json` directly, so curator is not a barrier against it.
 - `--budget` is enforced by claude and can overshoot by one turn. The secret scan is a tripwire for common key shapes, not a control.
 - Nothing watches the run directory between invocations; the integrity check runs while a drive is running.
-- Code from the repo runs only when you run implement, tests or ship yourself, interactively.
+- Without `--implement`, code from the repo runs only when you run implement, tests or ship yourself, interactively.
+
+## `detent drive --implement`
+
+`detent drive --run <id> --implement` is experimental, macOS only and OAuth only. Nothing is persisted: you pass the flag on every invocation, and without it drive stops at `before_implement` as before. On Linux it refuses with `implement_platform_unsupported`. A Linux host box exists (bubblewrap, no network), but the self-probe that vouches for the implement child only runs on macOS, and setup commands with network egress are not built on Linux. It also refuses when `ANTHROPIC_API_KEY` is set (`implement_api_key_refused`), because a key in the environment could reach the sandboxed child. It never ships and still refuses `--allow-ship`. Shipping is a step you run yourself.
+
+How the implement child is contained:
+
+- **Command and sandbox.** The child is `claude -p --restricted --tools Bash` under Claude Code's own Bash sandbox (Seatbelt on macOS). Drive writes the settings: your home directory is unreadable, the network is closed, writes go only to the clone, the outbox, a tmp dir and the shim call log, the `.git` files that redirect git (`config`, `hooks`, `commondir`, `worktrees`, `objects/info/alternates` and similar) are not writable, and your per-user tmp dir and claude's per-uid tmp are unreadable. The clone is a throwaway copy of the run's branch.
+- **A shim shell.** Drive sets `CLAUDE_CODE_SHELL` to a shim. Claude runs every Bash command as `<shell> -c <command>` inside the sandbox, so the shim runs inside it too. Before each command it checks that it really is sandboxed, runs a probe script (reads of the denied directories, a write outside the allowed ones, a connection to a canary listener on localhost, and a few more), appends a line to the call log, and only then starts the real shell. If the probe fails, the shim prints a refusal and the command does not run.
+- **Checks after the child exits.** The transcript is the ground truth, because the unsandboxed claude process writes it and the child cannot. Drive reads it and fails the step as `sandbox_probe_failed` if any tool use is not Bash, any Bash call carries `dangerouslyDisableSandbox` or `run_in_background`, or an input has a key other than `command`, `description` and `timeout`. It then matches the shim's log lines one to one against the Bash calls in the transcript: the count must be equal, each logged command must contain the transcript's command, and each logged hash must match. It also requires a sentinel file, which the shim appends to only when it finds itself outside the sandbox, to exist and be empty.
+- **What happens to the commits.** Only after those checks pass does drive export the child's commits as a git bundle in a host box, run `verifyBundle` on it, check the tree out with a hardened checkout (plain blobs only, no filters, symlinks or submodules), and run the verify command in a fresh host box with no network. The verify command comes from `commands.verify` in `env.json`, which a human sets with `engine env --run <id> --verify "<command>"`. A command a child proposed in `env.proposed.json` is never used. The commits are then imported into `detent/<run>`. A read-only child with only Read, Glob and Grep then compares the diff with the plan.
+- **What blocks ship.** Drive raises a `recheck-review` decision every time, and a `sensitive-paths` decision when the diff touches files that run code or change tooling, such as CI config, git hooks, build scripts, `.env` files, agent config, lockfiles, or `package.json` outside a short list of harmless keys. Both block ship until you answer them. Read `recheck.md` and the diff before you do.
+- **The host box.** Drive runs its own commands against the untrusted clone (bundle export, the verify command) in a deny-default Seatbelt profile. Your home directory, your user tmp dir and claude's per-uid tmp are unreadable, writes go only to the listed directories, `setsid` and `setpgid` are denied, the box is single-use (a second run in it is refused as `hostbox_box_reused`), and captured output is capped at 1 MiB. It never falls back to running unboxed.
+- **Setup commands are not supported** in this version. A run whose `env.json` has `commands.setup` stops as `setup_unsupported`.
+- **Managed settings.** A managed-settings hook still fires even when drive passes `--setting-sources ""`, and hooks run outside the sandbox. So `--implement` refuses to start when managed settings (or managed MCP servers) define `hooks`, `env`, a `sandbox` key, MCP servers, or keys outside a short allowlist. The step then stops as `implement_preflight_failed`.
+
+What is not covered. Read these before you use it on anything you care about.
+
+- **The claude process is not sandboxed.** Only the Bash commands are. The claude process itself, any hooks it runs and the git commands claude runs for itself run unsandboxed as you. Drive disables hooks in its own settings and refuses managed hooks, but the process boundary is claude's, not drive's.
+- **Commit content is an exfiltration channel.** The child can read the clone, the plan and the other inputs, and anything it commits leaves the sandbox in the bundle. Drive does not scan the implement commits for secrets. Review the diff before you ship, and treat anything in the clone or the inputs as something the child could write into a commit.
+- **The shim log can be forged ahead of time.** The call log is writable by the child, because the shim has to append to it from inside the sandbox. The one-to-one check catches a command that skipped the shim or a log that drifted from the transcript. It does not catch a model that deliberately writes log lines for its own future commands before it runs them. The sentinel and the transcript shape checks do not cover that either.
+- **Other processes' arguments and environment are readable on macOS.** A sandboxed command can read the exec-time argv and environment of other processes you run, through the `KERN_PROCARGS2` sysctl. This is the known gap in the self-probe, which reports it as a known limit and not as a failure. The mitigation is that drive refuses to start when its own environment holds a secret-shaped variable (`env_secret`), but a process another program started with a secret in its arguments is not covered. The host box denies this sysctl, but the implement child's profile is Claude Code's, not drive's.
+- **The live end-to-end run is unverified.** The orchestration is tested with a stub claude. The containment is evidenced by the self-probe live tests and the host box live tests on macOS, not by a full implement run against a real model. Treat a first run as a test.
+- **Commits are authored by `detent implement <implement@detent.invalid>`.** Bundle verification rejects any commit whose author or committer is someone else.
 
 ## Curator access control
 
