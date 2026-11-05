@@ -1341,9 +1341,14 @@ function drainCuratorFor(runId, runDir) {
   if (r.error) throw new Error(`curator drain could not run: ${r.error.message}`);
   if (r.status !== 0) throw new Error(`curator drain exited ${r.status}: ${(r.stdout + r.stderr).trim().slice(-400)}`);
   const items = [];
+  const stampErrors = [];
   for (const line of r.stdout.split("\n").filter((l) => l.trim())) {
     let v;
     try { v = JSON.parse(line); } catch { throw new Error(`curator drain printed non-JSON: ${line.slice(0, 120)}`); }
+    if (v.stamp_error) {
+      stampErrors.push(String(v.stamp_error));
+      process.stderr.write(`engine: curator could not stamp an answer onto the gate page: ${v.stamp_error}\n`);
+    }
     if (!Array.isArray(v.prompts) || v.prompts.length === 0) continue;
     persistFeedback(runDir, v.prompts);
     let key = v.key;
@@ -1351,7 +1356,7 @@ function drainCuratorFor(runId, runDir) {
     if (!htmls.has(key)) throw new Error(`curator drain returned feedback for ${v.key}, which is not one of this run's gate pages`);
     items.push(...v.prompts);
   }
-  return { items };
+  return { items, ...(stampErrors.length ? { stampErrors } : {}) };
 }
 
 function applyFeedback(runDir, items) {
@@ -1418,7 +1423,7 @@ function cmdGateCollect(flags) {
     try {
       const d = drainCuratorFor(runId, runDir);
       items = d.items;
-      extra = d.note ? { curator: d.note } : {};
+      extra = { ...(d.note ? { curator: d.note } : {}), ...(d.stampErrors ? { stamp_errors: d.stampErrors } : {}) };
     } catch (e) { fail(e.message, "check `curator status`, or pass --file <feedback.json>"); }
   }
   const res = collectResult(runId, runDir, items, extra);
