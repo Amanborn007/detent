@@ -674,7 +674,13 @@ def run_contract(path):
     Missing node is a failure with a next step, never a pass: a page that was not checked has not
     passed. Contract findings are reported at the level contract.mjs assigns them.
     """
-    node = shutil.which("node")
+    node = os.environ.get("CURATOR_NODE")
+    if node:
+        if not (os.path.isfile(node) and os.access(node, os.X_OK)):
+            return ([(FAIL, 0, "CURATOR_NODE is set to %r, which is not an executable file. Fix or "
+                      "unset it, then run this check again" % node)], frozenset())
+    else:
+        node = shutil.which("node")
     if not node:
         return ([(FAIL, 0, "cannot run the decision contract: node is not on PATH. Install Node 18+ "
                   "or add it to PATH, then run this check again")], frozenset())

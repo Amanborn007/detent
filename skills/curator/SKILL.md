@@ -173,7 +173,7 @@ stage skills restate this rule at every gate (see `engine/stages/CONTRACT.md`,
   - Every option has a `<strong>` label (not the key again) and a
     `data-plan-consequence` of 4+ words. Escape hatches like "Other" are exempt.
   - Context is excerpt text. A bare path, URL, ID or "Context: c" is not context.
-  - Explain IDs like `DUNE-35` with `<abbr title>`, keep to 7 decisions or fewer, and put
+  - Explain IDs like `ACME-35` with `<abbr title>`, keep to 7 decisions or fewer, and put
     no alt-click or "click an option" hints on the page. The shell owns annotation
     instructions.
 

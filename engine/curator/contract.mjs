@@ -27,7 +27,7 @@ const words = (s) => (String(s).match(/\S+/g) || []).length;
 const squash = (s) => String(s).replace(/\s+/g, ' ').trim();
 const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '');
 
-// Ticket-style IDs only (DUNE-35, D-001); UTF-8 and SHA-256 are names a reader knows.
+// Ticket-style IDs only (ACME-35, D-001); UTF-8 and SHA-256 are names a reader knows.
 const ID_TOKEN = /\b(?:[A-Z]{2,10}-\d+|D-\d+)\b/g;
 const NOT_AN_ID = new Set(['UTF-8', 'UTF-16', 'UTF-32', 'SHA-1', 'SHA-256', 'SHA-512', 'ISO-8601', 'TLS-1']);
 const idsIn = (text) => (String(text).match(ID_TOKEN) || []).filter((t) => !NOT_AN_ID.has(t));

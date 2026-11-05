@@ -38,7 +38,7 @@ What the contract requires of every page that has a decision:
 - Recommendation: `data-plan-recommended` names an option key and a `data-plan-reason` gives at least 5 words of reason. With no recommendation, write `data-plan-no-recommendation="{why}"` in at least 5 words.
 - Each option has a `<strong>` label that reads as words (not the key again) and a `data-plan-consequence` of at least 4 words saying what happens if it is chosen. Escape hatches such as "Other" or "Skip" need no consequence.
 - Context is the excerpt text itself. "Context: c" or a bare file path tells the reader nothing.
-- Warnings: an ID like `DUNE-35` with no `<abbr title>` or `[data-plan-glossary]` entry, more than 7 decisions on one page, and any text telling the reader to alt-click or click an option. Annotation instructions belong to the shell, not the page.
+- Warnings: an ID like `ACME-35` with no `<abbr title>` or `[data-plan-glossary]` entry, more than 7 decisions on one page, and any text telling the reader to alt-click or click an option. Annotation instructions belong to the shell, not the page.
 
 The option key (`data-plan-option="phased"`) is the answer string sent back to you. The label is for the reader. Keep the key short and stable, and write the label and consequence in full.
 
