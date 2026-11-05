@@ -219,3 +219,10 @@ test("the round two page passes the curator artifact check", () => {
   const chk = spawnSync(process.execPath, [CURATOR_CLI, "check", file], { encoding: "utf8", env: { ...process.env, ...NO_BROWSER } });
   assert.equal(chk.status, 0, chk.stdout + chk.stderr);
 });
+
+test("the intent decision block carries no engine file path and no bare decision id", () => {
+  const { html } = example();
+  const block = html.slice(html.indexOf('<section id="decide">'), html.indexOf('<section id="raw">'));
+  assert.ok(!block.includes("Context: plan/plan.md"), "the intent gate always reviews plan.md, so the path is noise");
+  assert.ok(!/<p class="small">D-\d+<\/p>/.test(block), "a lone decision id tells a reviewer nothing");
+});
