@@ -41,7 +41,7 @@ if (group === '--help' || group === 'help' && rest.length === 0) {
     '  detent herald   <...>   herald morning brief (window|assemble|render)\n' +
     '  detent courier  <...>   courier connector reads (request|await|list|get|fulfill|fail)\n' +
     '  detent drive --run <id> contained intake, research and plan with headless claude children (experimental, spends credit)\n' +
-    '  detent runtime run|capabilities  run one prompt through a model runtime, request JSON on stdin (see engine/runtime/CONTRACT.md)\n' +
+    '  detent runtime run|plan|parse|capabilities  run one prompt through a model runtime, or plan it and parse its output yourself; request JSON on stdin (see engine/runtime/CONTRACT.md)\n' +
     '  detent feedback <...>   agent self-feedback journal (add|list) — coverage gaps the AGENT logs; not curator human feedback\n' +
     '  detent index    <...>   repo index (build|refresh|status|query <words>|cochange <files>)\n' +
     '  detent drive --run <id> run a run end to end with headless claude children (experimental, spends credit, see engine/cli/README.md)\n' +
