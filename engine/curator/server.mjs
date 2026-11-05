@@ -18,8 +18,32 @@ export const FEEDBACK_NEXT_STEP =
 export const ENDED_NEXT_STEP =
   'The user ended the session. Stop polling. Do not reopen it uninvited; deliver any remaining updates in chat.';
 
-export const IDLE_SHUTDOWN_MS = 60 * 60 * 1000; // 60 min with no sessions/activity
+export const IDLE_SHUTDOWN_MS = 60 * 60 * 1000; // 60 min with no poll waiter and no request
 export const HEARTBEAT_MS = 15 * 1000;
+const DELIVERED_CAP = 500;
+const SEEN_FLUSH_MS = 5000;
+
+export function idleMsFromEnv(env = process.env) {
+  if (env.CURATOR_IDLE_MS === undefined || env.CURATOR_IDLE_MS === '') return IDLE_SHUTDOWN_MS;
+  const ms = Number(env.CURATOR_IDLE_MS);
+  if (!Number.isFinite(ms) || ms <= 0) throw new Error(`CURATOR_IDLE_MS must be a positive number of milliseconds, got ${env.CURATOR_IDLE_MS}`);
+  return ms;
+}
+
+// A live session keeps the daemon up: after a sleep its drafts need this boot's keys.
+export function shouldIdleExit({ hasWaiters, hasLiveSessions, lastActivity, now, idleMs }) {
+  return !hasWaiters && !hasLiveSessions && now - lastActivity > idleMs;
+}
+
+// An orphan exits, but never while it holds a waiting poll or unsent answers.
+export function shouldExitForState({ stateExists, statePid, ownPid, hasWaiters, hasPending }) {
+  if (hasWaiters || hasPending) return false;
+  return !stateExists || statePid !== ownPid;
+}
+
+export function shouldPruneSession({ fileExists, pendingCount }) {
+  return !fileExists && pendingCount === 0;
+}
 
 // ---------------------------------------------------------------------------
 // SessionStore: the core queue/poll semantics. Pure logic, unit-testable.
@@ -31,6 +55,8 @@ export class SessionStore {
     this.sessions = new Map(); // key -> session
     this.meta = {}; // pid/port, merged into the state file by the server
     this.lastActivity = Date.now();
+    this.itemIds = new WeakMap();
+    this.busy = 0; // non-poll requests in flight; the daemon never exits mid-request
   }
 
   touch() {
@@ -53,6 +79,8 @@ export class SessionStore {
       chat: existing ? existing.chat : [],
       version: 0,
       waiters: [],
+      delivered: existing ? existing.delivered : [],
+      lastSeenAt: null,
     };
     this.sessions.set(key, session);
     this.flush();
@@ -61,6 +89,66 @@ export class SessionStore {
 
   get(key) {
     return this.sessions.get(key) || null;
+  }
+
+  hasPending() {
+    for (const s of this.sessions.values()) if (s.pending.length > 0) return true;
+    return false;
+  }
+
+  // Copy our queued items into whatever state.json now holds, without taking it over.
+  mergePendingIntoState() {
+    if (!this.stateFile) return;
+    const data = fs.existsSync(this.stateFile) ? JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) : {};
+    data.sessions ||= {};
+    for (const [key, s] of this.sessions) {
+      if (s.pending.length === 0) continue;
+      const target = data.sessions[key] ||= {
+        id: s.id, file: s.file, createdAt: s.createdAt, pending: [], ended: s.ended, endedBy: s.endedBy,
+        chat: s.chat, delivered: s.delivered, lastSeenAt: s.lastSeenAt,
+      };
+      for (const item of s.pending) {
+        if (!target.pending.some((p) => JSON.stringify(p) === JSON.stringify(item))) target.pending.push(item);
+      }
+    }
+    const tmp = `${this.stateFile}.tmp-${process.pid}`;
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+    fs.renameSync(tmp, this.stateFile);
+  }
+
+  hasWaiters() {
+    for (const s of this.sessions.values()) if (s.waiters.length > 0) return true;
+    return false;
+  }
+
+  // Items carry no id on the wire (agents deepEqual them), so ids live beside them.
+  idsFor(items) {
+    return items.map((item) => {
+      let id = this.itemIds.get(item);
+      if (!id) {
+        id = crypto.randomBytes(8).toString('hex');
+        this.itemIds.set(item, id);
+      }
+      return id;
+    });
+  }
+
+  // Called once a poll response has been fully written to the agent's socket.
+  recordDelivered(key, prompts) {
+    const session = this.get(key);
+    if (!session || !Array.isArray(prompts) || prompts.length === 0) return;
+    const at = new Date().toISOString();
+    for (const id of this.idsFor(prompts)) session.delivered.push({ id, at });
+    if (session.delivered.length > DELIVERED_CAP) session.delivered.splice(0, session.delivered.length - DELIVERED_CAP);
+    this.flush();
+  }
+
+  markSeen(key, now = Date.now(), { flush = false } = {}) {
+    const session = this.get(key);
+    if (!session) return;
+    const due = flush || session.lastSeenAt === null || now - session.lastSeenAt >= SEEN_FLUSH_MS;
+    session.lastSeenAt = now;
+    if (due) this.flush();
   }
 
   getById(id) {
@@ -114,6 +202,7 @@ export class SessionStore {
     this.touch();
     const session = this.mustGet(key);
     if (session.ended) throw new Error(`session for ${key} already ended`);
+    this.idsFor(items);
     SessionStore.mergeItems(session.pending, items);
     session.version += 1;
     if (session.waiters.length > 0) {
@@ -212,6 +301,7 @@ export class SessionStore {
       ended: s.ended,
       ended_by: s.endedBy,
       pending_feedback_items: s.pending.length,
+      last_seen_at: s.lastSeenAt === null ? null : new Date(s.lastSeenAt).toISOString(),
     }));
   }
 
@@ -233,6 +323,8 @@ export class SessionStore {
         ended: s.ended,
         endedBy: s.endedBy,
         chat: s.chat,
+        delivered: s.delivered,
+        lastSeenAt: s.lastSeenAt,
       };
     }
     const data = { ...this.meta, updatedAt: new Date().toISOString(), sessions };
@@ -242,10 +334,12 @@ export class SessionStore {
     fs.renameSync(tmp, this.stateFile);
   }
 
-  loadState() {
+  // Pruning happens here and nowhere else: a missing file at open() time is routine.
+  loadState({ fileExists = fs.existsSync } = {}) {
     if (!this.stateFile || !fs.existsSync(this.stateFile)) return;
     const data = JSON.parse(fs.readFileSync(this.stateFile, 'utf8'));
     for (const [key, s] of Object.entries(data.sessions || {})) {
+      if (shouldPruneSession({ fileExists: fileExists(s.file), pendingCount: (s.pending || []).length })) continue;
       this.sessions.set(key, {
         id: s.id,
         key,
@@ -257,6 +351,8 @@ export class SessionStore {
         chat: s.chat || [],
         version: 0,
         waiters: [],
+        delivered: s.delivered || [],
+        lastSeenAt: typeof s.lastSeenAt === 'number' ? s.lastSeenAt : null,
       });
     }
   }
@@ -324,7 +420,40 @@ export function safeReadArtifact(registeredFile) {
   return fs.readFileSync(real);
 }
 
-function chromePage(session) {
+// Pure answer-flow logic. It is injected into the shell page as source, so it
+// must stay self-contained (no closures, no imports).
+export function answerProgress(questions, answered) {
+  const seen = new Set(answered);
+  const names = [...seen];
+  if (!Array.isArray(questions)) {
+    return { known: false, total: null, answered: names.length, unanswered: [], requiredMissing: [] };
+  }
+  const open = questions.filter((q) => !seen.has(q.question));
+  return {
+    known: true,
+    total: questions.length,
+    answered: questions.length - open.length,
+    unanswered: open.map((q) => q.question),
+    requiredMissing: open.filter((q) => q.required).map((q) => q.question),
+  };
+}
+
+export function itemDelivery(id, delivered) {
+  return delivered.some((d) => d.id === id) ? 'delivered' : 'sent';
+}
+
+export function handoffLabel(state, polling) {
+  if (state === 'delivered') return 'handed to agent';
+  return polling ? 'sent, agent is picking it up' : 'queued — agent not listening right now';
+}
+
+// Superseded by handoffLabel in the page; kept because shell-flow.test.mjs imports it.
+export function deliveryLabel(state, polling) {
+  if (state === 'delivered') return 'delivered to agent';
+  return polling ? 'sent, agent is picking it up' : 'queued — agent not listening right now';
+}
+
+export function chromePage(session) {
   const title = escapeHtml(path.basename(session.file));
   const sid = session.id;
   return `<!DOCTYPE html>
@@ -336,6 +465,7 @@ function chromePage(session) {
 <style>
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; min-width: 0; }
+  [hidden] { display: none !important; }
   body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
          display: flex; flex-direction: column; height: 100vh; background: #f4f5f7; color: #1a1d21; }
   @media (prefers-color-scheme: dark) { body { background: #17191c; color: #e6e8ea; } }
@@ -349,11 +479,17 @@ function chromePage(session) {
   iframe { flex: 1; border: 0; background: #fff; }
   aside { width: 340px; flex: none; display: flex; flex-direction: column; border-left: 1px solid rgba(128,128,128,.3); }
   aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .6; margin: 12px 14px 6px; }
+  #progress { font-size: 12px; margin: 0 14px 4px; opacity: .85; }
+  #jumps { margin: 0 14px 4px; display: flex; flex-direction: column; gap: 2px; }
+  #jumps button { text-align: left; border: 0; background: none; color: #2563c9; font-size: 12px; cursor: pointer; padding: 1px 0;
+                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #queue { flex: 1; overflow-y: auto; padding: 0 10px; min-height: 80px; }
   #queue:empty::after { content: "Nothing queued. Alt-click an element, select text, or answer a decision in the plan. Click anything queued to edit it before sending.";
                         display: block; font-size: 12px; opacity: .55; padding: 8px 6px; }
+  #sentList { max-height: 24vh; overflow-y: auto; padding: 0 10px; }
   .item { border: 1px solid rgba(128,128,128,.3); border-radius: 8px; padding: 8px 10px; margin: 6px 0; font-size: 12.5px;
           display: flex; gap: 8px; align-items: flex-start; background: rgba(128,128,128,.05); }
+  .item.sent { opacity: .8; }
   .item .kind { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 1px 6px;
                 border-radius: 99px; flex: none; margin-top: 1px; }
   .kind-annotation { background: #dbe9ff; color: #1c4f9c; } .kind-selection { background: #ffeccc; color: #8a5a00; }
@@ -366,8 +502,18 @@ function chromePage(session) {
   .item .body:hover { background: rgba(128,128,128,.16); box-shadow: 0 0 0 3px rgba(128,128,128,.16); }
   .item .body:focus-visible { outline: 2px solid #2563c9; outline-offset: 2px; }
   .item .snippet { opacity: .65; font-size: 11.5px; display: block; margin-top: 2px; }
+  .item .state { font-size: 11px; display: block; margin-top: 3px; font-weight: 600; color: #8a5a00; }
+  .item .state.delivered { color: #176633; }
   .item button { flex: none; border: 0; background: none; cursor: pointer; color: inherit; opacity: .5; font-size: 14px; padding: 0 2px; }
   .item button:hover { opacity: 1; }
+  #modal { flex: none; padding: 10px 14px; border-top: 1px solid rgba(128,128,128,.3); background: rgba(37,99,201,.08);
+           display: flex; flex-direction: column; gap: 8px; }
+  #modalMsg { font-size: 12.5px; overflow-wrap: anywhere; }
+  #modalText { width: 100%; resize: vertical; min-height: 90px; border-radius: 8px; border: 1px solid rgba(128,128,128,.4);
+               padding: 8px; font: inherit; font-size: 13px; background: transparent; color: inherit; }
+  #err { flex: none; display: flex; gap: 8px; padding: 8px 14px; background: #f5c4c4; color: #4a1010; font-size: 12.5px; }
+  #err span { flex: 1; overflow-wrap: anywhere; }
+  #err button { border: 0; background: none; cursor: pointer; color: inherit; }
   #composer { flex: none; padding: 10px 14px; border-top: 1px solid rgba(128,128,128,.3); display: flex; flex-direction: column; gap: 8px; }
   #comment { width: 100%; resize: vertical; min-height: 54px; border-radius: 8px; border: 1px solid rgba(128,128,128,.4);
              padding: 8px; font: inherit; font-size: 13px; background: transparent; color: inherit; }
@@ -375,8 +521,14 @@ function chromePage(session) {
   button.primary { flex: 1; background: #2563c9; color: #fff; border: 0; border-radius: 8px; padding: 9px; font-size: 13px;
                    font-weight: 600; cursor: pointer; }
   button.primary:disabled { opacity: .45; cursor: default; }
+  button.plain { background: none; border: 1px solid rgba(128,128,128,.5); color: inherit; border-radius: 8px; padding: 9px 12px;
+                 font-size: 13px; cursor: pointer; }
   button.danger { background: none; border: 1px solid rgba(200,60,60,.6); color: #c83c3c; border-radius: 8px; padding: 9px 12px;
                   font-size: 13px; cursor: pointer; }
+  #drafts { flex: none; padding: 10px 14px; border-top: 1px solid rgba(128,128,128,.3); display: none; flex-direction: column; gap: 6px; font-size: 12.5px; }
+  body.nokey #drafts, body.offline #drafts { display: flex; }
+  #draftText { width: 100%; min-height: 110px; font: 12px ui-monospace, monospace; border-radius: 8px; padding: 8px;
+               border: 1px solid rgba(128,128,128,.4); background: transparent; color: inherit; }
   #chat { flex: none; max-height: 30vh; overflow-y: auto; padding: 4px 14px 10px; border-top: 1px solid rgba(128,128,128,.3); }
   .msg { font-size: 12.5px; margin: 6px 0; overflow-wrap: anywhere; }
   .msg .who { font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; opacity: .6; margin-right: 6px; }
@@ -385,17 +537,40 @@ function chromePage(session) {
   body.ended #banner { display: block; }
   #nokey { display: none; padding: 8px 14px; background: #f2cf8a; color: #17191c; font-size: 13px; font-weight: 600; flex: none; }
   body.nokey #nokey { display: block; }
+  #offline { display: none; padding: 8px 14px; background: #f5c4c4; color: #4a1010; font-size: 13px; font-weight: 600; flex: none; }
+  body.offline #offline { display: block; }
 </style>
 </head>
 <body>
 <header id="hdr"><span class="dot"></span><h1>${title}</h1><span class="hint">alt-click to annotate · select text to comment</span></header>
 <div id="banner">Session ended. Nothing further will be sent to the agent.</div>
-<div id="nokey">This link has no access key, or its keys came from an earlier curator server, so nothing on this page can reach the agent. Run <code>curator open &lt;file&gt;</code> again and use the link it prints.</div>
+<div id="nokey">This page can't reach the agent: its access key is missing, or it came from an earlier curator server that has since restarted. Your unsent items are kept below. Run <code>curator open &lt;file&gt;</code> again, use the link it prints, and paste anything you still want sent.</div>
+<div id="offline">Curator server not reachable — your unsent items are kept</div>
 <main>
   <iframe id="plan" sandbox="allow-scripts allow-forms" title="plan artifact"></iframe>
   <aside>
     <h2>Queued for agent</h2>
+    <div id="progress"></div>
+    <div id="jumps"></div>
     <div id="queue"></div>
+    <div id="sentWrap" hidden>
+      <h2>Sent to agent</h2>
+      <div id="sentList"></div>
+    </div>
+    <div id="modal" hidden>
+      <div id="modalMsg"></div>
+      <textarea id="modalText" hidden></textarea>
+      <div class="row">
+        <button class="primary" id="modalOk">OK</button>
+        <button class="plain" id="modalCancel">Cancel</button>
+      </div>
+    </div>
+    <div id="err" role="alert" hidden><span id="errText"></span><button id="errClose" title="Dismiss">✕</button></div>
+    <div id="drafts">
+      <div>Unsent items from this page, as text you can copy:</div>
+      <textarea id="draftText" readonly></textarea>
+      <div class="row"><button class="plain" id="draftCopy">Copy</button></div>
+    </div>
     <div id="composer">
       <textarea id="comment" placeholder="Free-text comment for the agent (optional)"></textarea>
       <div class="row">
@@ -411,22 +586,109 @@ function chromePage(session) {
 (function () {
   'use strict';
   var SID = ${JSON.stringify(sid)};
-  // C authorises this page's own calls; R lets the iframe load the artifact and nothing else.
-  var keys = new URLSearchParams(location.hash.slice(1));
-  var CAP = keys.get('c') || '';
-  var RKEY = keys.get('r') || '';
-  var noKey = !CAP || !RKEY;
-  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+  var KEYS_KEY = 'curator:keys:' + SID;
+  var DRAFT_KEY = 'curator:draft:' + SID;
+  var NL = String.fromCharCode(10);
+  ${answerProgress}
+  ${itemDelivery}
+  ${handoffLabel}
   var frame = document.getElementById('plan');
   var queueEl = document.getElementById('queue');
   var chatEl = document.getElementById('chat');
   var commentEl = document.getElementById('comment');
   var sendBtn = document.getElementById('send');
   var endBtn = document.getElementById('end');
+  var progressEl = document.getElementById('progress');
+  var jumpsEl = document.getElementById('jumps');
+  var sentWrapEl = document.getElementById('sentWrap');
+  var sentListEl = document.getElementById('sentList');
+  var modalEl = document.getElementById('modal');
+  var modalMsgEl = document.getElementById('modalMsg');
+  var modalTextEl = document.getElementById('modalText');
+  var modalOkEl = document.getElementById('modalOk');
+  var errEl = document.getElementById('err');
+  var errTextEl = document.getElementById('errText');
+  var draftTextEl = document.getElementById('draftText');
   var queue = [];
+  var sent = [];
+  var questions = null;
+  var delivered = [];
+  var polling = false;
+  var lastMtime = null;
   var chatVersion = 0;
   var chatCount = 0;
   var ended = false;
+  var storageWarned = false;
+  var sendConfirming = false;
+
+  function showError(msg) {
+    errTextEl.textContent = msg;
+    errEl.hidden = false;
+  }
+  document.getElementById('errClose').addEventListener('click', function () { errEl.hidden = true; });
+
+  function storageFailed() {
+    if (storageWarned) return;
+    storageWarned = true;
+    showError('Browser storage is unavailable, so keys and drafts will not survive a reload.');
+  }
+
+  // C authorises this page's own calls; R lets the iframe load the artifact and nothing else.
+  // The fragment is stripped from the address bar, so a reload reads the keys back from here.
+  var keys = new URLSearchParams(location.hash.slice(1));
+  var CAP = keys.get('c') || '';
+  var RKEY = keys.get('r') || '';
+  if (CAP && RKEY) {
+    try { sessionStorage.setItem(KEYS_KEY, JSON.stringify({ c: CAP, r: RKEY })); } catch (e) { storageFailed(); }
+  } else {
+    var savedKeys = null;
+    try { savedKeys = sessionStorage.getItem(KEYS_KEY); } catch (e) { storageFailed(); }
+    if (savedKeys) {
+      var parsedKeys = JSON.parse(savedKeys);
+      CAP = parsedKeys.c || '';
+      RKEY = parsedKeys.r || '';
+    }
+  }
+  var noKey = !CAP || !RKEY;
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+
+  var modalQueue = [];
+  var modalCb = null;
+  var modalCancelCb = null;
+  function openModal(opts) {
+    if (modalCb) { modalQueue.push(opts); return; }
+    modalCb = opts.onOk;
+    modalCancelCb = opts.onCancel || null;
+    modalMsgEl.textContent = opts.message;
+    var withText = typeof opts.text === 'string';
+    modalTextEl.hidden = !withText;
+    modalTextEl.value = withText ? opts.text : '';
+    modalOkEl.textContent = opts.ok || 'OK';
+    modalEl.hidden = false;
+    (withText ? modalTextEl : modalOkEl).focus();
+  }
+  function closeModal(cancelled) {
+    var onCancel = modalCancelCb;
+    modalCb = null;
+    modalCancelCb = null;
+    modalEl.hidden = true;
+    if (cancelled === true && onCancel) onCancel();
+    var next = modalQueue.shift();
+    if (next) openModal(next);
+  }
+  function cancelModal() { closeModal(true); }
+  function acceptModal() {
+    var cb = modalCb;
+    var value = modalTextEl.value;
+    closeModal(false);
+    if (cb) cb(value);
+  }
+  modalOkEl.addEventListener('click', acceptModal);
+  document.getElementById('modalCancel').addEventListener('click', cancelModal);
+  modalEl.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape') { ev.preventDefault(); cancelModal(); }
+    else if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey) && !modalTextEl.hidden) { ev.preventDefault(); acceptModal(); }
+  });
 
   function toFrame(msg) {
     if (frame.contentWindow) frame.contentWindow.postMessage(Object.assign({ curator: true }, msg), '*');
@@ -445,6 +707,76 @@ function chromePage(session) {
     if (item.type === 'annotation') return (item.selector || '') + (item.elementText ? ' — ' + item.elementText.slice(0, 90) : '');
     if (item.type === 'decision' && item.note) return 'note: ' + item.note.slice(0, 140);
     return '';
+  }
+
+  function draftText() {
+    var lines = queue.map(function (item) {
+      var sn = snippet(item);
+      return '[' + item.type + '] ' + label(item) + (sn ? NL + '    ' + sn : '');
+    });
+    var c = commentEl.value.trim();
+    if (c) lines.push('[comment] ' + c);
+    return lines.join(NL);
+  }
+  function saveDrafts() {
+    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ queue: queue, comment: commentEl.value, sent: sent })); } catch (e) { storageFailed(); }
+  }
+  function restoreDrafts() {
+    var raw = null;
+    try { raw = sessionStorage.getItem(DRAFT_KEY); } catch (e) { storageFailed(); }
+    if (!raw) return;
+    var d = JSON.parse(raw);
+    if (Array.isArray(d.queue)) queue = d.queue;
+    if (Array.isArray(d.sent)) sent = d.sent;
+    if (typeof d.comment === 'string') commentEl.value = d.comment;
+  }
+  commentEl.addEventListener('input', saveDrafts);
+
+  function answeredQuestions() {
+    return queue.concat(sent.map(function (s) { return s.item; }))
+      .filter(function (i) { return i.type === 'decision'; })
+      .map(function (i) { return i.question; });
+  }
+
+  function renderProgress() {
+    var p = answerProgress(questions, answeredQuestions());
+    jumpsEl.textContent = '';
+    if (p.known) {
+      progressEl.textContent = p.answered + ' of ' + p.total + ' decisions answered';
+      p.unanswered.forEach(function (q) {
+        var b = document.createElement('button');
+        b.textContent = 'Jump to: ' + q;
+        b.title = q;
+        b.addEventListener('click', function () { toFrame({ action: 'scroll-to-question', question: q }); });
+        jumpsEl.appendChild(b);
+      });
+    } else if (p.answered > 0) {
+      progressEl.textContent = p.answered + ' decisions answered (this artifact does not report how many it has)';
+    } else {
+      progressEl.textContent = '';
+    }
+  }
+
+  function renderSent() {
+    sentListEl.textContent = '';
+    sentWrapEl.hidden = sent.length === 0;
+    sent.forEach(function (entry) {
+      var state = entry.id ? itemDelivery(entry.id, delivered) : 'sent';
+      var div = document.createElement('div');
+      div.className = 'item sent';
+      var kind = document.createElement('span');
+      kind.className = 'kind kind-' + entry.item.type;
+      kind.textContent = entry.item.type;
+      var body = document.createElement('span');
+      body.className = 'body';
+      body.textContent = label(entry.item);
+      var st = document.createElement('span');
+      st.className = 'state ' + state;
+      st.textContent = handoffLabel(state, polling);
+      body.appendChild(st);
+      div.appendChild(kind); div.appendChild(body);
+      sentListEl.appendChild(div);
+    });
   }
 
   function render() {
@@ -485,8 +817,12 @@ function chromePage(session) {
       div.appendChild(kind); div.appendChild(body); div.appendChild(rm);
       queueEl.appendChild(div);
     });
-    sendBtn.disabled = ended || noKey;
+    sendBtn.disabled = ended || noKey || sendConfirming;
     endBtn.disabled = ended || noKey;
+    draftTextEl.value = draftText();
+    renderProgress();
+    renderSent();
+    saveDrafts();
   }
 
   // Edit a queued item in place. A decision edits its note, since the answer
@@ -495,25 +831,37 @@ function chromePage(session) {
     var item = queue[i];
     if (!item || ended) return;
     if (item.type === 'decision') {
-      var note = window.prompt('Why / note for: ' + item.question, item.note || '');
-      if (note === null) return;
-      note = note.trim();
-      if (note === '') delete item.note; else item.note = note;
-      if (item.answer === null && item.note === undefined) {
-        queue.splice(i, 1);
-        toFrame({ action: 'decision-cleared', question: item.question });
-      } else {
-        toFrame({ action: 'note-set', question: item.question, note: item.note || '' });
-      }
-      render();
+      openModal({
+        message: 'Why / note for: ' + item.question, text: item.note || '', ok: 'Save',
+        onOk: function (note) {
+          var question = item.question;
+          var i = queue.findIndex(function (q) { return q.type === 'decision' && q.question === question; });
+          if (i === -1) { showError('That decision was removed while you were editing it, so the note was not saved.'); return; }
+          item = queue[i];
+          note = note.trim();
+          if (note === '') delete item.note; else item.note = note;
+          if (item.answer === null && item.note === undefined) {
+            queue.splice(i, 1);
+            toFrame({ action: 'decision-cleared', question: item.question });
+          } else {
+            toFrame({ action: 'note-set', question: item.question, note: item.note || '' });
+          }
+          render();
+        },
+      });
       return;
     }
     var field = item.type === 'prompt' ? 'text' : 'comment';
-    var next = window.prompt('Edit this ' + item.type + ':', item[field] || '');
-    if (next === null) return;
-    next = next.trim();
-    if (next === '') queue.splice(i, 1); else item[field] = next;
-    render();
+    openModal({
+      message: 'Edit this ' + item.type + ':', text: item[field] || '', ok: 'Save',
+      onOk: function (next) {
+        var i = queue.indexOf(item);
+        if (i === -1) { showError('That item was removed while you were editing it, so the edit was not saved.'); return; }
+        next = next.trim();
+        if (next === '') queue.splice(i, 1); else item[field] = next;
+        render();
+      },
+    });
   }
 
   function dequeueDecision(question) {
@@ -532,18 +880,38 @@ function chromePage(session) {
     render();
   }
 
+  function repostMarks() {
+    queue.forEach(function (item) {
+      if (item.type !== 'decision') return;
+      toFrame({ action: 'decision-accepted', question: item.question, answer: item.answer });
+      if (item.note) toFrame({ action: 'note-set', question: item.question, note: item.note });
+    });
+    sent.forEach(function (entry) {
+      if (entry.item.type === 'decision') toFrame({ action: 'decision-sent', question: entry.item.question });
+    });
+  }
+  frame.addEventListener('load', repostMarks);
+
   window.addEventListener('message', function (ev) {
     if (ev.source !== frame.contentWindow) return;
     var d = ev.data;
     if (!d || d.curator !== true) return;
     if (d.action === 'annotate-request') {
-      var c = window.prompt('Comment on: ' + (d.elementText || d.selector || 'element'));
-      if (c === null || c.trim() === '') return;
-      enqueue({ type: 'annotation', selector: d.selector, elementText: d.elementText, comment: c.trim() });
+      openModal({
+        message: 'Comment on: ' + (d.elementText || d.selector || 'element'), text: '', ok: 'Queue',
+        onOk: function (c) {
+          if (c.trim() === '') return;
+          enqueue({ type: 'annotation', selector: d.selector, elementText: d.elementText, comment: c.trim() });
+        },
+      });
     } else if (d.action === 'selection-request') {
-      var c2 = window.prompt('Comment on: “' + (d.selectedText || '').slice(0, 120) + '”');
-      if (c2 === null || c2.trim() === '') return;
-      enqueue({ type: 'selection', selector: d.selector, selectedText: d.selectedText, comment: c2.trim() });
+      openModal({
+        message: 'Comment on: “' + (d.selectedText || '').slice(0, 120) + '”', text: '', ok: 'Queue',
+        onOk: function (c) {
+          if (c.trim() === '') return;
+          enqueue({ type: 'selection', selector: d.selector, selectedText: d.selectedText, comment: c.trim() });
+        },
+      });
     } else if (d.action === 'decision') {
       var dec = { type: 'decision', question: d.question, answer: d.answer };
       // Only attach note when the user actually wrote one, so a note-less
@@ -558,11 +926,24 @@ function chromePage(session) {
       }
       enqueue(dec);
       toFrame({ action: 'decision-accepted', question: d.question, answer: d.answer });
+    } else if (d.action === 'questions') {
+      if (!Array.isArray(d.questions)) return;
+      questions = d.questions.map(function (q) {
+        return typeof q === 'string' ? { question: q, required: false } : { question: q.question, required: !!q.required };
+      });
+      renderProgress();
     } else if (d.action === 'prompt') {
-      if (!window.confirm('The artifact page wants to queue this prompt for the agent: ' + String(d.text).slice(0, 300))) return;
-      enqueue({ type: 'prompt', text: d.text });
+      openModal({
+        message: 'The artifact page wants to queue this prompt for the agent: ' + String(d.text).slice(0, 300), ok: 'Queue it',
+        onOk: function () { enqueue({ type: 'prompt', text: d.text }); },
+      });
     }
   });
+
+  function setOffline(off) {
+    document.body.classList.toggle('offline', off);
+    if (off) draftTextEl.value = draftText();
+  }
 
   function api(method, url, body) {
     return fetch(url, {
@@ -587,31 +968,85 @@ function chromePage(session) {
     chatEl.scrollTop = chatEl.scrollHeight;
   }
 
+  function sendFailed(resp) {
+    showError('Send failed: ' + resp.error + (resp.next_step ? ' ' + resp.next_step : '') + ' Your items are still queued.');
+    render();
+  }
+
+  function doSend(items, comment) {
+    sendBtn.disabled = true;
+    api('POST', '/api/send?s=' + SID, { items: items }).then(function (resp) {
+      if (resp.error) { sendFailed(resp); return; }
+      var ids = resp.ids || [];
+      items.forEach(function (item, n) {
+        if (item.type === 'decision') {
+          // The server keeps one answer per question, so an undelivered earlier answer is gone.
+          sent = sent.filter(function (e) {
+            return !(e.item.type === 'decision' && e.item.question === item.question && itemDelivery(e.id, delivered) !== 'delivered');
+          });
+          toFrame({ action: 'decision-sent', question: item.question });
+        }
+        sent.push({ item: item, id: ids[n] });
+      });
+      queue = queue.filter(function (q) { return items.indexOf(q) === -1; });
+      if (comment && commentEl.value.trim() === comment) commentEl.value = '';
+      errEl.hidden = true;
+      render();
+    }).catch(function () {
+      showError('Send failed: the curator server is not reachable. Your items are still queued.');
+      render();
+    });
+  }
+
   sendBtn.addEventListener('click', function () {
     if (ended) return;
+    var built = buildItems();
+    if (built.items.length === 0) { showError('Nothing to send. Queue an annotation, decision or comment first.'); return; }
+    var p = answerProgress(questions, answeredQuestions());
+    if (p.requiredMissing.length > 0) {
+      var names = p.requiredMissing.slice(0, 3).map(function (q) { return '“' + q.slice(0, 60) + '”'; }).join(', ');
+      sendConfirming = true;
+      render();
+      openModal({
+        message: p.requiredMissing.length + ' required decision(s) have no answer yet: ' + names + (p.requiredMissing.length > 3 ? ' and more' : '') + '. The agent will get nothing for them.',
+        ok: 'Send anyway',
+        onOk: function () {
+          sendConfirming = false;
+          var live = buildItems();
+          if (live.items.length === 0) { render(); showError('Nothing left to send.'); return; }
+          doSend(live.items, live.comment);
+        },
+        onCancel: function () { sendConfirming = false; render(); },
+      });
+      return;
+    }
+    doSend(built.items, built.comment);
+  });
+
+  function buildItems() {
     var items = queue.slice();
     var c = commentEl.value.trim();
     if (c) items.push({ type: 'comment', text: c });
-    if (items.length === 0) { window.alert('Nothing to send — queue an annotation, decision, or comment first.'); return; }
-    sendBtn.disabled = true;
-    api('POST', '/api/send?s=' + SID, { items: items }).then(function (resp) {
-      if (resp.error) { window.alert('Send failed: ' + resp.error + (resp.next_step ? '\\n' + resp.next_step : '')); sendBtn.disabled = false; return; }
-      queue.forEach(function (item) {
-        if (item.type === 'decision') toFrame({ action: 'decision-cleared', question: item.question });
-      });
-      queue = [];
-      commentEl.value = '';
-      sendBtn.disabled = false;
-      render();
-    }).catch(function (e) { window.alert('Send failed: ' + e); sendBtn.disabled = false; });
-  });
+    return { items: items, comment: c };
+  }
 
   endBtn.addEventListener('click', function () {
     if (ended) return;
-    if (!window.confirm('End the session? The agent will stop polling this plan.')) return;
-    api('POST', '/api/end?s=' + SID, { by: 'user' }).then(function (resp) {
-      if (resp.error) { window.alert('End failed: ' + resp.error + (resp.next_step ? '\\n' + resp.next_step : '')); return; }
-      markEnded();
+    openModal({
+      message: 'End the session? The agent will stop polling this plan.', ok: 'End session',
+      onOk: function () {
+        api('POST', '/api/end?s=' + SID, { by: 'user' }).then(function (resp) {
+          if (resp.error) { showError('End failed: ' + resp.error + (resp.next_step ? ' ' + resp.next_step : '')); return; }
+          markEnded();
+        }).catch(function () { showError('End failed: the curator server is not reachable.'); });
+      },
+    });
+  });
+
+  document.getElementById('draftCopy').addEventListener('click', function () {
+    navigator.clipboard.writeText(draftTextEl.value).catch(function () {
+      draftTextEl.select();
+      showError('Could not copy automatically. The text is selected, press Cmd/Ctrl+C.');
     });
   });
 
@@ -627,18 +1062,34 @@ function chromePage(session) {
     if (timer) { clearInterval(timer); timer = null; }
     noKey = true;
     document.body.classList.add('nokey');
+    setOffline(false);
     render();
+  }
+
+  function reloadArtifact() {
+    saveDrafts();
+    frame.src = '/artifact/' + SID + '?k=' + encodeURIComponent(RKEY) + '&t=' + Date.now();
   }
 
   function tick() {
     api('GET', '/api/updates?s=' + SID + '&since=' + chatVersion).then(function (resp) {
-      if (resp.error) return;
+      setOffline(false);
+      if (resp.error) { if (!noKey) showError('Curator server said: ' + resp.error); return; }
       chatVersion = resp.version;
       (resp.chat || []).slice(chatCount).forEach(function (m) { addMsg(m.from, m.text); });
       chatCount = (resp.chat || []).length;
+      delivered = resp.delivered || [];
+      polling = !!resp.polling;
+      renderSent();
+      if (typeof resp.mtime === 'number') {
+        if (lastMtime !== null && resp.mtime !== lastMtime) reloadArtifact();
+        lastMtime = resp.mtime;
+      }
       if (resp.ended && !ended) markEnded();
-    }).catch(function () { /* server restarting; retry on next tick */ });
+    }).catch(function () { setOffline(true); });
   }
+
+  restoreDrafts();
   if (noKey) {
     document.body.classList.add('nokey');
   } else {
@@ -691,6 +1142,10 @@ export function createServer(store, { secret } = {}) {
     store.touch();
     const url = new URL(req.url, 'http://127.0.0.1');
     const p = url.pathname;
+    if (p !== '/api/poll') {
+      store.busy += 1;
+      res.on('close', () => { store.busy -= 1; });
+    }
     try {
       // 1. Host: present, loopback, and this server's own port. Defeats DNS rebinding and other-port pages.
       const host = String(req.headers.host || '').toLowerCase();
@@ -748,11 +1203,17 @@ export function createServer(store, { secret } = {}) {
       if (req.method === 'GET' && p === '/api/updates') {
         const session = sessionFor(url);
         if (!capOk(session, capOf(req))) throw unauthorized();
+        store.markSeen(session.key);
+        let mtime = null;
+        try { mtime = fs.statSync(session.file).mtimeMs; } catch (e) { if (e.code !== 'ENOENT') throw e; }
         return sendJson(res, 200, {
           version: session.version,
           chat: session.chat,
           ended: session.ended,
           ended_by: session.endedBy,
+          delivered: session.delivered,
+          polling: session.waiters.length > 0,
+          mtime,
         });
       }
 
@@ -784,6 +1245,7 @@ export function createServer(store, { secret } = {}) {
           store.requeue(key, payload); // ended payloads can carry prompts too — never lose them
           return;
         }
+        res.on('finish', () => store.recordDelivered(key, payload.prompts));
         return res.end(JSON.stringify(payload));
       }
 
@@ -829,9 +1291,12 @@ export function createServer(store, { secret } = {}) {
           if (!Array.isArray(body.items) || body.items.length === 0) {
             return sendJson(res, 400, { error: 'items must be a non-empty array', next_step: 'Queue at least one item before sending.' });
           }
+          if (body.items.some((item) => item === null || typeof item !== 'object' || Array.isArray(item))) {
+            return sendJson(res, 400, { error: 'every item must be a JSON object', next_step: 'Send items shaped like {"type": "comment", "text": "..."}.' });
+          }
           const delivered = store.send(session.key, body.items);
           store.addUserChat(session.key, `sent ${body.items.length} item(s) to the agent`);
-          return sendJson(res, 200, { ok: true, delivered });
+          return sendJson(res, 200, { ok: true, delivered, ids: store.idsFor(body.items) });
         }
 
         if (p === '/api/end') {
@@ -932,8 +1397,19 @@ if (isDirectRun() && process.argv.includes('--daemon')) {
       }
     }, 2000);
   }
-  // Idle self-shutdown: no live sessions and no activity for 60 minutes.
+  // Idle self-shutdown, and exit when another daemon has taken over state.json.
+  const idleMs = idleMsFromEnv();
   setInterval(() => {
-    if (!store.hasLiveSessions() && Date.now() - store.lastActivity > IDLE_SHUTDOWN_MS) stop();
-  }, 60 * 1000);
+    if (store.busy > 0) return;
+    let statePid = null;
+    const stateExists = fs.existsSync(stateFile);
+    if (stateExists) statePid = JSON.parse(fs.readFileSync(stateFile, 'utf8')).pid ?? null;
+    // Not stop(): that would rewrite state.json and clobber the daemon that owns it.
+    const hasWaiters = store.hasWaiters();
+    if (shouldExitForState({ stateExists, statePid, ownPid: process.pid, hasWaiters, hasPending: store.hasPending() })) {
+      store.mergePendingIntoState();
+      process.exit(0);
+    }
+    if (shouldIdleExit({ hasWaiters, hasLiveSessions: store.hasLiveSessions(), lastActivity: store.lastActivity, now: Date.now(), idleMs })) stop();
+  }, Math.min(60 * 1000, idleMs));
 }
