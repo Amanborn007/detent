@@ -95,7 +95,9 @@ export function buildHostboxEnv({ platform, box, path, parentEnv = process.env, 
   const entries = implementPathEntries(path ?? parentEnv.PATH);
   if (!entries.length) throw new HostboxError("hostbox_path_empty", "PATH has no absolute entries");
   for (const e of entries) {
-    if (within(e, box)) throw new HostboxError("hostbox_path_in_box", `PATH entry ${e} is inside the box, which the child can write`);
+    let real = e;
+    try { real = realpathSync(e); } catch { /* a missing entry is checked lexically only */ }
+    if (within(e, box) || within(real, box)) throw new HostboxError("hostbox_path_in_box", `PATH entry ${e} is inside the box, which the child can write`);
   }
   const identity = {};
   const plain = {};
@@ -145,8 +147,10 @@ function capture() {
   let head = null;
   let tail = null;
   let total = 0;
+  let finished = false;
   return {
     push(chunk) {
+      if (finished) return;
       hash.update(chunk);
       total += chunk.length;
       if (tail === null) {
@@ -161,6 +165,7 @@ function capture() {
       if (tail.length > half) tail = tail.subarray(tail.length - half);
     },
     done() {
+      finished = true;
       const truncated = tail !== null;
       const text = truncated
         ? `${head.toString("utf8")}\n[hostbox: ${total - head.length - tail.length} bytes omitted]\n${tail.toString("utf8")}`
@@ -193,6 +198,12 @@ export async function runInHostbox({
   for (const w of writable) {
     if (typeof w !== "string" || !within(w, box)) throw new HostboxError("hostbox_writable_outside_box", `writable ${String(w)} is outside the box ${box}`);
   }
+  const realHome = (() => { try { return realpathSync(home); } catch { return home; } })();
+  for (const p of readOnly) {
+    const realP = (() => { try { return realpathSync(p); } catch { return p; } })();
+    if (within(p, box) || within(realP, box)) throw bad(`readOnly ${p} is inside the box; renaming its parent would bypass the write deny`);
+    if (within(home, p) || within(realHome, p) || within(home, realP) || within(realHome, realP)) throw bad(`readOnly ${p} is HOME or contains it`);
+  }
   const childEnv = buildHostboxEnv({ platform, box, path, parentEnv, extra, net, developerDir });
   const roots = toolchainRoots ?? detectToolchainRoots(home, { path: implementPathEntries(path ?? parentEnv.PATH) });
 
@@ -213,6 +224,7 @@ export async function runInHostbox({
 
   return new Promise((resolveP, rejectP) => {
     const child = spawn(bin, argv, { cwd, env: childEnv, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    const startedAt = Date.now();
     const out = capture();
     const err = capture();
     let timedOut = false;
@@ -220,6 +232,7 @@ export async function runInHostbox({
     let killError = null;
     let termTimer = null;
     let exitTimer = null;
+    let exited = false;
     // --new-session defeats kill(-pid) on Linux, and its pid namespace dies with bwrap.
     const killBox = (sig) => {
       try {
@@ -244,8 +257,10 @@ export async function runInHostbox({
       clearTimeout(exitTimer);
       const o = out.done();
       const e = err.done();
+      child.stdout.destroy();
+      child.stderr.destroy();
       if (killError) return rejectP(new HostboxError("hostbox_kill_failed", `could not kill the boxed process: ${killError.message}`));
-      if (platform === "darwin" && code === 71 && /sandbox_apply/.test(e.text)) {
+      if (platform === "darwin" && code === 71 && o.bytes === 0 && Date.now() - startedAt < 1000 && /sandbox_apply/.test(e.text)) {
         return rejectP(new HostboxError("sandbox_unavailable:nested", `sandbox-exec could not apply the profile: ${e.text.trim()}`));
       }
       resolveP({
@@ -266,6 +281,10 @@ export async function runInHostbox({
     });
     // Descendants can hold the pipes open, so the group dies the moment the child itself exits.
     child.on("exit", (code, signal) => {
+      if (exited) return;
+      exited = true;
+      clearTimeout(timer);
+      clearTimeout(termTimer);
       if (platform === "darwin") killBox("SIGKILL");
       exitTimer = setTimeout(() => finish(code, signal), 1000);
       exitTimer.unref();
