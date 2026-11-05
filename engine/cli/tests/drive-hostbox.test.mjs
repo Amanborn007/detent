@@ -77,8 +77,9 @@ test("buildProbeProfile still refuses an out-of-range port, and undefined is not
 test("the only write root is the box and a writable entry outside it throws", () => {
   const s = needSb();
   const p = s.buildSeatbeltProfile({ ...base(), writable: [join(BOX, "work"), join(BOX, "out")] });
-  assert.equal(p.split("\n").filter((l) => l.startsWith("(allow file-write*")).length, 1);
-  assert.ok(p.includes(`(allow file-write* (subpath "${BOX}")`));
+  assert.equal(p.split("\n").filter((l) => l.startsWith("(allow file-write*")).length, 4);
+  for (const w of [join(BOX, "work"), join(BOX, "out"), join(BOX, "home"), join(BOX, "tmp")]) assert.ok(p.includes(`(allow file-write* (subpath "${w}")`), w);
+  assert.ok(!p.includes(`(allow file-write* (subpath "${BOX}")`));
   assert.throws(() => s.buildSeatbeltProfile({ ...base(), writable: ["/etc"] }), /outside the box/);
   assert.throws(() => s.buildSeatbeltProfile({ ...base(), writable: [BOX + "/../x"] }), /not normalized|outside the box/);
 });
