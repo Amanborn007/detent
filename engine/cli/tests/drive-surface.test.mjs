@@ -102,3 +102,16 @@ test("SECURITY.md and REFERENCE.md document drive --implement and its limits", (
     assert.ok(ref.includes(w), `REFERENCE.md lacks ${w}`);
   }
 });
+
+test("docs state the user's git identity, the eval-quoted match and the missing secret scan", () => {
+  const sec = read("SECURITY.md");
+  const ref = read("docs/REFERENCE.md");
+  for (const [rel, t] of [["SECURITY.md", sec], ["docs/REFERENCE.md", ref]]) {
+    assert.ok(!t.includes("implement@detent.invalid"), `${rel}: stale fixed identity`);
+    assert.ok(t.includes("foreign_author"), `${rel}: foreign_author`);
+    assert.match(t, /own git identity/, `${rel}: user's own identity`);
+    assert.match(t, /eval '/, `${rel}: eval-quoted command match`);
+    assert.match(t, /no secret scan|does not scan/i, `${rel}: no secret scan`);
+  }
+  for (const code of ["git_identity_missing", "git_identity_invalid"]) assert.ok(ref.includes(code), `REFERENCE.md lacks ${code}`);
+});
