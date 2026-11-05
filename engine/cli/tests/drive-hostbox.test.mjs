@@ -5,24 +5,20 @@ import { PassThrough } from "node:stream";
 import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import * as sb from "../drive/seatbelt.mjs";
+import * as hb from "../drive/hostbox.mjs";
 
-const sb = await import("../drive/seatbelt.mjs").catch((e) => ({ loadError: e }));
-const hb = await import("../drive/hostbox.mjs").catch((e) => ({ loadError: e }));
 const pf = await import("../drive/preflight.mjs");
 const gs = await import("../drive/gitsafe.mjs");
 const shim = await import("../drive/probes/seatbelt-deny-default.mjs");
-const needSb = () => { if (sb.loadError) throw sb.loadError; return sb; };
-const needHb = () => { if (hb.loadError) throw hb.loadError; return hb; };
 
 const BOX = realpathSync(mkdtempSync(join(tmpdir(), "hostbox-unit-")));
 const HOME = "/Users/u";
 const base = () => ({ scratch: BOX, home: HOME, loopbackPort: null, toolchainRoots: [] });
 const denies = (p, path) => p.includes(`(deny file-read* (subpath "${path}"))`);
 
-// seatbelt.mjs ---------------------------------------------------------------
-
 test("the probes file is a shim over the promoted seatbelt module", () => {
-  const s = needSb();
+  const s = sb;
   assert.equal(shim.buildProbeProfile, s.buildProbeProfile);
   assert.equal(shim.defaultDenyRead, s.defaultDenyRead);
   assert.equal(shim.XCODE_SELECT_LINK, s.XCODE_SELECT_LINK);
@@ -30,7 +26,7 @@ test("the probes file is a shim over the promoted seatbelt module", () => {
 });
 
 test("profile is deny-default with the three xcode allows and no lsd or coreservices names", () => {
-  const p = needSb().buildSeatbeltProfile(base());
+  const p = sb.buildSeatbeltProfile(base());
   assert.match(p, /\(deny default/);
   assert.ok(p.includes('(allow file-read* (subpath "/private/var/db/xcode_select_link"))'));
   assert.ok(p.includes('(allow file-read* (subpath "/Library/Preferences/com.apple.dt.Xcode.plist"))'));
@@ -41,12 +37,12 @@ test("profile is deny-default with the three xcode allows and no lsd or coreserv
 });
 
 test("HOME and the shared claude tmps are denied, not just the named credential dirs", () => {
-  const p = needSb().buildSeatbeltProfile(base());
+  const p = sb.buildSeatbeltProfile(base());
   for (const d of [HOME, "/tmp/claude", "/private/tmp/claude", `${HOME}/.ssh`]) assert.ok(denies(p, d), d);
 });
 
 test("readOnly and toolchain roots are re-allowed after the HOME deny, in that order", () => {
-  const p = needSb().buildSeatbeltProfile({ ...base(), readOnly: [`${HOME}/clone`], toolchainRoots: [`${HOME}/.nvm/versions/node/v20/bin`] });
+  const p = sb.buildSeatbeltProfile({ ...base(), readOnly: [`${HOME}/clone`], toolchainRoots: [`${HOME}/.nvm/versions/node/v20/bin`] });
   const deny = p.indexOf(`(deny file-read* (subpath "${HOME}"))`);
   for (const d of [`${HOME}/clone`, `${HOME}/.nvm/versions/node/v20/bin`]) {
     const allow = p.indexOf(`(allow file-read* (subpath "${d}"))`);
@@ -56,12 +52,12 @@ test("readOnly and toolchain roots are re-allowed after the HOME deny, in that o
 
 test("the box dir itself stays readable even when it sits under HOME", () => {
   const box = `${HOME}/work/box`;
-  const p = needSb().buildSeatbeltProfile({ ...base(), scratch: box });
+  const p = sb.buildSeatbeltProfile({ ...base(), scratch: box });
   assert.ok(p.indexOf(`(allow file-read* (subpath "${box}"))`) > p.indexOf(`(deny file-read* (subpath "${HOME}"))`));
 });
 
 test("a null loopbackPort emits no network line and a port emits exactly one", () => {
-  const s = needSb();
+  const s = sb;
   assert.ok(!s.buildSeatbeltProfile(base()).includes("network-outbound"));
   const p = s.buildSeatbeltProfile({ ...base(), loopbackPort: 3128 });
   assert.equal(p.split("\n").filter((l) => l.includes("network-outbound")).length, 1);
@@ -69,13 +65,13 @@ test("a null loopbackPort emits no network line and a port emits exactly one", (
 });
 
 test("buildProbeProfile still refuses an out-of-range port, and undefined is not null", () => {
-  const s = needSb();
+  const s = sb;
   assert.throws(() => s.buildProbeProfile({ scratch: BOX, loopbackPort: 0 }), /loopbackPort/);
   assert.throws(() => s.buildProbeProfile({ scratch: BOX }), /loopbackPort/);
 });
 
 test("the only write root is the box and a writable entry outside it throws", () => {
-  const s = needSb();
+  const s = sb;
   const p = s.buildSeatbeltProfile({ ...base(), writable: [join(BOX, "work"), join(BOX, "out")] });
   assert.equal(p.split("\n").filter((l) => l.startsWith("(allow file-write*")).length, 4);
   for (const w of [join(BOX, "work"), join(BOX, "out"), join(BOX, "home"), join(BOX, "tmp")]) assert.ok(p.includes(`(allow file-write* (subpath "${w}")`), w);
@@ -85,23 +81,21 @@ test("the only write root is the box and a writable entry outside it throws", ()
 });
 
 test("unsafe seatbelt input throws instead of being escaped silently", () => {
-  const s = needSb();
+  const s = sb;
   assert.throws(() => s.buildSeatbeltProfile({ ...base(), readOnly: ["relative"] }), /absolute/);
   assert.throws(() => s.buildSeatbeltProfile({ ...base(), home: "relative" }), /absolute/);
 });
 
-// bwrapArgv ------------------------------------------------------------------
-
 const BW = () => ({ roBinds: ["/opt/tool"], rwBinds: [BOX], net: "none", cwd: BOX, cmd: "/usr/bin/true", args: ["a"] });
 
 test("bwrap argv unshares everything, dies with the parent and starts a new session", () => {
-  const a = needHb().bwrapArgv(BW());
+  const a = hb.bwrapArgv(BW());
   for (const f of ["--unshare-all", "--die-with-parent", "--new-session"]) assert.ok(a.includes(f), f);
   assert.ok(!a.includes("--share-net"));
 });
 
 test("bwrap argv mounts a fresh /tmp, proc and dev, and no HOME", () => {
-  const a = needHb().bwrapArgv(BW());
+  const a = hb.bwrapArgv(BW());
   const at = (flag, v) => a.some((x, i) => x === flag && a[i + 1] === v);
   assert.ok(at("--tmpfs", "/tmp"));
   assert.ok(at("--proc", "/proc"));
@@ -111,7 +105,7 @@ test("bwrap argv mounts a fresh /tmp, proc and dev, and no HOME", () => {
 });
 
 test("bwrap argv binds the box read-write and the extras read-only, then -- before the command", () => {
-  const a = needHb().bwrapArgv(BW());
+  const a = hb.bwrapArgv(BW());
   const has = (flag, p) => a.some((x, i) => x === flag && a[i + 1] === p && a[i + 2] === p);
   assert.ok(has("--bind", BOX));
   assert.ok(has("--ro-bind", "/opt/tool"));
@@ -122,18 +116,16 @@ test("bwrap argv binds the box read-write and the extras read-only, then -- befo
 });
 
 test("bwrap argv refuses a relative command, relative binds and any net but none", () => {
-  const h = needHb();
+  const h = hb;
   assert.throws(() => h.bwrapArgv({ ...BW(), cmd: "true" }), (e) => e.code === "hostbox_bad_argument");
   assert.throws(() => h.bwrapArgv({ ...BW(), roBinds: ["rel"] }), (e) => e.code === "hostbox_bad_argument");
   assert.throws(() => h.bwrapArgv({ ...BW(), net: { socket: "/x" } }), (e) => e.code === "setup_egress_unsupported");
 });
 
-// detectNested ---------------------------------------------------------------
-
 const SPAWN_SYNC = (r) => () => r;
 
 test("detectNested reads sandbox_apply from sandbox-exec stderr", () => {
-  const { detectNested } = needHb();
+  const { detectNested } = hb;
   const nested = detectNested({ platform: "darwin", spawn: SPAWN_SYNC({ status: 71, stderr: "sandbox-exec: sandbox_apply: Operation not permitted\n" }) });
   assert.equal(nested.nested, true);
   assert.ok(nested.detail);
@@ -142,20 +134,20 @@ test("detectNested reads sandbox_apply from sandbox-exec stderr", () => {
 });
 
 test("detectNested never maps an exit code alone to nested", () => {
-  const { detectNested } = needHb();
+  const { detectNested } = hb;
   assert.throws(() => detectNested({ platform: "darwin", spawn: SPAWN_SYNC({ status: 71, stderr: "usage error" }) }), (e) => e.code === "sandbox_probe_failed");
   assert.throws(() => detectNested({ platform: "darwin", spawn: SPAWN_SYNC({ error: new Error("ENOENT") }) }), (e) => e.code === "sandbox_probe_failed");
 });
 
 test("detectNested has no separate linux signal and spawns nothing there", () => {
   let n = 0;
-  const r = needHb().detectNested({ platform: "linux", spawn: () => { n++; return { status: 0 }; } });
+  const r = hb.detectNested({ platform: "linux", spawn: () => { n++; return { status: 0 }; } });
   assert.equal(r.nested, false);
   assert.equal(n, 0);
 });
 
 test("detectNested output is accepted as preflight's nested param", () => {
-  const { detectNested } = needHb();
+  const { detectNested } = hb;
   const pre = (spawn) => pf.implementPreflight({
     env: { PATH: "/usr/bin" }, platform: "darwin", managedSettings: [],
     versions: { claude: "2.1.306", git: "2.45.1", node: "20.0.0" }, which: () => null, exists: () => true,
@@ -166,10 +158,8 @@ test("detectNested output is accepted as preflight's nested param", () => {
   assert.deepEqual(r.refusals.map((x) => x.code), ["sandbox_unavailable:nested"]);
 });
 
-// env ------------------------------------------------------------------------
-
 const PARENT = { PATH: "/usr/bin:/bin", HOME: "/Users/real", USER: "real", LANG: "en_US.UTF-8", LC_CTYPE: "UTF-8", GITHUB_TOKEN: "ghp_x", SSH_AUTH_SOCK: "/s", AWS_SECRET_ACCESS_KEY: "k", AWS_PROFILE: "p", GH_TOKEN: "t" };
-const ENV = (o = {}) => needHb().buildHostboxEnv({ platform: "linux", box: BOX, parentEnv: PARENT, ...o });
+const ENV = (o = {}) => hb.buildHostboxEnv({ platform: "linux", box: BOX, parentEnv: PARENT, ...o });
 
 test("child env is built from an allowlist, never the parent env", () => {
   const e = ENV();
@@ -187,7 +177,7 @@ test("child env is built from an allowlist, never the parent env", () => {
 });
 
 test("a PATH entry inside the box or a relative-only PATH throws", () => {
-  const h = needHb();
+  const h = hb;
   assert.throws(() => ENV({ path: `/usr/bin:${BOX}/node_modules/.bin` }), (e) => e.code === "hostbox_path_in_box");
   assert.throws(() => ENV({ path: "bin:." }), (e) => e.code === "hostbox_path_empty");
   assert.equal(h.buildHostboxEnv({ platform: "linux", box: BOX, parentEnv: PARENT, path: "/a:rel:/b" }).PATH, "/a:/b");
@@ -201,22 +191,20 @@ test("a secret-named extra throws and an unlisted extra throws", () => {
 });
 
 test("setup env adds the proxy and npm cache vars, and a caller cannot set them", () => {
-  const e = needHb().buildHostboxEnv({ platform: "darwin", box: BOX, parentEnv: PARENT, net: { port: 3128 }, developerDir: "/Library/Developer/CommandLineTools" });
+  const e = hb.buildHostboxEnv({ platform: "darwin", box: BOX, parentEnv: PARENT, net: { port: 3128 }, developerDir: "/Library/Developer/CommandLineTools" });
   assert.equal(e.HTTPS_PROXY, "http://127.0.0.1:3128");
   assert.equal(e.https_proxy, "http://127.0.0.1:3128");
   assert.equal(e.NO_PROXY, "");
   assert.equal(e.npm_config_cache, join(BOX, "cache"));
   assert.equal(e.npm_config_userconfig, "/dev/null");
-  assert.throws(() => needHb().buildHostboxEnv({ platform: "darwin", box: BOX, parentEnv: PARENT, net: { port: 3128 }, developerDir: "/x", extra: { HTTPS_PROXY: "http://evil" } }), (er) => er.code === "hostbox_env_forbidden");
+  assert.throws(() => hb.buildHostboxEnv({ platform: "darwin", box: BOX, parentEnv: PARENT, net: { port: 3128 }, developerDir: "/x", extra: { HTTPS_PROXY: "http://evil" } }), (er) => er.code === "hostbox_env_forbidden");
 });
 
 test("DEVELOPER_DIR is set on darwin only", () => {
-  const h = needHb();
+  const h = hb;
   assert.equal(h.buildHostboxEnv({ platform: "darwin", box: BOX, parentEnv: PARENT, developerDir: "/Library/Developer/CommandLineTools" }).DEVELOPER_DIR, "/Library/Developer/CommandLineTools");
   assert.ok(!("DEVELOPER_DIR" in ENV()));
 });
-
-// gitsafe exports --------------------------------------------------------------
 
 test("gitsafe exports hardEnv and resolveGit for the host box", () => {
   assert.equal(typeof gs.hardEnv, "function");
@@ -224,8 +212,6 @@ test("gitsafe exports hardEnv and resolveGit for the host box", () => {
   assert.equal(gs.hardEnv().GIT_CONFIG_NOSYSTEM, "1");
   assert.ok(gs.resolveGit().startsWith("/"));
 });
-
-// runInHostbox -----------------------------------------------------------------
 
 function fakeSpawn() {
   const calls = [];
@@ -241,7 +227,7 @@ function fakeSpawn() {
   return spawn;
 }
 
-const RUN = (o = {}) => needHb().runInHostbox({
+const RUN = (o = {}) => hb.runInHostbox({
   platform: "linux", box: BOX, cmd: "/usr/bin/true", args: [], cwd: BOX, net: "none", timeoutMs: 5000,
   parentEnv: PARENT, which: (n) => `/usr/bin/${n}`, kill: () => {}, ...o,
 });
