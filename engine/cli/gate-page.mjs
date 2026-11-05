@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderMarkdown, renderInline, slugify } from "./markdown.mjs";
+import { checkPage } from "../curator/contract.mjs";
 
 const THEME_FILE = join(dirname(fileURLToPath(import.meta.url)), "..", "curator", "theme.html");
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
@@ -145,6 +146,13 @@ function resolveStage(gate, stages) {
     if (stages.includes(stage)) return stage;
   }
   return null;
+}
+
+// Contract results are warn-level: reported as warning events, never blocking the page.
+export function contractWarnings(html) {
+  const { errors, warnings } = checkPage(html);
+  const mk = (level) => (r) => ({ code: "gate_page_contract", file: null, section: null, check: r.id, level, line: r.line, detail: `${r.id}: ${r.msg}` });
+  return [...errors.map(mk("error")), ...warnings.map(mk("warning"))];
 }
 
 // Returns { html, warnings }; the caller writes the file and records each warning.
@@ -354,7 +362,7 @@ export function buildGatePage(run, gate, model) {
   }
 
   const earlierHtml = earlier.length ? `<h2>Already answered</h2>\n<ul class="earlier">\n${earlier.map((d) =>
-    `<li id="decision-${esc(d.id)}">${inl(d.question || "")} → <strong>${esc(d.answer)}</strong>${d.note ? ` (${esc(d.note)})` : ""} <span class="small">${esc(d.id)}</span></li>`).join("\n")}\n</ul>` : "";
+    `<li id="decision-${esc(d.id)}">${inl(d.question || "")} → <strong>${esc(d.answer)}</strong>${d.note ? ` (${esc(d.note)})` : ""} <span class="small"><abbr title="decision ${esc(d.id)}">${esc(d.id)}</abbr></span></li>`).join("\n")}\n</ul>` : "";
 
   const pending = gate.decisions.map((d) => {
     const intentOpts = isIntent && d.gate === "intent";
@@ -429,5 +437,6 @@ ${rawHtml ? `<section id="raw">\n<h2>Run artifacts</h2>\n<p class="small">Everyt
 </body>
 </html>
 `;
+  warnings.push(...contractWarnings(html));
   return { html, warnings };
 }
