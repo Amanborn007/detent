@@ -24,6 +24,7 @@ import { join, resolve, dirname, delimiter, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync, spawn } from "node:child_process";
 import process from "node:process";
+import { createHash } from "node:crypto";
 import { runBenchmark, checkpointBenchmark, ledgerLine } from "../bench/bench.mjs";
 import { runEval, EvalRefusal, resolveEvalRoots } from "../eval/eval.mjs";
 import { loadRoutingConfig, tierOf, advisorConsultEvent } from "../routing/routing.mjs";
@@ -1239,10 +1240,15 @@ ${options}
 </div>
 </section>`;
   }).join("\n");
-  writeFileSync(file, `<!doctype html>
+  const hash = createHash("sha256").update(JSON.stringify({ runId, name: gate.name, stage: gate.stage || null,
+    decisions: gate.decisions, noteHtml: gate.noteHtml || "", docHtml })).digest("hex");
+  const prior = existsSync(file) ? readFileSync(file, "utf8") : null;
+  if (prior !== null && prior.includes(`<meta name="detent-gate-hash" content="${hash}">`)) return file;
+  const page = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="detent-gate-hash" content="${hash}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gate ${escapeHtml(gate.name)}</title>
 <style>
@@ -1295,8 +1301,47 @@ ${docHtml || `<p class="sub">No stage artifact has been written yet.</p>`}
 </main>
 </body>
 </html>
-`);
+`;
+  writeFileSync(file, prior === null ? page : carryCuratorMarks(prior, page, gate.decisions));
   return file;
+}
+
+// `curator log` and `curator answer` edit the page on disk, so a re-render must not discard them.
+function carryCuratorMarks(prior, page, decisions) {
+  let next = page;
+  const logs = prior.match(/<li data-curator-log-entry>[\s\S]*?<\/li>/g) || [];
+  if (logs.length) {
+    const section = `<section data-curator-changelog>
+  <h2>Decision &amp; Change Log</h2>
+  <ol data-curator-changelog-entries>
+      ${logs.join("\n      ")}
+  </ol>
+</section>
+`;
+    next = next.replace(/<\/body>/i, () => `${section}</body>`);
+  }
+  for (const d of decisions) {
+    const q = `<div data-plan-question="${escapeHtml(d.id)}"`;
+    const oldAt = prior.indexOf(q);
+    const newAt = next.indexOf(q);
+    if (oldAt === -1 || newAt === -1) continue;
+    const oldTag = prior.slice(oldAt, prior.indexOf(">", oldAt) + 1);
+    const marks = oldTag.match(/\s+data-curator-answered(?:-at|-note)?="[^"]*"/g);
+    if (!marks) continue;
+    const answered = /data-curator-answered="([^"]*)"/.exec(oldTag);
+    const optTag = answered ? `<div class="option" data-plan-option="${answered[1]}">` : null;
+    const blockEnd = next.indexOf("</section>", newAt);
+    const optAt = optTag ? next.indexOf(optTag, newAt) : -1;
+    if (answered && (optAt === -1 || optAt > blockEnd)) continue;
+    const tagEnd = next.indexOf(">", newAt);
+    next = next.slice(0, tagEnd) + marks.join("") + next.slice(tagEnd);
+    if (optTag) {
+      const at = next.indexOf(optTag, newAt);
+      const end = at + optTag.length - 1;
+      next = next.slice(0, end) + " data-curator-answered-option" + next.slice(end);
+    }
+  }
+  return next;
 }
 
 // ---------------------------------------------------------------------------
