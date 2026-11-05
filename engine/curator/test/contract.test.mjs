@@ -130,7 +130,7 @@ test('C7 context: bare pointers and tiny fragments are not context', () => {
   assert.equal(only(page({ q: question({ why: '<p data-plan-why-now>c</p>' }) }), 'C7').length, 1);
   assert.equal(only(page({ q: question({ why: '<p data-plan-why-now>Why now: ~/code/x/plan.md</p>' }) }), 'C7').length, 1);
   assert.equal(only(page({ q: question({ why: '<p data-plan-why-now>Why now: https://example.com/a</p>' }) }), 'C7').length, 1);
-  assert.equal(only(page({ q: question({ why: '<p data-plan-why-now>Why now: DUNE-35</p>' }) }), 'C7').length, 1);
+  assert.equal(only(page({ q: question({ why: '<p data-plan-why-now>Why now: ACME-35</p>' }) }), 'C7').length, 1);
   const ptrConseq = OPTIONS.replace('Traffic moves in four steps, so a bad ranking reaches few users.', 'src/engine/a/b/c.mjs');
   assert.ok(only(page({ q: question({ options: ptrConseq }) }), 'C7').length >= 1);
   const ptrBrief = BRIEF.replace('dual writes have run for two weeks now.', 'docs/design/plan-v2.md');
@@ -138,15 +138,15 @@ test('C7 context: bare pointers and tiny fragments are not context', () => {
 });
 
 test('C8 glossary (warning): an ID token needs an abbr, a glossary entry or a link', () => {
-  const withId = page({ after: '<h2>Background</h2><p>See DUNE-35 for history.</p>' });
+  const withId = page({ after: '<h2>Background</h2><p>See ACME-35 for history.</p>' });
   const r = checkPage(withId, ERR);
   assert.ok(ids(r.warnings).includes('C8'));
   assert.equal(r.errors.filter((e) => e.id === 'C8').length, 0);
-  const abbr = page({ after: '<h2>B</h2><p>See <abbr title="the banner ticket">DUNE-35</abbr>.</p>' });
+  const abbr = page({ after: '<h2>B</h2><p>See <abbr title="the banner ticket">ACME-35</abbr>.</p>' });
   assert.ok(!ids(checkPage(abbr, ERR).warnings).includes('C8'));
-  const gl = page({ after: '<h2>B</h2><p>See DUNE-35.</p><dl data-plan-glossary><dt>DUNE-35</dt><dd>banner</dd></dl>' });
+  const gl = page({ after: '<h2>B</h2><p>See ACME-35.</p><dl data-plan-glossary><dt>ACME-35</dt><dd>banner</dd></dl>' });
   assert.ok(!ids(checkPage(gl, ERR).warnings).includes('C8'));
-  const link = page({ after: '<h2>B</h2><p>See <a href="https://j/DUNE-35">DUNE-35</a>.</p>' });
+  const link = page({ after: '<h2>B</h2><p>See <a href="https://j/ACME-35">ACME-35</a>.</p>' });
   assert.ok(!ids(checkPage(link, ERR).warnings).includes('C8'));
 });
 

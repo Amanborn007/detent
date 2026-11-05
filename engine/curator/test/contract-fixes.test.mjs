@@ -47,7 +47,7 @@ test('a real option with a label equal to its key still fails C6', () => {
 test('C8 ignores encodings and standards names but still flags ticket-style IDs', () => {
   const quiet = '<p>UTF-8 and H2 and ES2020 and SHA256 and SHA-256 are fine.</p>';
   assert.ok(!checkPage(page('', quiet), ERR).warnings.some((w) => w.id === 'C8'));
-  for (const id of ['D-001', 'DUNE-35']) {
+  for (const id of ['D-001', 'ACME-35']) {
     const w = checkPage(page('', `<p>See ${id} for details.</p>`), ERR).warnings;
     assert.ok(w.some((x) => x.id === 'C8' && x.msg.includes(id)), id);
   }
