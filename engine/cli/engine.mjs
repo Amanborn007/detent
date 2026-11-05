@@ -1329,20 +1329,11 @@ function carryCuratorMarks(prior, page, decisions) {
     const newAt = next.indexOf(q);
     if (oldAt === -1 || newAt === -1) continue;
     const oldTag = prior.slice(oldAt, prior.indexOf(">", oldAt) + 1);
-    const marks = oldTag.match(/\s+data-curator-answered(?:-at|-note)?="[^"]*"/g);
+    // A pending decision's answer stamp was refused or never seen by the engine, so only the note survives.
+    const marks = oldTag.match(/\s+data-curator-answered-(?:at|note)="[^"]*"/g);
     if (!marks) continue;
-    const answered = /data-curator-answered="([^"]*)"/.exec(oldTag);
-    const optTag = answered ? `<div class="option" data-plan-option="${answered[1]}">` : null;
-    const blockEnd = next.indexOf("</section>", newAt);
-    const optAt = optTag ? next.indexOf(optTag, newAt) : -1;
-    if (answered && (optAt === -1 || optAt > blockEnd)) continue;
     const tagEnd = next.indexOf(">", newAt);
     next = next.slice(0, tagEnd) + marks.join("") + next.slice(tagEnd);
-    if (optTag) {
-      const at = next.indexOf(optTag, newAt);
-      const end = at + optTag.length - 1;
-      next = next.slice(0, end) + " data-curator-answered-option" + next.slice(end);
-    }
   }
   return next;
 }
@@ -1441,6 +1432,8 @@ function applyFeedback(runDir, items) {
     const base = { id: item.question, answer: item.answer ?? null, ...(item.note ? { note: item.note } : {}) };
     // The curator drain empties its queue, so an unresolved item survives only if it is recorded here.
     const keep = (reason, record) => {
+      // Changes the decision's render hash so the page is rewritten and drops the refused answer stamp.
+      if (d && item.answer != null) d.rejected_answer = { answer: item.answer, at: new Date().toISOString() };
       if (record && (item.note || item.answer != null)) recordHumanNote(d, item, seenNotes);
       unresolved.push({ ...base, reason, ...(record ? { recorded: true } : {}) });
     };
