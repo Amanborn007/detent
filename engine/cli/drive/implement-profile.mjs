@@ -159,11 +159,11 @@ function gitDenyWrite(ctx) {
 }
 
 function implementDenyWrite(ctx) {
-  return withTwins(dedupe([...gitDenyWrite(ctx), ...SHARED_TMP, ...claudeUidTmp(ctx)]), ctx);
+  return withTwins(dedupe([...gitDenyWrite(ctx), ...SHARED_TMP, ...claudeUidTmp(ctx), ...(ctx.sentinel ? [ctx.sentinel] : [])]), ctx);
 }
 
 function implementAllowRead(ctx) {
-  const dirs = [ctx.clone, ctx.inputs, ctx.outbox, ctx.tmp].filter(Boolean).flatMap(variants);
+  const dirs = [ctx.clone, ctx.inputs, ctx.outbox, ctx.tmp, ctx.shimDir].filter(Boolean).flatMap(variants);
   const toolchains = detectToolchainRoots(ctx.home, {
     path: ctx.path ?? implementPathEntries(process.env.PATH),
     exclude: [ctx.sroot, ...(ctx.extraDeny ?? [])],
@@ -188,7 +188,7 @@ export function buildImplementSettings(ctx) {
         denyRead: implementDenyRead(ctx),
         allowRead: implementAllowRead(ctx),
         denyWrite: implementDenyWrite(ctx),
-        allowWrite: [ctx.clone, ctx.outbox, ctx.tmp],
+        allowWrite: [ctx.clone, ctx.outbox, ctx.tmp, ...(ctx.callLog ? [ctx.callLog] : [])],
       },
     },
     disableAllHooks: true,
@@ -256,7 +256,7 @@ export function validateImplementSettings(s, ctx) {
   for (const f of GIT_INDIRECTION) {
     if (!list("denyWrite").some((x) => x.endsWith(`/.git/${f}`))) errs.push(`denyWrite must include a .git/${f} entry`);
   }
-  if (list("allowWrite").length > 3) errs.push("allowWrite may hold only the clone, outbox and tmp");
+  if (list("allowWrite").length > (ctx.callLog ? 4 : 3)) errs.push("allowWrite may hold only the clone, outbox, tmp and the shim call log");
   for (const w of list("allowWrite")) {
     if (SHARED_TMP.some((t) => w === t || w.startsWith(t + "/"))) errs.push(`allowWrite must not include shared tmp ${w}`);
   }
@@ -284,9 +284,14 @@ export function validateImplementSettings(s, ctx) {
         if (a === d || d.startsWith(a + "/")) errs.push(`allowRead ${a} equals or contains denyRead ${d}`);
       }
     }
-    const want = [ctx.clone, ctx.outbox, ctx.tmp].sort();
+    const want = [ctx.clone, ctx.outbox, ctx.tmp, ...(ctx.callLog ? [ctx.callLog] : [])].sort();
     if (JSON.stringify([...list("allowWrite")].sort()) !== JSON.stringify(want)) {
-      errs.push(`allowWrite must be exactly the clone, outbox and tmp (got ${list("allowWrite").join(", ")})`);
+      errs.push(`allowWrite must be exactly the clone, outbox, tmp${ctx.callLog ? " and the shim call log" : ""} (got ${list("allowWrite").join(", ")})`);
+    }
+    if (ctx.sentinel) {
+      for (const p of isDarwin(ctx) ? [ctx.sentinel, DATA_TWIN + ctx.sentinel] : [ctx.sentinel]) {
+        if (!list("denyWrite").includes(p)) errs.push(`denyWrite must include the sentinel ${p}`);
+      }
     }
     for (const g of gitDenyWrite(ctx)) {
       if (!list("denyWrite").includes(g)) errs.push(`denyWrite must include ${g}`);
@@ -340,13 +345,14 @@ export function buildImplementEnv(parentEnv, ctx) {
       throw new Error(`implement env: PATH entry ${e} is inside a writable or shared dir`);
     }
   }
+  if (ctx.shell !== undefined && (typeof ctx.shell !== "string" || !isAbsolute(ctx.shell))) throw new Error("implement env: ctx.shell must be an absolute path");
   const env = {
     PATH: pathEntries.join(":"),
     // Real HOME only: claude finds its login through it. Bash stays covered by the HOME denyRead.
     HOME: ctx.home,
     TERM: "dumb",
     SHELL: "/bin/sh",
-    CLAUDE_CODE_SHELL: "/bin/bash",
+    CLAUDE_CODE_SHELL: ctx.shell ?? "/bin/bash",
     CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1",
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_NOSYSTEM: "1",
