@@ -30,13 +30,14 @@ export function idleMsFromEnv(env = process.env) {
   return ms;
 }
 
-// An open tab ticks every 1.5s, so a live review never reaches the idle window.
-export function shouldIdleExit({ hasWaiters, lastActivity, now, idleMs }) {
-  return !hasWaiters && now - lastActivity > idleMs;
+// A live session keeps the daemon up: after a sleep its drafts need this boot's keys.
+export function shouldIdleExit({ hasWaiters, hasLiveSessions, lastActivity, now, idleMs }) {
+  return !hasWaiters && !hasLiveSessions && now - lastActivity > idleMs;
 }
 
-// A daemon whose state file vanished or names another pid is an orphan nobody can find.
-export function shouldExitForState({ stateExists, statePid, ownPid }) {
+// An orphan exits, but never while it holds a waiting poll or unsent answers.
+export function shouldExitForState({ stateExists, statePid, ownPid, hasWaiters, hasPending }) {
+  if (hasWaiters || hasPending) return false;
   return !stateExists || statePid !== ownPid;
 }
 
@@ -88,6 +89,31 @@ export class SessionStore {
 
   get(key) {
     return this.sessions.get(key) || null;
+  }
+
+  hasPending() {
+    for (const s of this.sessions.values()) if (s.pending.length > 0) return true;
+    return false;
+  }
+
+  // Copy our queued items into whatever state.json now holds, without taking it over.
+  mergePendingIntoState() {
+    if (!this.stateFile) return;
+    const data = fs.existsSync(this.stateFile) ? JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) : {};
+    data.sessions ||= {};
+    for (const [key, s] of this.sessions) {
+      if (s.pending.length === 0) continue;
+      const target = data.sessions[key] ||= {
+        id: s.id, file: s.file, createdAt: s.createdAt, pending: [], ended: s.ended, endedBy: s.endedBy,
+        chat: s.chat, delivered: s.delivered, lastSeenAt: s.lastSeenAt,
+      };
+      for (const item of s.pending) {
+        if (!target.pending.some((p) => JSON.stringify(p) === JSON.stringify(item))) target.pending.push(item);
+      }
+    }
+    const tmp = `${this.stateFile}.tmp-${process.pid}`;
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+    fs.renameSync(tmp, this.stateFile);
   }
 
   hasWaiters() {
@@ -397,15 +423,12 @@ export function safeReadArtifact(registeredFile) {
 // Pure answer-flow logic. It is injected into the shell page as source, so it
 // must stay self-contained (no closures, no imports).
 export function answerProgress(questions, answered) {
-  const seen = {};
-  const names = [];
-  answered.forEach((q) => {
-    if (!seen[q]) { seen[q] = true; names.push(q); }
-  });
+  const seen = new Set(answered);
+  const names = [...seen];
   if (!Array.isArray(questions)) {
     return { known: false, total: null, answered: names.length, unanswered: [], requiredMissing: [] };
   }
-  const open = questions.filter((q) => !seen[q.question]);
+  const open = questions.filter((q) => !seen.has(q.question));
   return {
     known: true,
     total: questions.length,
@@ -419,6 +442,12 @@ export function itemDelivery(id, delivered) {
   return delivered.some((d) => d.id === id) ? 'delivered' : 'sent';
 }
 
+export function handoffLabel(state, polling) {
+  if (state === 'delivered') return 'handed to agent';
+  return polling ? 'sent, agent is picking it up' : 'queued — agent not listening right now';
+}
+
+// Superseded by handoffLabel in the page; kept because shell-flow.test.mjs imports it.
 export function deliveryLabel(state, polling) {
   if (state === 'delivered') return 'delivered to agent';
   return polling ? 'sent, agent is picking it up' : 'queued — agent not listening right now';
@@ -497,7 +526,7 @@ export function chromePage(session) {
   button.danger { background: none; border: 1px solid rgba(200,60,60,.6); color: #c83c3c; border-radius: 8px; padding: 9px 12px;
                   font-size: 13px; cursor: pointer; }
   #drafts { flex: none; padding: 10px 14px; border-top: 1px solid rgba(128,128,128,.3); display: none; flex-direction: column; gap: 6px; font-size: 12.5px; }
-  body.nokey #drafts { display: flex; }
+  body.nokey #drafts, body.offline #drafts { display: flex; }
   #draftText { width: 100%; min-height: 110px; font: 12px ui-monospace, monospace; border-radius: 8px; padding: 8px;
                border: 1px solid rgba(128,128,128,.4); background: transparent; color: inherit; }
   #chat { flex: none; max-height: 30vh; overflow-y: auto; padding: 4px 14px 10px; border-top: 1px solid rgba(128,128,128,.3); }
@@ -562,7 +591,7 @@ export function chromePage(session) {
   var NL = String.fromCharCode(10);
   ${answerProgress}
   ${itemDelivery}
-  ${deliveryLabel}
+  ${handoffLabel}
   var frame = document.getElementById('plan');
   var queueEl = document.getElementById('queue');
   var chatEl = document.getElementById('chat');
@@ -590,6 +619,7 @@ export function chromePage(session) {
   var chatCount = 0;
   var ended = false;
   var storageWarned = false;
+  var sendConfirming = false;
 
   function showError(msg) {
     errTextEl.textContent = msg;
@@ -624,9 +654,11 @@ export function chromePage(session) {
 
   var modalQueue = [];
   var modalCb = null;
+  var modalCancelCb = null;
   function openModal(opts) {
     if (modalCb) { modalQueue.push(opts); return; }
     modalCb = opts.onOk;
+    modalCancelCb = opts.onCancel || null;
     modalMsgEl.textContent = opts.message;
     var withText = typeof opts.text === 'string';
     modalTextEl.hidden = !withText;
@@ -635,22 +667,26 @@ export function chromePage(session) {
     modalEl.hidden = false;
     (withText ? modalTextEl : modalOkEl).focus();
   }
-  function closeModal() {
+  function closeModal(cancelled) {
+    var onCancel = modalCancelCb;
     modalCb = null;
+    modalCancelCb = null;
     modalEl.hidden = true;
+    if (cancelled === true && onCancel) onCancel();
     var next = modalQueue.shift();
     if (next) openModal(next);
   }
+  function cancelModal() { closeModal(true); }
   function acceptModal() {
     var cb = modalCb;
     var value = modalTextEl.value;
-    closeModal();
+    closeModal(false);
     if (cb) cb(value);
   }
   modalOkEl.addEventListener('click', acceptModal);
-  document.getElementById('modalCancel').addEventListener('click', closeModal);
+  document.getElementById('modalCancel').addEventListener('click', cancelModal);
   modalEl.addEventListener('keydown', function (ev) {
-    if (ev.key === 'Escape') { ev.preventDefault(); closeModal(); }
+    if (ev.key === 'Escape') { ev.preventDefault(); cancelModal(); }
     else if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey) && !modalTextEl.hidden) { ev.preventDefault(); acceptModal(); }
   });
 
@@ -683,7 +719,7 @@ export function chromePage(session) {
     return lines.join(NL);
   }
   function saveDrafts() {
-    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ queue: queue, comment: commentEl.value })); } catch (e) { storageFailed(); }
+    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ queue: queue, comment: commentEl.value, sent: sent })); } catch (e) { storageFailed(); }
   }
   function restoreDrafts() {
     var raw = null;
@@ -691,6 +727,7 @@ export function chromePage(session) {
     if (!raw) return;
     var d = JSON.parse(raw);
     if (Array.isArray(d.queue)) queue = d.queue;
+    if (Array.isArray(d.sent)) sent = d.sent;
     if (typeof d.comment === 'string') commentEl.value = d.comment;
   }
   commentEl.addEventListener('input', saveDrafts);
@@ -735,7 +772,7 @@ export function chromePage(session) {
       body.textContent = label(entry.item);
       var st = document.createElement('span');
       st.className = 'state ' + state;
-      st.textContent = deliveryLabel(state, polling);
+      st.textContent = handoffLabel(state, polling);
       body.appendChild(st);
       div.appendChild(kind); div.appendChild(body);
       sentListEl.appendChild(div);
@@ -780,7 +817,7 @@ export function chromePage(session) {
       div.appendChild(kind); div.appendChild(body); div.appendChild(rm);
       queueEl.appendChild(div);
     });
-    sendBtn.disabled = ended || noKey;
+    sendBtn.disabled = ended || noKey || sendConfirming;
     endBtn.disabled = ended || noKey;
     draftTextEl.value = draftText();
     renderProgress();
@@ -797,8 +834,10 @@ export function chromePage(session) {
       openModal({
         message: 'Why / note for: ' + item.question, text: item.note || '', ok: 'Save',
         onOk: function (note) {
-          var i = queue.indexOf(item);
-          if (i === -1) return;
+          var question = item.question;
+          var i = queue.findIndex(function (q) { return q.type === 'decision' && q.question === question; });
+          if (i === -1) { showError('That decision was removed while you were editing it, so the note was not saved.'); return; }
+          item = queue[i];
           note = note.trim();
           if (note === '') delete item.note; else item.note = note;
           if (item.answer === null && item.note === undefined) {
@@ -817,7 +856,7 @@ export function chromePage(session) {
       message: 'Edit this ' + item.type + ':', text: item[field] || '', ok: 'Save',
       onOk: function (next) {
         var i = queue.indexOf(item);
-        if (i === -1) return;
+        if (i === -1) { showError('That item was removed while you were editing it, so the edit was not saved.'); return; }
         next = next.trim();
         if (next === '') queue.splice(i, 1); else item[field] = next;
         render();
@@ -903,6 +942,7 @@ export function chromePage(session) {
 
   function setOffline(off) {
     document.body.classList.toggle('offline', off);
+    if (off) draftTextEl.value = draftText();
   }
 
   function api(method, url, body) {
@@ -960,22 +1000,35 @@ export function chromePage(session) {
 
   sendBtn.addEventListener('click', function () {
     if (ended) return;
-    var items = queue.slice();
-    var c = commentEl.value.trim();
-    if (c) items.push({ type: 'comment', text: c });
-    if (items.length === 0) { showError('Nothing to send. Queue an annotation, decision or comment first.'); return; }
+    var built = buildItems();
+    if (built.items.length === 0) { showError('Nothing to send. Queue an annotation, decision or comment first.'); return; }
     var p = answerProgress(questions, answeredQuestions());
     if (p.requiredMissing.length > 0) {
       var names = p.requiredMissing.slice(0, 3).map(function (q) { return '“' + q.slice(0, 60) + '”'; }).join(', ');
+      sendConfirming = true;
+      render();
       openModal({
         message: p.requiredMissing.length + ' required decision(s) have no answer yet: ' + names + (p.requiredMissing.length > 3 ? ' and more' : '') + '. The agent will get nothing for them.',
         ok: 'Send anyway',
-        onOk: function () { doSend(items, c); },
+        onOk: function () {
+          sendConfirming = false;
+          var live = buildItems();
+          if (live.items.length === 0) { render(); showError('Nothing left to send.'); return; }
+          doSend(live.items, live.comment);
+        },
+        onCancel: function () { sendConfirming = false; render(); },
       });
       return;
     }
-    doSend(items, c);
+    doSend(built.items, built.comment);
   });
+
+  function buildItems() {
+    var items = queue.slice();
+    var c = commentEl.value.trim();
+    if (c) items.push({ type: 'comment', text: c });
+    return { items: items, comment: c };
+  }
 
   endBtn.addEventListener('click', function () {
     if (ended) return;
@@ -1238,6 +1291,9 @@ export function createServer(store, { secret } = {}) {
           if (!Array.isArray(body.items) || body.items.length === 0) {
             return sendJson(res, 400, { error: 'items must be a non-empty array', next_step: 'Queue at least one item before sending.' });
           }
+          if (body.items.some((item) => item === null || typeof item !== 'object' || Array.isArray(item))) {
+            return sendJson(res, 400, { error: 'every item must be a JSON object', next_step: 'Send items shaped like {"type": "comment", "text": "..."}.' });
+          }
           const delivered = store.send(session.key, body.items);
           store.addUserChat(session.key, `sent ${body.items.length} item(s) to the agent`);
           return sendJson(res, 200, { ok: true, delivered, ids: store.idsFor(body.items) });
@@ -1331,7 +1387,11 @@ if (isDirectRun() && process.argv.includes('--daemon')) {
     const stateExists = fs.existsSync(stateFile);
     if (stateExists) statePid = JSON.parse(fs.readFileSync(stateFile, 'utf8')).pid ?? null;
     // Not stop(): that would rewrite state.json and clobber the daemon that owns it.
-    if (shouldExitForState({ stateExists, statePid, ownPid: process.pid })) process.exit(0);
-    if (shouldIdleExit({ hasWaiters: store.hasWaiters(), lastActivity: store.lastActivity, now: Date.now(), idleMs })) stop();
+    const hasWaiters = store.hasWaiters();
+    if (shouldExitForState({ stateExists, statePid, ownPid: process.pid, hasWaiters, hasPending: store.hasPending() })) {
+      store.mergePendingIntoState();
+      process.exit(0);
+    }
+    if (shouldIdleExit({ hasWaiters, hasLiveSessions: store.hasLiveSessions(), lastActivity: store.lastActivity, now: Date.now(), idleMs })) stop();
   }, Math.min(60 * 1000, idleMs));
 }
