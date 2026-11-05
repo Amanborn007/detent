@@ -48,7 +48,7 @@ test("gate open with unchanged decisions and inputs leaves the page, and its cur
   assert.match(before, /data-curator-answered="approve"/);
 });
 
-test("a changed option re-renders the page and carries the log entries and stamps forward", () => {
+test("a changed option re-renders the page and carries the log entries and only the note stamps forward", () => {
   const g = atPlanGate();
   marked(g);
   const p = join(g.ctx.runDir, "decisions.json");
@@ -57,9 +57,10 @@ test("a changed option re-renders the page and carries the log entries and stamp
   const html = readFileSync(g.html, "utf8");
   assert.match(html, /data-plan-option="defer"/);
   assert.match(html, /decided to split step 3/);
-  assert.match(html, /data-curator-answered="approve"/);
+  assert.doesNotMatch(html, /data-curator-answered="/);
+  assert.doesNotMatch(html, /data-curator-answered-option/);
   assert.match(html, /data-curator-answered-note="ok with caveat"/);
-  assert.match(html, /data-plan-option="approve"[^>]*data-curator-answered-option|data-curator-answered-option[^>]*data-plan-option="approve"/);
+  assert.match(html, /data-curator-answered-at="/);
 });
 
 test("a stamp for an option that no longer exists is dropped, the log is kept", () => {
