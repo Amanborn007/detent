@@ -3,7 +3,7 @@
 // services that reach the keychain daemon and Launch Services.
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { posix } from "node:path";
+import { join, posix } from "node:path";
 import { detectToolchainRoots, implementDenyRead, implementPathEntries } from "./implement-profile.mjs";
 
 export const CLAUDE_BASE_VERSION = "2.1.306";
@@ -77,10 +77,10 @@ function ancestors(p) {
   return out.reverse();
 }
 
-// scratch is the only writable tree and loopbackPort the only reachable endpoint.
+// writeRoots (default scratch) are the only writable trees and loopbackPort the only reachable endpoint.
 // denyRead entries are emitted before reallowRead, and denyWrite after the write
 // allow, so each probe can pin down SBPL's last-matching-rule-wins order.
-export function buildProbeProfile({ scratch, loopbackPort, denyRead = [], reallowRead = [], denyWrite = [], logTag = "detent-probe" }) {
+export function buildProbeProfile({ scratch, writeRoots = [scratch], loopbackPort, denyRead = [], reallowRead = [], denyWrite = [], logTag = "detent-probe" }) {
   if (!/^[A-Za-z0-9-]{1,64}$/.test(logTag)) throw new Error(`logTag must be 1-64 letters, digits or dashes: ${logTag}`);
   if (loopbackPort !== null && (!Number.isInteger(loopbackPort) || loopbackPort < 1 || loopbackPort > 65535)) {
     throw new Error(`loopbackPort must be null or an integer in 1..65535: ${loopbackPort}`);
@@ -131,7 +131,8 @@ export function buildProbeProfile({ scratch, loopbackPort, denyRead = [], reallo
   for (const d of metaDirs) out.push(`(allow file-read-metadata (literal ${sbplString(d, "reallowRead")}))`);
   for (const p of reallowRead) out.push(`(allow file-read* ${subpath(p, "reallowRead")})`);
   out.push("");
-  out.push(`(allow file-write* ${subpath(scratch, "scratch")}${DEVICE_WRITES.map((d) => ` (literal ${JSON.stringify(d)})`).join("")})`);
+  const devices = DEVICE_WRITES.map((d) => ` (literal ${JSON.stringify(d)})`).join("");
+  writeRoots.forEach((w, i) => out.push(`(allow file-write* ${subpath(w, "writeRoots")}${i === 0 ? devices : ""})`));
   for (const p of denyWrite) out.push(`(deny file-write* ${subpath(p, "denyWrite")})`);
   return out.join("\n") + "\n";
 }
@@ -145,11 +146,18 @@ const within = (p, root) => p === root || p.startsWith(root.endsWith("/") ? root
 // A setsid()/setpgid() child leaves the process group the run is killed through.
 const DENY_SESSION_SYSCALLS = "(deny syscall-unix (syscall-number SYS_setsid SYS_setpgid))";
 
+// The writable entries plus box/home and box/tmp, minus any entry already inside another.
+export function boxWriteRoots(scratch, writable) {
+  const wanted = [...new Set([...writable, join(scratch, "home"), join(scratch, "tmp")])];
+  return wanted.filter((w) => !wanted.some((o) => o !== w && within(w, o)));
+}
+
 // The host box profile: HOME, the user temp dir and the claude tmps are denied wholesale, then only readOnly,
-// the detected toolchain roots, the xcode allows and the box itself are read again. The box is
-// the only write root; loopbackPort null leaves the network fully closed.
+// the detected toolchain roots, the xcode allows and the box itself are read again. Writes are
+// limited to the writable entries (default the box) plus box/home and box/tmp (the child's HOME and
+// TMPDIR); loopbackPort null leaves the network fully closed.
 export function buildSeatbeltProfile({
-  scratch, home, readOnly = [], writable = [], denyRead = [], loopbackPort = null, toolchainRoots,
+  scratch, home, readOnly = [], writable = [scratch], denyRead = [], loopbackPort = null, toolchainRoots,
   userTmp = realOr(tmpdir()), uid = process.getuid(), logTag = "detent-hostbox",
 }) {
   sbplString(scratch, "scratch");
@@ -161,10 +169,12 @@ export function buildSeatbeltProfile({
   const roots = toolchainRoots ?? detectToolchainRoots(home, { path: implementPathEntries(process.env.PATH) });
   for (const p of readOnly) sbplString(p, "readOnly");
   for (const p of roots) sbplString(p, "toolchain root");
+  const writeRoots = boxWriteRoots(scratch, writable);
   const tmpDeny = implementDenyRead({ platform: "darwin", home, sroot: home, userTmp, uid });
   const reallow = [...new Set([...readOnly, ...roots, scratch, XCODE_SELECT_LINK, XCODE_LICENSE_PLIST])];
   const profile = buildProbeProfile({
     scratch,
+    writeRoots,
     loopbackPort,
     logTag,
     denyRead: [...new Set([...defaultDenyRead(home), ...tmpDeny, ...denyRead])],

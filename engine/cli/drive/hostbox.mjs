@@ -3,12 +3,12 @@
 // Linux uses bubblewrap with no network. It never falls back to an unboxed run.
 import { spawn as nodeSpawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { accessSync, constants, mkdirSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
+import { accessSync, closeSync, constants, mkdirSync, mkdtempSync, openSync, realpathSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, posix } from "node:path";
 import { hardEnv } from "./gitsafe.mjs";
 import { detectToolchainRoots, implementPathEntries } from "./implement-profile.mjs";
-import { buildSeatbeltProfile } from "./seatbelt.mjs";
+import { boxWriteRoots, buildSeatbeltProfile } from "./seatbelt.mjs";
 
 export class HostboxError extends Error {
   constructor(code, message, extra = {}) {
@@ -62,8 +62,8 @@ export function bwrapArgv({ roBinds = [], rwBinds = [], net = "none", cwd, cmd, 
     "--ro-bind", "/usr", "/usr",
     ...ROOT_DIRS.flatMap((p) => ["--ro-bind-try", p, p]),
     ...ETC_FILES.flatMap((p) => ["--ro-bind-try", p, p]),
-    ...rwBinds.flatMap((p) => ["--bind", p, p]),
     ...roBinds.flatMap((p) => ["--ro-bind", p, p]),
+    ...rwBinds.flatMap((p) => ["--bind", p, p]),
     "--chdir", cwd,
     "--", cmd, ...args,
   ];
@@ -176,7 +176,7 @@ function capture() {
 }
 
 export async function runInHostbox({
-  platform = process.platform, box, cmd, args = [], cwd, env: extra = {}, path, readOnly = [], writable = [],
+  platform = process.platform, box, cmd, args = [], cwd, env: extra = {}, path, readOnly = [], writable = [box],
   net = "none", timeoutMs, home = homedir(), toolchainRoots, developerDir, parentEnv = process.env,
   spawn = nodeSpawn, which = findOnPath, kill = process.kill.bind(process),
 }) {
@@ -212,7 +212,10 @@ export async function runInHostbox({
   if (platform === "linux") {
     bin = which("bwrap");
     if (!bin) throw new HostboxError("bwrap_missing", "bubblewrap (bwrap) is not on PATH; refusing to run unboxed");
-    argv = bwrapArgv({ roBinds: [...readOnly, ...roots], rwBinds: [box], net, cwd, cmd, args });
+    // A later bind overlays an earlier one, so the read-only box goes first and the writable entries on top.
+    const rw = boxWriteRoots(box, writable);
+    const wholeBox = rw.length === 1 && rw[0] === box;
+    argv = bwrapArgv({ roBinds: [...(wholeBox ? [] : [box]), ...readOnly, ...roots], rwBinds: rw, net, cwd, cmd, args });
   } else {
     bin = SANDBOX_EXEC;
     const profile = buildSeatbeltProfile({
@@ -291,4 +294,41 @@ export async function runInHostbox({
     });
     child.on("close", (code, signal) => finish(code, signal));
   });
+}
+
+const usedBoxes = new Set();
+
+/**
+ * Makes a fresh box dir under parent and returns { dir, run }. run() takes runInHostbox's options
+ * minus box and refuses a second call on the same box with hostbox_box_reused. S7 must run every
+ * untrusted command through this, never runInHostbox on a long-lived box: the child can leave
+ * files, symlinks or background state in the box that a later run would trust. Callers copy the
+ * outputs they need out of dir and discard it, and close the egress proxy after a setup run.
+ * A run that fails to start still uses the box up.
+ */
+export function createBox({ parent = tmpdir() } = {}) {
+  absolutes([parent], "parent");
+  let realParent;
+  try {
+    realParent = realpathSync(parent);
+  } catch (e) {
+    throw new HostboxError("hostbox_box_missing", `box parent ${parent} does not exist: ${e.message}`);
+  }
+  const dir = realpathSync(mkdtempSync(join(realParent, "hostbox-")));
+  for (const d of ["home", "tmp", "cache", "out", "work"]) mkdirSync(join(dir, d), { mode: 0o700 });
+  // Outside the box so the boxed child cannot delete it.
+  const marker = `${dir}.used`;
+  const run = (opts = {}) => {
+    const reused = new HostboxError("hostbox_box_reused", `box ${dir} was already used; create a fresh one`);
+    if (usedBoxes.has(dir)) return Promise.reject(reused);
+    usedBoxes.add(dir);
+    try {
+      closeSync(openSync(marker, "wx", 0o600));
+    } catch (e) {
+      if (e.code === "EEXIST") return Promise.reject(reused);
+      return Promise.reject(new HostboxError("hostbox_box_marker_failed", `could not write the use marker ${marker}: ${e.message}`));
+    }
+    return runInHostbox({ cwd: join(dir, "work"), ...opts, box: dir });
+  };
+  return { dir, run };
 }

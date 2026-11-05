@@ -49,8 +49,7 @@ live("a canary in realpath(tmpdir()) outside the box is unreadable", darwin, asy
   } finally { rmSync(canary, { force: true }); }
 });
 
-// M2 is blocked by the committed test "the only write root is the box"; enable once that is signed off.
-live("with writable limited to box/out a write to box/work fails", { skip: "blocked: M2 conflicts with a frozen test" }, async () => {
+live("with writable limited to box/out a write to box/work fails", {}, async () => {
   const box = mkBox();
   await sh(box, `echo x > "${box}/work/f"; echo y > "${box}/out/f"`, { writable: [join(box, "out")] });
   assert.equal(existsSync(join(box, "work", "f")), false);
