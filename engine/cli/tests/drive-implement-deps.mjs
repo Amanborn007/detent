@@ -1,29 +1,14 @@
 // Test-only deps for `drive --implement`, loaded through DETENT_IMPLEMENT_TEST_DEPS under node --test.
 // It swaps the host box for an unboxed runner that records what drive asked for, and the probe for a trivial one.
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { setGitSpy } from "../drive/gitsafe.mjs";
 
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 
-function subcommand(argv) {
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "-c" || argv[i] === "-C" || argv[i] === "--git-dir") { i++; continue; }
-    return argv[i];
-  }
-  return null;
-}
-
 export default function deps(cfg) {
   const log = (e) => appendFileSync(cfg.eventsFile, `${JSON.stringify(e)}\n`);
-  setGitSpy(({ argv }) => {
-    const i = argv.indexOf("--git-dir");
-    const gitDir = i >= 0 ? argv[i + 1] : null;
-    log({ ev: "git", sub: subcommand(argv), gitDir, gitDirExists: gitDir ? existsSync(gitDir) : null });
-  });
-
   function createBox({ parent }) {
     const dir = realpathSync(mkdtempSync(join(parent, "hostbox-")));
     for (const d of ["home", "tmp", "cache", "out", "work"]) mkdirSync(join(dir, d), { mode: 0o700 });
@@ -64,9 +49,12 @@ export default function deps(cfg) {
     preflight: () => ({ ok: !cfg.preflightRefusals, refusals: cfg.preflightRefusals ?? [] }),
     createBox,
     makeProbe: () => ({
-      script: "echo bash_ran=1",
-      expect: { bash_ran: { k: "eq", v: cfg.probeWant ?? 1 } },
-      controlScript: "true",
+      exps: {
+        validate: { readDeny: [], writeAllow: [], writeDenyRequired: [] },
+        probe: { script: "echo bash_ran=1", expect: { bash_ran: { k: "eq", v: cfg.probeWant ?? 1 } }, controls: {} },
+        shell: { realShell: "/bin/sh", canaryPort: 1, canarySocket: "/tmp/none.sock" },
+      },
+      finish: async () => ({ canaryHits: 0 }),
     }),
   };
 }
