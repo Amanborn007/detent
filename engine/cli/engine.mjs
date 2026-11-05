@@ -457,6 +457,7 @@ function nextDecisionId(decisions) {
 // resolved: that answer is legal only for an external/infra/capability/data
 // unblock, never a bypass of the owner's own call.
 function isUnresolvedJudgment(d) {
+  if (d.status === "answered" && Array.isArray(d.blocking_answers) && d.blocking_answers.includes(d.answer)) return true;
   return d.cause === "judgment" && typeof d.answer === "string" &&
     d.answer.trim().toLowerCase() === PROCEED_DEGRADED_ANSWER;
 }
@@ -1436,7 +1437,7 @@ const ENGINE_ROOT = resolve(dirname(ENGINE_FILE), "..");
 function driveInjection() {
   return {
     STAGES, STAGE_ARTIFACTS, STAGE_END_GATES, out, refuse, fail, nowIso, readJson, appendEvent, detentRoot, repoOf, findRun,
-    loadStatus, loadDecisions, saveDecisions, nextDecisionId, pendingBlockers, syncGateAnsweredEvents, beginStage, endStage,
+    loadStatus, loadDecisions, saveDecisions, nextDecisionId, pendingBlockers, isUnresolvedJudgment, syncGateAnsweredEvents, beginStage, endStage,
     raiseEndGate, renderGateArtifact, drainCuratorFor, collectResult, siblingCurator, escapeHtml, parseYamlSubset, runExec,
     engineFile: ENGINE_FILE,
   };
@@ -2500,7 +2501,7 @@ function waitingDecision(runDir) {
   const stage = STAGES.find((s) => !["done", "skipped"].includes(status.stages[s].status));
   const blockers = stage ? pendingBlockers(decisions, stage) : [];
   const blocked = stage ? decisions.filter((d) => (status.stages[stage].blocked_on || []).includes(d.id) && d.status === "pending") : [];
-  return blockers[0] || blocked[0] || decisions.find((d) => d.status === "pending") || null;
+  return blockers[0] || blocked[0] || decisions.find((d) => d.status === "pending" || isUnresolvedJudgment(d)) || null;
 }
 
 const hasApproveRevise = (d) => Array.isArray(d.options) && d.options.includes("approve") && d.options.includes("revise");
@@ -2531,7 +2532,7 @@ function cmdDecide(flags) {
   writeFileSync(feedback, p.stdout.trim().split("\n").pop());
   const collected = selfJson(["gate", "collect", "--run", runId, "--repo", repo, "--file", feedback]);
   if (!collected.json.ok) relay(collected);
-  const stillPending = loadDecisions(runDir).filter((d) => d.status === "pending").map((d) => d.id);
+  const stillPending = loadDecisions(runDir).filter((d) => d.status === "pending" || isUnresolvedJudgment(d)).map((d) => d.id);
   out({
     ok: true, ...info, answered: collected.json.answered, unresolved: collected.json.unresolved, pending: stillPending,
     next_step: stillPending.length
