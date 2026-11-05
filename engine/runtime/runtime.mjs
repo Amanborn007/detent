@@ -79,7 +79,8 @@ function checkDenyTools(list) {
     if (!isObject(entry) || Object.keys(entry).length !== 1 || entry.shell_prefix === undefined) throw bad(at, "must be exactly { shell_prefix: string }");
     const p = entry.shell_prefix;
     if (typeof p !== "string" || !p) throw bad(`${at}.shell_prefix`, "must be a non-empty string");
-    if (/[()*\n\0]/.test(p)) throw bad(`${at}.shell_prefix`, "must not contain ( ) *, a newline or NUL");
+    if (/[()*\\\x00-\x1f\x7f]/.test(p)) throw bad(`${at}.shell_prefix`, "must not contain ( ) *, a backslash or a control character");
+    if (p.trim() !== p) throw bad(`${at}.shell_prefix`, "must not start or end with whitespace");
   });
 }
 

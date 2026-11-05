@@ -1,4 +1,5 @@
 // claude-code adapter: pure capabilities(), plan(req) and parse(native, req). It never spawns.
+import { posix } from "node:path";
 import { RuntimeRequestError } from "../errors.mjs";
 
 const NAME = "claude-code";
@@ -84,6 +85,7 @@ function planStrict(req) {
   if (req.model === undefined) throw strict("needs model");
   if (req.budget?.usd === undefined || req.budget?.turns === undefined) throw strict("needs budget.usd and budget.turns");
   if (req.add_dirs === undefined) throw strict("needs add_dirs");
+  for (const d of req.add_dirs) if (d === "/" || posix.resolve(d) !== d) throw strict(`needs add_dirs entries that are normalised and not the root, got ${JSON.stringify(d)}`);
   if (req.env === undefined) throw strict("needs env");
   if (req.deny_tools !== undefined) throw strict("does not take deny_tools");
   if (req.persist_session !== undefined) throw strict("does not take persist_session");
@@ -162,8 +164,9 @@ const containment = Object.freeze({
   timeout_ms: 30000,
   check(native) {
     if (native.error) return { ok: false, kind: "spawn", message: native.error.message };
+    if (native.status !== 0 || native.signal) return { ok: false, kind: "exit", status: native.status, signal: native.signal ?? null };
     const text = (native.stdout ?? "").trim();
-    if (!versionAtLeast(text)) return { ok: false, kind: "version", text, min: MIN_CLAUDE_VERSION };
+    if (!/^\d+\.\d+\.\d+(\s|$)/.test(text) || !versionAtLeast(text)) return { ok: false, kind: "version", text, min: MIN_CLAUDE_VERSION };
     return { ok: true, version: text };
   },
 });
