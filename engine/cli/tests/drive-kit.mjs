@@ -3,8 +3,8 @@ import { writeFileSync, readFileSync, existsSync, mkdirSync, chmodSync, mkdtempS
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
-import { spawnSync } from "node:child_process";
-import { engine, mkRun, mkCuratorClone, readJson, writeJson, writeArtifact } from "./helpers.mjs";
+import { spawn, spawnSync } from "node:child_process";
+import { ENGINE, engine, mkRun, mkCuratorClone, readJson, writeJson, writeArtifact, detentHome, curatorStateDir } from "./helpers.mjs";
 
 export const BARE_PATH = "/usr/bin:/bin";
 export const scratch = () => realpathSync(mkdtempSync(join(tmpdir(), "drive-hard-")));
@@ -133,6 +133,7 @@ const cwd = realpathSync(process.cwd());
 appendFileSync(join(here, "impl-stub.log"), JSON.stringify({ args: argv, cwd, env: process.env, settings, prompt, tools, files: tools === "Bash" ? [] : readdirSync(cwd) }) + "\\n");
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
 if (tools !== "Bash") {
+  if ((cfg.recheck || {}).killParent) process.kill(process.ppid, "SIGKILL");
   console.log(JSON.stringify([{ type: "result", subtype: "success", is_error: false, result: (cfg.recheck || {}).text ?? "recheck ok", total_cost_usd: 0.01, num_turns: 1, permission_denials: [] }]));
   process.exit(0);
 }
@@ -195,4 +196,23 @@ export function implDrive(t, cfg, { flags = ["--implement"], deps = {}, env = {}
     },
   });
   return { ...r, calls: implLog(t), events: implEvents(t) };
+}
+
+// implDrive without waiting: returns the live child so a test can signal it, plus a promise of {code, signal, stdout, stderr}.
+export function implDriveAsync(t, cfg, { flags = ["--implement"], deps = {} } = {}) {
+  writeFileSync(join(t.d, "mode.json"), JSON.stringify(cfg));
+  const depsCfg = join(t.d, "impl-deps.json");
+  writeFileSync(depsCfg, JSON.stringify({ eventsFile: join(t.d, "impl-events.jsonl"), repo: t.repo, runId: t.runId, ...deps }));
+  mkdirSync(t.tmp, { recursive: true });
+  const env = {
+    ...process.env, DETENT_ROOT: detentHome(), CURATOR_NO_BROWSER: "1", CURATOR_STATE_DIR: curatorStateDir(),
+    PATH: BARE_PATH, TMPDIR: t.tmp, USER: "tester", DETENT_IMPLEMENT_TEST_DEPS: IMPL_DEPS, DETENT_IMPLEMENT_TEST_CFG: depsCfg,
+  };
+  const child = spawn(process.execPath, [ENGINE, "drive", "--run", t.runId, "--repo", t.repo, "--claude-bin", t.implStub, "--stack", t.stack, ...flags], { env });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (d) => { stdout += d; });
+  child.stderr.on("data", (d) => { stderr += d; });
+  const done = new Promise((res) => child.on("close", (code, signal) => res({ code, signal, stdout, stderr })));
+  return { child, done };
 }

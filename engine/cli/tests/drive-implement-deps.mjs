@@ -1,9 +1,10 @@
 // Test-only deps for `drive --implement`, loaded through DETENT_IMPLEMENT_TEST_DEPS under node --test.
 // It swaps the host box for an unboxed runner that records what drive asked for, and the probe for a trivial one.
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn as nodeSpawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { HostboxError, createBox as realCreateBox } from "../drive/hostbox.mjs";
 
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 
@@ -20,6 +21,19 @@ export default function deps(cfg) {
       const kind = opts.args[0] === "-c" ? "verify" : "export";
       const cwd = opts.cwd ?? join(dir, "work");
       const refExists = spawnSync("git", ["-C", cfg.repo, "rev-parse", "--verify", "-q", `refs/heads/detent/${cfg.runId}`]).status === 0;
+      if (kind === "verify" && cfg.verifyThrows) throw new HostboxError(cfg.verifyThrows, "injected verify box failure");
+      if (kind === "export" && cfg.exportThrows) throw new HostboxError(cfg.exportThrows, "injected export box failure");
+      if (kind === "verify" && cfg.realBoxSleep) {
+        // The real box registry with a stand-in spawn: a detached sh that leaves a sleeper in its group.
+        const spawn = (_bin, _argv, o) => nodeSpawn("/bin/sh", ["-c", `sleep 300 & echo $! > '${cfg.realBoxSleep}'; wait`], o);
+        return realCreateBox({ parent: dirname(dir) }).run({ ...opts, developerDir: "/tmp", spawn });
+      }
+      if (kind === "verify" && cfg.verifyTimedOut) {
+        return {
+          code: null, signal: "SIGTERM", stdout: "", stderr: "", timedOut: true, truncated: { stdout: false, stderr: false },
+          bytes: { stdout: 0, stderr: 0 }, sha256: { stdout: sha(""), stderr: sha("") },
+        };
+      }
       log({ ev: "box_run", kind, dir, cmd: opts.cmd, args: opts.args, net: opts.net, readOnly: opts.readOnly ?? [], writable: opts.writable ?? [dir], cwd, refExists });
       if (kind === "verify" && cfg.advanceRefOnVerify) {
         const head = spawnSync("git", ["-C", cfg.repo, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
@@ -49,12 +63,12 @@ export default function deps(cfg) {
     preflight: () => ({ ok: !cfg.preflightRefusals, refusals: cfg.preflightRefusals ?? [] }),
     createBox,
     makeProbe: () => ({
-      exps: {
+      exps: cfg.probeBadExps ? {} : {
         validate: { readDeny: [], writeAllow: [], writeDenyRequired: [] },
         probe: { script: "echo bash_ran=1", expect: { bash_ran: { k: "eq", v: cfg.probeWant ?? 1 } }, controls: {} },
         shell: { realShell: "/bin/sh", canaryPort: 1, canarySocket: "/tmp/none.sock" },
       },
-      finish: async () => ({ canaryHits: 0 }),
+      finish: async () => { log({ ev: "probe_finish" }); return { canaryHits: 0 }; },
     }),
   };
 }
