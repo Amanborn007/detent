@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, symlinkSync, chmodSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { engine, ENGINE } from "./helpers.mjs";
+import { engine, ENGINE, assertCuratorOpened } from "./helpers.mjs";
 import { setup, drive, git, throughStage, scratch, readJson, writeJson, BARE_PATH } from "./drive-kit.mjs";
 import { HUMAN, decisionsOf } from "./verbs-helpers.mjs";
 
@@ -51,6 +51,7 @@ test("the gate page shows the proposed commands, gotchas and attempts, escaped",
   const r = drive(t, { manifestPatch: patch });
   assert.equal(r.code, 0, r.stdout + r.stderr);
   assert.equal(r.json.stopped, "needs_human");
+  assertCuratorOpened(r);
   const html = readFileSync(r.json.html, "utf8");
   assert.match(html, /Proposed by the child/);
   for (const w of ["run &lt;b&gt;this&lt;/b&gt;", "g &lt;i&gt;1&lt;/i&gt;", "A &lt;u&gt;x&lt;/u&gt;"]) assert.ok(html.includes(w), w);

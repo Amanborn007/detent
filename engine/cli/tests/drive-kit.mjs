@@ -3,7 +3,7 @@ import { writeFileSync, readFileSync, existsSync, mkdirSync, chmodSync, mkdtempS
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { engine, mkRun, readJson, writeJson, writeArtifact } from "./helpers.mjs";
+import { engine, mkRun, mkCuratorClone, readJson, writeJson, writeArtifact } from "./helpers.mjs";
 
 export const BARE_PATH = "/usr/bin:/bin";
 export const scratch = () => realpathSync(mkdtempSync(join(tmpdir(), "drive-hard-")));
@@ -80,11 +80,23 @@ export function callsOf(t) {
   return existsSync(p) ? readFileSync(p, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
 }
 
+/** A clone of the engine whose bundled curator is a stub: gate pages are "opened" without a browser or a daemon. */
+function stubCuratorDir(t) {
+  if (!t.curatorDir) {
+    t.curatorDir = scratch();
+    mkCuratorClone(t.curatorDir, `#!${process.execPath}
+const a = process.argv.slice(2);
+if (a[0] === "open") console.log(JSON.stringify({ url: "http://127.0.0.1:9/s/stub", key: a[1] }));
+`);
+  }
+  return t.curatorDir;
+}
+
 export function drive(t, cfg, extra = [], env = {}) {
   writeFileSync(join(t.d, "mode.json"), JSON.stringify(cfg));
   mkdirSync(t.tmp, { recursive: true });
   const r = engine(["drive", "--run", t.runId, "--repo", t.repo, "--claude-bin", t.stub, "--stack", t.stack, ...extra],
-    { env: { PATH: BARE_PATH, TMPDIR: t.tmp, ...env } });
+    { env: { PATH: BARE_PATH, TMPDIR: t.tmp, TEST_CLONE: stubCuratorDir(t), ...env } });
   return { ...r, calls: callsOf(t) };
 }
 

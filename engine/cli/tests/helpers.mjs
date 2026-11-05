@@ -1,5 +1,6 @@
 // Shared test helpers for the engine CLI test suite. Zero dependencies.
 import { spawnSync } from "node:child_process";
+import { after } from "node:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, cpSync, rmSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -14,6 +15,30 @@ export const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures"
 let HOME = null;
 export function detentHome() { return HOME; }
 
+const CURATOR_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "curator", "cli.mjs");
+const stateDirs = new Set();
+
+/** The curator state dir a test's engine() calls use unless the test names its own (the curator's own default under DETENT_ROOT). */
+export function curatorStateDir() {
+  if (!HOME) throw new Error("curatorStateDir needs a test home: call mkRepo()/mkRun() first");
+  return join(HOME, ".local", "curator");
+}
+
+/** Stop any curator daemon recorded in a state dir this file's tests used, through curator's own `stop`. */
+export function stopCuratorDaemons() {
+  for (const dir of stateDirs) {
+    if (!existsSync(join(dir, "state.json"))) continue;
+    const r = spawnSync(process.execPath, [CURATOR_CLI, "stop"], { encoding: "utf8", env: { ...process.env, CURATOR_STATE_DIR: dir, CURATOR_NO_BROWSER: "1" } });
+    if (r.status !== 0) throw new Error(`curator stop failed for ${dir}: ${r.stdout}${r.stderr}`);
+  }
+}
+after(stopCuratorDaemons);
+
+/** The failure line drive prints when the gate page could not be handed to curator. */
+export function assertCuratorOpened(r) {
+  if (/curator open failed/.test(r.stderr || "")) throw new Error(`curator open failed:\n${r.stderr}`);
+}
+
 const GIT_ENV = {
   GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.invalid",
   GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.invalid",
@@ -24,11 +49,17 @@ export function engine(args, opts = {}) {
   // TEST_CLONE (a helper-only key, never passed on) runs the engine from a copied clone whose bundled curator is a stub.
   const { TEST_CLONE, ...extra } = opts.env || {};
   const bin = TEST_CLONE ? join(TEST_CLONE, "clone", "engine", "cli", "engine.mjs") : ENGINE;
+  const env = {
+    ...process.env, ...(HOME ? { DETENT_ROOT: HOME } : {}),
+    CURATOR_NO_BROWSER: "1", ...(HOME ? { CURATOR_STATE_DIR: curatorStateDir() } : {}), ...extra,
+  };
+  for (const k of Object.keys(env)) if (env[k] === undefined) delete env[k]; // a test opts out of a default with { KEY: undefined }
+  if (env.CURATOR_STATE_DIR) stateDirs.add(env.CURATOR_STATE_DIR);
   const r = spawnSync(process.execPath, [bin, ...args], {
     encoding: "utf8",
     cwd: opts.cwd,
     input: opts.input,
-    env: { ...process.env, ...(HOME ? { DETENT_ROOT: HOME } : {}), ...extra },
+    env,
   });
   let json = null;
   const out = (r.stdout || "").trim();

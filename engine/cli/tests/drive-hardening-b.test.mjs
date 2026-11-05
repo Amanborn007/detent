@@ -2,6 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { assertCuratorOpened } from "./helpers.mjs";
 import { setup, drive, throughStage } from "./drive-kit.mjs";
 
 test("the gate page shows proposed commands, gotchas and attempts (well-formed proposal), escaped", () => {
@@ -14,6 +15,7 @@ test("the gate page shows proposed commands, gotchas and attempts (well-formed p
   const r = drive(t, { manifestPatch: patch });
   assert.equal(r.code, 0, r.stdout + r.stderr);
   assert.equal(r.json.stopped, "needs_human");
+  assertCuratorOpened(r);
   const html = readFileSync(r.json.html, "utf8");
   assert.match(html, /Proposed by the child/);
   for (const w of ["run &lt;b&gt;this&lt;/b&gt;", "g &lt;i&gt;1&lt;/i&gt;", "A &lt;u&gt;x&lt;/u&gt;", "E &lt;s&gt;y&lt;/s&gt;"]) assert.ok(html.includes(w), w);

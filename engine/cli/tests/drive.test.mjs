@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { engine, mkCuratorClone, mkRun, readJson, writeJson, writeArtifact, eventsOf, ENGINE } from "./helpers.mjs";
+import { engine, mkCuratorClone, mkRun, readJson, writeJson, writeArtifact, eventsOf, ENGINE, assertCuratorOpened } from "./helpers.mjs";
 
 const CURATOR_CLI = join(fileURLToPath(import.meta.url), "..", "..", "..", "curator", "cli.mjs");
 const BARE_PATH = "/usr/bin:/bin";
@@ -185,7 +185,8 @@ function setMode(t, cfg) {
 function driveArgs(t, extra) { return ["drive", "--run", t.runId, "--repo", t.repo, "--claude-bin", t.stub, "--stack", t.stack, ...extra]; }
 function driveEnv(t, env = {}) {
   mkdirSync(t.tmp, { recursive: true });
-  return { PATH: BARE_PATH, TMPDIR: t.tmp, ...env };
+  if (!t.curatorDir) { t.curatorDir = scratch(); mkCuratorStub(t.curatorDir); }
+  return { PATH: BARE_PATH, TMPDIR: t.tmp, TEST_CLONE: t.curatorDir, ...env };
 }
 
 function drive(t, cfg, extra = [], env = {}) {
@@ -368,6 +369,7 @@ test("drive runs intake, research and plan, stops at the plan gate with a clean 
   const r = drive(t, {});
   assert.equal(r.code, 0, r.stdout + r.stderr);
   assert.equal(r.json.stopped, "needs_human");
+  assertCuratorOpened(r);
   assert.deepEqual(r.calls.map((c) => c.stage), ["intake", "research", "plan"]);
   const st = readJson(join(t.runDir, "stage-status.json")).stages;
   assert.equal(st.intake.status, "done");
@@ -427,6 +429,7 @@ test("a child needs_human outbox files pending decisions with drive-assigned ids
   const r = drive(t, { outbox: "needshuman" });
   assert.equal(r.code, 0, r.stdout + r.stderr);
   assert.equal(r.json.stopped, "needs_human");
+  assertCuratorOpened(r);
   const d = readJson(join(t.runDir, "decisions.json"));
   assert.equal(d.length, 1);
   assert.equal(d[0].id, "D-001");
@@ -452,6 +455,7 @@ test("curator feedback is drained only at drive start; a child-planted marker an
   const r = drive(t, { marker: join(cur, "marker") }, [], { PATH: BARE_PATH, TEST_CLONE: cur });
   assert.equal(r.code, 0, r.stdout + r.stderr);
   assert.equal(r.json.stopped, "needs_human");
+  assertCuratorOpened(r);
   assert.ok(existsSync(join(cur, "marker")), "the child did plant it");
   assert.equal(readJson(join(t.runDir, "decisions.json"))[0].status, "pending");
   const log = existsSync(join(cur, "curator.log")) ? readFileSync(join(cur, "curator.log"), "utf8") : "";
@@ -656,7 +660,7 @@ async function signalRun(sig, cfg) {
   throughIntake(t);
   setMode(t, { sleep: true, ...cfg });
   const child = spawn(process.execPath, [ENGINE, ...driveArgs(t, ["--max-steps", "1"])], {
-    env: { ...process.env, DETENT_ROOT: t.home, ...driveEnv(t) },
+    env: { ...process.env, DETENT_ROOT: t.home, CURATOR_NO_BROWSER: "1", CURATOR_STATE_DIR: join(t.home, ".local", "curator"), ...driveEnv(t) },
     stdio: ["ignore", "pipe", "pipe"],
   });
   const exited = new Promise((res) => child.on("close", (code, s) => res({ code, s })));

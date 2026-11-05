@@ -137,6 +137,7 @@ test('the browser is launched on a local file, never on a url carrying the keys'
   const file = makeArtifact(dir);
   const env = { ...process.env, CURATOR_STATE_DIR: stateDir, PATH: `${bin}:${process.env.PATH}` };
   delete env.CURATOR_NO_BROWSER;
+  env.CURATOR_ALLOW_BROWSER = '1';
   const r = await runCli(['open', file], env);
   assert.equal(r.code, 0, r.stdout + r.stderr);
   toKill.add(JSON.parse(readFileSync(join(stateDir, 'state.json'), 'utf8')).pid);

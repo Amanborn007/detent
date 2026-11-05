@@ -48,7 +48,7 @@ test("a real drive step carries the deny rules for CURATOR_STATE_DIR", () => {
 test("without CURATOR_STATE_DIR the default state dir under the detent root is denied", () => {
   const t = setup();
   throughStage(t, "intake");
-  const r = drive(t, {}, ["--max-steps", "1"], { DETENT_ROOT: t.home });
+  const r = drive(t, {}, ["--max-steps", "1"], { DETENT_ROOT: t.home, CURATOR_STATE_DIR: undefined });
   assert.equal(r.code, 0, r.stdout + r.stderr);
   const deny = r.calls[0].settings.permissions.deny;
   for (const rule of rules(join(realpathSync(t.home), ".local", "curator"))) assert.ok(deny.includes(rule), `missing ${rule} in ${JSON.stringify(deny)}`);
