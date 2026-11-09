@@ -32,7 +32,7 @@ $ detent drive --run 2026-10-21-acme-widgets-1 --repo ~/demo-repo --budget 1 --m
 }
 ```
 
-The plan gate opens as a local page. You click approve or revise.
+The plan gate opens as a local page. You click **Approve the plan** or **Send it back**.
 
 <p align="center">
   <picture>
@@ -53,7 +53,7 @@ Left alone, an agent can spend an hour building the wrong thing and then push it
 ## What you get
 
 - **Two gates, no surprise pushes.** You approve the plan and you approve the push. Nothing in the repo calls `gh pr merge`.
-- **Plans you click, not scroll.** A plan opens as a local web page. You click approve or revise and leave notes on lines, and your answer goes back into the run.
+- **Plans you click, not scroll.** A plan opens as a local web page. You click **Approve the plan** or **Send it back** and leave notes on lines, and your answer goes back into the run.
 - **Bot comments handled.** Once a PR is ready, sentinel reads what the review bots left and fixes the ones your policy allows, for up to 10 rounds.
 - **Your stack, plugged in.** Your tracker, docs, reviewer and test runner are commands in a YAML file, JSON in and JSON out. GitHub adapters ship in the box.
 - **Work while you sleep.** `/detent:owl` loops toward an objective overnight, under caps you confirm first.
