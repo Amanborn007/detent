@@ -48,6 +48,12 @@ function blank(html) {
       (m, open, _t, body, close) => open + keep(body) + close);
 }
 
+const NAMED = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+const decode = (s) => s.replace(/&(?:#(\d+)|#x([0-9a-f]+)|(\w+));/gi, (m, d, h, n) => {
+  if (n) return Object.hasOwn(NAMED, n.toLowerCase()) ? NAMED[n.toLowerCase()] : m;
+  return String.fromCodePoint(d ? Number(d) : parseInt(h, 16));
+});
+
 function parse(html) {
   const src = blank(html);
   const root = { tag: '#root', attrs: {}, kids: [], parent: null, start: 0 };
@@ -55,7 +61,7 @@ function parse(html) {
   let last = 0;
   const re = /<(\/?)([a-zA-Z][\w:-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
   const text = (to) => {
-    if (to > last) cur.kids.push({ text: src.slice(last, to).replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'"), start: last });
+    if (to > last) cur.kids.push({ text: decode(src.slice(last, to)), start: last });
   };
   let m;
   while ((m = re.exec(src))) {
@@ -72,7 +78,7 @@ function parse(html) {
     const attrs = {};
     const ar = /([^\s=/"'<>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
     let a;
-    while ((a = ar.exec(m[3]))) attrs[a[1].toLowerCase()] = a[2] ?? a[3] ?? a[4] ?? '';
+    while ((a = ar.exec(m[3]))) attrs[a[1].toLowerCase()] = decode(a[2] ?? a[3] ?? a[4] ?? '');
     const node = { tag, attrs, kids: [], parent: cur, start: m.index };
     cur.kids.push(node);
     if (!VOID.has(tag) && !m[3].trimEnd().endsWith('/')) cur = node;
@@ -262,9 +268,15 @@ export function checkPage(html, opts) {
 export function checkDecisionRecord(obj, opts) {
   const rep = makeIssues(lvl(opts));
   const o = obj || {};
-  const options = (Array.isArray(o.options) ? o.options : []).map((x) => ({
-    key: x.key, label: x.label, consequence: x.consequence,
-  }));
+  const details = o.option_details || {};
+  const raw = Array.isArray(o.options) ? o.options : [];
+  const keys = raw.map((x) => (typeof x === 'string' ? x : x.key));
+  for (const k of Object.keys(details)) if (!keys.includes(k)) throw new Error(`option_details names "${k}", which is not one of the options`);
+  const options = raw.map((x) => {
+    const key = typeof x === 'string' ? x : x.key;
+    const d = typeof x === 'string' ? details[x] || {} : x;
+    return { key, label: d.label, consequence: d.consequence };
+  });
   checkQuestion({
     heading: typeof o.question === 'string' ? o.question : null,
     recommendedKey: o.recommended ? o.recommended.key : null,
