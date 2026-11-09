@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: node --test engine/*/test engine/*/tests
+      - run: node --test --test-timeout=120000 engine/*/test engine/*/tests
       - run: bash engine/owl/test/run-tests.sh
       - run: |
           for f in hooks/tests/*.sh scripts/tests/*.sh engine/scripts/tests/*.sh; do
