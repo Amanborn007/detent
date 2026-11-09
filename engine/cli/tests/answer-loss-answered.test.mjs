@@ -160,3 +160,16 @@ test("a changed answer for an answered decision gets a headline that does not as
   assert.doesNotMatch(r.json.next_step, /answer the gate with an exact option/);
   assert.match(r.json.next_step, /drive-last\.json/);
 });
+
+test("a drain with a changed answer and an invalid option keeps the answer-with-an-exact-option headline and names the conflict", () => {
+  const { t, first, intent } = withAnsweredDecision();
+  const drain = JSON.stringify({ key: realpathSync(first.json.html), status: "feedback", prompts: [
+    { type: "decision", question: "D-900", answer: "revise" },
+    { type: "decision", question: intent.id, answer: "maybe" },
+  ] });
+  const r = drive(t, {}, [], { STUB_DRAIN: drain });
+  assert.equal(r.json.reason, "curator_feedback_unresolved");
+  assert.match(r.json.next_step, /answer the gate with an exact option/);
+  assert.match(r.json.next_step, /D-900/);
+  assert.match(r.json.next_step, /drive-last\.json/);
+});
