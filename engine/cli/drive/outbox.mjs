@@ -18,7 +18,12 @@ const FORBIDDEN_DECISION_KEYS = [
   "id", "gate", "status", "answer", "answered_by", "answered_via", "answered_at",
   "exercise_state", "withdrawn", "withdrawn_at", "degraded_assumption", "rejected_options", "human_notes", "rejected_answer",
 ];
-const DECISION_KEYS = ["key", "question", "options", "blocks", "cause", "context", "kind", "source"];
+const DECISION_KEYS = [
+  "key", "question", "options", "blocks", "cause", "context", "kind", "source",
+  "recommended", "no_recommendation", "why_now", "context_excerpt",
+];
+const OPTION_KEYS = ["key", "label", "consequence", "then"];
+const OPTION_KEY_RE = /^.{1,200}$/s;
 const MANIFEST_KEYS = [
   "schema", "run_id", "stage", "nonce", "status", "summary", "artifacts", "decisions",
   "env", "attempts", "steps",
@@ -165,6 +170,23 @@ function hasHeading(text, heading) {
   return false;
 }
 
+function validateRecommendation(d, optionKeys, w, norm) {
+  const hasRec = Object.hasOwn(d, "recommended");
+  const hasNone = Object.hasOwn(d, "no_recommendation");
+  if (hasRec && hasNone) rej("bad_recommendation", `${w}: give recommended or no_recommendation, not both`);
+  if (hasNone) {
+    if (typeof d.no_recommendation !== "string" || d.no_recommendation.length === 0 || d.no_recommendation.length > 500) rej("bad_recommendation", `${w}.no_recommendation`);
+    norm.no_recommendation = d.no_recommendation;
+  }
+  if (!hasRec) return;
+  const r = d.recommended;
+  if (!isObj(r)) rej("bad_recommendation", `${w}.recommended must be {key, reason}`);
+  for (const k of Object.keys(r)) if (k !== "key" && k !== "reason") rej("bad_recommendation", `${w}.recommended: unknown key ${JSON.stringify(k)}`);
+  if (!optionKeys.includes(r.key)) rej("bad_recommendation", `${w}.recommended.key is not one of the options`);
+  if (typeof r.reason !== "string" || r.reason.length === 0 || r.reason.length > 500) rej("bad_recommendation", `${w}.recommended.reason must be 1-500 chars`);
+  norm.recommended = { key: r.key, reason: r.reason };
+}
+
 // Returns normalized decisions without ids; the caller assigns those.
 export function validateDecisions(list, { stage, stages = DEFAULT_STAGES } = {}) {
   try {
@@ -188,10 +210,26 @@ export function validateDecisions(list, { stage, stages = DEFAULT_STAGES } = {})
       if (typeof d.question !== "string" || d.question.length === 0 || d.question.length > 2000) {
         rej("bad_question", w);
       }
-      if (!Array.isArray(d.options) || d.options.length < 2 || d.options.length > 6
-        || d.options.some((o) => typeof o !== "string" || o.length === 0 || o.length > 200)
-        || new Set(d.options).size !== d.options.length) {
-        rej("bad_options", w);
+      if (!Array.isArray(d.options) || d.options.length < 2 || d.options.length > 6) rej("bad_options", w);
+      const optionKeys = [];
+      const details = {};
+      for (const o of d.options) {
+        if (typeof o === "string") { optionKeys.push(o); continue; }
+        if (!isObj(o)) rej("bad_options", `${w}: option must be a string or an object`);
+        for (const k of Object.keys(o)) if (!OPTION_KEYS.includes(k)) rej("unknown_key", `${w}.options: ${JSON.stringify(k)}`);
+        optionKeys.push(o.key);
+        if (typeof o.key !== "string") continue;
+        const det = {};
+        for (const [k, max] of [["label", 200], ["consequence", 500], ["then", 500]]) {
+          if (!Object.hasOwn(o, k)) continue;
+          if (typeof o[k] !== "string" || o[k].length === 0 || o[k].length > max) rej("bad_options", `${w}: option ${JSON.stringify(o.key)} ${k} must be 1-${max} chars`);
+          det[k] = o[k];
+        }
+        details[o.key] = det;
+      }
+      if (optionKeys.some((k) => ["__proto__", "constructor", "prototype"].includes(k))) rej("bad_options", `${w}: option key ${JSON.stringify(optionKeys.find((k) => ["__proto__", "constructor", "prototype"].includes(k)))} is reserved`);
+      if (optionKeys.some((k) => typeof k !== "string" || !OPTION_KEY_RE.test(k)) || new Set(optionKeys).size !== optionKeys.length) {
+        rej("bad_options", `${w}: every option needs a distinct key of 1-200 chars`);
       }
       if (!Array.isArray(d.blocks) || d.blocks.length === 0 || d.blocks.length > 20) rej("bad_blocks", w);
       const blocks = [];
@@ -202,7 +240,8 @@ export function validateDecisions(list, { stage, stages = DEFAULT_STAGES } = {})
         if (!blocks.includes(name)) blocks.push(name);
       }
       if (!CAUSES.includes(d.cause)) rej("bad_cause", w);
-      const norm = { key: d.key, question: d.question, options: [...d.options], blocks, cause: d.cause };
+      const norm = { key: d.key, question: d.question, options: optionKeys, blocks, cause: d.cause };
+      if (Object.keys(details).length) norm.option_details = details;
       if (Object.hasOwn(d, "context")) {
         if (typeof d.context !== "string" || d.context.length > 4000) rej("bad_context", w);
         norm.context = d.context;
@@ -214,6 +253,12 @@ export function validateDecisions(list, { stage, stages = DEFAULT_STAGES } = {})
       if (Object.hasOwn(d, "source")) {
         if (typeof d.source !== "string" || d.source.length > 200) rej("bad_source", w);
         norm.source = d.source;
+      }
+      validateRecommendation(d, optionKeys, w, norm);
+      for (const [k, max, reason] of [["why_now", 500, "bad_why_now"], ["context_excerpt", 2000, "bad_context_excerpt"]]) {
+        if (!Object.hasOwn(d, k)) continue;
+        if (typeof d[k] !== "string" || d[k].length === 0 || d[k].length > max) rej(reason, w);
+        norm[k] = d[k];
       }
       return norm;
     });

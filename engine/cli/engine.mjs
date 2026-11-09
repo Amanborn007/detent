@@ -33,7 +33,7 @@ import { detectTagger } from "../index/lib/tagger-ts.mjs";
 import { readSteps, renderLiveHtml, isRunComplete, STEP_KINDS, STEP_STATUSES } from "./liveview.mjs";
 import { loadRunState, buildNote, checkSufficiency, currentStage, optionKey } from "../handoff/handoff.mjs";
 import { analyzeSpend, trackingLine, compareTracking } from "../spend/spend.mjs";
-import { renderMarkdown } from "./markdown.mjs";
+import { buildGatePage } from "./gate-page.mjs";
 import { homedir, tmpdir } from "node:os";
 import { resolvePackPath, validatePackFile, PackPathError } from "../pack/pack.mjs";
 
@@ -71,7 +71,7 @@ const STAGE_END_GATES = {
     playbook: "plan-review",
     blocks: ["implement"],
     question:
-      "Intent gate: does plan/plan.md faithfully implement brief.md (goal, acceptance criteria, constraints)? Approve to unlock implement; revise to loop back to plan.",
+      "Does this plan do what the brief asks, and nothing it does not ask for?",
     options: ["approve", "revise"],
     context: "plan/plan.md",
   },
@@ -1165,6 +1165,7 @@ function cmdGateOpen(gateId, flags) {
       name: decision.gate || decision.id,
       stage,
       decisions: pendingFor(decisions, decision),
+      earlier: decisions.filter((d) => d.status === "answered" && !isUnresolvedJudgment(d)),
     });
     out({
       ok: true,
@@ -1205,106 +1206,20 @@ function pendingFor(decisions, decision) {
     (d.id === decision.id || (Array.isArray(d.blocks) && d.blocks.some((b) => blocks.has(b)))));
 }
 
-// Bump when renderGateArtifact's markup changes, so existing pages re-render.
-const GATE_TEMPLATE_VERSION = 1;
-
-function humanNotesHtml(d) {
-  if (!Array.isArray(d.human_notes) || d.human_notes.length === 0) return "";
-  const items = d.human_notes.map((n) =>
-    `<li>${escapeHtml(n.at || "")}${n.answer_if_any ? ` (leaning ${escapeHtml(n.answer_if_any)})` : ""}: ${escapeHtml(n.note || "")}</li>`).join("");
-  return `<div class="human-notes"><p class="sub">Notes you left on this decision</p><ul>${items}</ul></div>`;
-}
+// Bump when the page's markup changes without its inputs changing, so existing pages re-render.
+const GATE_TEMPLATE_VERSION = 2;
 
 function renderGateArtifact({ runId, runDir }, gate) {
   const plansDir = join(detentRoot(), ".plans");
   mkdirSync(plansDir, { recursive: true });
   const file = join(plansDir, `${runId}-${gate.name}.html`);
-  const primary = (gate.stage && STAGE_ARTIFACTS[gate.stage]) || [];
-  const docs = [...new Set([...primary, ...Object.values(STAGE_ARTIFACTS).flat()])]
-    .filter((rel) => existsSync(join(runDir, rel)));
-  const docHtml = docs.map((rel, i) => {
-    const src = readFileSync(join(runDir, rel), "utf8");
-    const body = rel.endsWith(".md") ? `<article class="doc">${renderMarkdown(src)}</article>` : `<pre>${escapeHtml(src)}</pre>`;
-    return `<details${i === 0 ? " open" : ""}><summary>${escapeHtml(rel)}</summary><p><strong>${i === 0 ? "The artifact this gate reviews" : "Earlier run artifact, for context"}: ${escapeHtml(rel)}</strong></p>${body}</details>`;
-  }).join("\n");
-  const blocks = gate.decisions.map((d) => {
-    const options = (d.options || []).map((o) =>
-      `<div class="option" data-plan-option="${escapeHtml(o)}"><strong>${escapeHtml(o)}</strong></div>`,
-    ).join("\n");
-    return `<section>
-<h2>Decision ${escapeHtml(d.id)}</h2>
-<div data-plan-question="${escapeHtml(d.id)}">
-<p class="q-label">${escapeHtml(d.question || "")}</p>
-${d.context ? `<p class="sub">Context: ${escapeHtml(d.context)}</p>` : ""}
-${humanNotesHtml(d)}
-<div class="options">
-${options}
-</div>
-</div>
-</section>`;
-  }).join("\n");
-  const hash = createHash("sha256").update(JSON.stringify({ tpl: GATE_TEMPLATE_VERSION, runId, name: gate.name, stage: gate.stage || null,
-    decisions: gate.decisions, noteHtml: gate.noteHtml || "", docHtml })).digest("hex");
+  const { html, warnings } = buildGatePage({ runId, runDir }, gate, { stages: STAGES, stageArtifacts: STAGE_ARTIFACTS });
+  for (const w of warnings) appendEvent(runDir, { event: "warning", gate: gate.name, ...w });
+  // The decisions are hashed as well as the page: a refused answer changes them without changing the markup.
+  const hash = createHash("sha256").update(JSON.stringify({ tpl: GATE_TEMPLATE_VERSION, decisions: gate.decisions, html })).digest("hex");
   const prior = existsSync(file) ? readFileSync(file, "utf8") : null;
   if (prior !== null && prior.includes(`<meta name="detent-gate-hash" content="${hash}">`)) return file;
-  const page = `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="detent-gate-hash" content="${hash}">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Gate ${escapeHtml(gate.name)}</title>
-<style>
-  :root { --paper:#faf8f5; --paper-2:#efece7; --ink:#16273c; --muted:#7e7c76; --rule:#e1ddd7;
-          --accent:#397882; --accent-tint:#bfe6ec; --mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) { --paper:#14181c; --paper-2:#1b2026; --ink:#e8e6e2; --muted:#98a2af;
-      --rule:#2b3037; --accent:#7fc3cd; --accent-tint:#1d3a40; }
-  }
-  * { box-sizing: border-box; min-width: 0; }
-  body { margin: 0; padding: 2rem 1rem 6rem; background: var(--paper); color: var(--ink);
-         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; line-height: 1.6; }
-  main { max-width: 52rem; margin: 0 auto; }
-  h1 { font-size: 1.5rem; margin: .2rem 0 1rem; }
-  h2 { font-size: 1.1rem; margin: 2rem 0 .5rem; }
-  .eyebrow, .sub { font-family: var(--mono); font-size: .75rem; color: var(--muted); }
-  pre { background: var(--paper-2); border: 1px solid var(--rule); padding: 1rem; overflow-x: auto;
-        white-space: pre-wrap; font-family: var(--mono); font-size: .85rem; }
-  summary { cursor: pointer; font-family: var(--mono); font-size: .85rem; }
-  .doc { border-left: 3px solid var(--rule); padding: .2rem 0 .2rem 1.2rem; margin: .5rem 0 1.5rem; }
-  .doc h3 { font-size: 1.15rem; margin: 1.2rem 0 .4rem; }
-  .doc h4 { font-size: 1rem; margin: 1.4rem 0 .4rem; }
-  .doc h5, .doc h6 { font-size: .95rem; margin: 1rem 0 .3rem; }
-  .doc p, .doc ul, .doc ol, .doc blockquote, .doc table { margin: .5rem 0; }
-  .doc ul, .doc ol { padding-left: 1.4rem; }
-  .doc li { margin: .25rem 0; }
-  .doc code { font-family: var(--mono); font-size: .85em; background: var(--paper-2); padding: .05rem .3rem; border-radius: .25rem; }
-  .doc pre code { background: none; padding: 0; }
-  .doc blockquote { border-left: 3px solid var(--accent); margin-left: 0; padding-left: 1rem; color: var(--muted); }
-  .doc table { border-collapse: collapse; display: block; overflow-x: auto; font-size: .9rem; }
-  .doc th, .doc td { border: 1px solid var(--rule); padding: .35rem .6rem; text-align: left; vertical-align: top; }
-  .doc th { background: var(--paper-2); }
-  .doc a { color: var(--accent); }
-  .doc hr { border: 0; border-top: 1px solid var(--rule); }
-  .q-label { font-weight: 600; }
-  .options { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .6rem; }
-  .option { border: 1px solid var(--rule); border-radius: .4rem; padding: .6rem 1rem; cursor: pointer; background: var(--paper-2); }
-  .option:hover { border-color: var(--accent); }
-  [data-curator-chosen] { border-color: var(--accent); background: var(--accent-tint); }
-</style>
-</head>
-<body>
-<main>
-<p class="eyebrow">${escapeHtml(runId)} · gate ${escapeHtml(gate.name)}${gate.stage ? ` · stage ${escapeHtml(gate.stage)}` : ""}</p>
-<h1>Needs your decision</h1>
-${gate.noteHtml || ""}
-${blocks}
-<h2>What you are deciding on</h2>
-${docHtml || `<p class="sub">No stage artifact has been written yet.</p>`}
-</main>
-</body>
-</html>
-`;
+  const page = html.replace(/<meta charset="utf-8">/, (m) => `${m}\n<meta name="detent-gate-hash" content="${hash}">`);
   writeFileSync(file, prior === null ? page : carryCuratorMarks(prior, page, gate.decisions));
   return file;
 }
@@ -1327,18 +1242,18 @@ function carryCuratorMarks(prior, page, decisions) {
     next = next.replace(/<\/body>/i, () => `${section}</body>`);
   }
   for (const d of decisions) {
-    const q = `<div data-plan-question="${escapeHtml(d.id)}"`;
-    const oldAt = prior.indexOf(q);
-    const newAt = next.indexOf(q);
-    if (oldAt === -1 || newAt === -1) continue;
-    const oldTag = prior.slice(oldAt, prior.indexOf(">", oldAt) + 1);
+    const tagRe = new RegExp(`<div\\b[^>]*\\sdata-plan-question="${escapeHtml(d.id).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*>`);
+    const oldMatch = tagRe.exec(prior);
+    const newMatch = tagRe.exec(next);
+    if (!oldMatch || !newMatch) continue;
+    const oldTag = oldMatch[0];
     // A pending decision's answer stamp was refused or never seen by the engine, so only the note survives.
     // A note already listed under "Notes you left" is not stamped a second time.
     const listed = new Set((d.human_notes || []).map((n) => n.note));
     const marks = oldTag.match(/\s+data-curator-answered-(?:at|note)="[^"]*"/g);
     const note = oldTag.match(/\sdata-curator-answered-note="([^"]*)"/)?.[1];
     if (!marks || (note !== undefined && listed.has(unescapeCuratorAttr(note)))) continue;
-    const tagEnd = next.indexOf(">", newAt);
+    const tagEnd = newMatch.index + newMatch[0].length - 1;
     next = next.slice(0, tagEnd) + marks.join("") + next.slice(tagEnd);
   }
   return next;

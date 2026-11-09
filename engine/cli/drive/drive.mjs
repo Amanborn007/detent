@@ -285,6 +285,19 @@ function section(text, heading) {
   return out.join("\n").trim();
 }
 
+const REQUIRED_INPUTS = { research: ["brief.md"], plan: ["brief.md", "research.md", "access-report.json"] };
+
+function requireInputs(E, ctx, stage) {
+  for (const name of REQUIRED_INPUTS[stage] || []) {
+    const src = join(ctx.runDir, name);
+    if (existsSync(src)) continue;
+    const ref = E.readJson(join(ctx.runDir, "run.json")).ticket_ref;
+    stopFail(E, ctx, "inputs_artifact_missing",
+      `${name} is missing and its stage is already done: restore it at ${src}, or start a new run with engine run new --ticket ${ref}`,
+      { stage, detail: src });
+  }
+}
+
 function prepareInputs(E, ctx, stage, stepN) {
   const { runDir, runId, repo, stack } = ctx;
   const stepDir = join(ST.sroot, "steps", String(stepN));
@@ -294,16 +307,12 @@ function prepareInputs(E, ctx, stage, stepN) {
   ST.stepDir = stepDir;
   ST.outbox = dirs.outbox;
   const nonce = randomBytes(16).toString("hex");
-  const put = (name, data) => writeFileSync(join(dirs.inputs, name), data);
-  const copyIf = (src, name) => { if (existsSync(src)) copyFileSync(src, join(dirs.inputs, name)); };
+  const written = [];
+  const put = (name, data) => { writeFileSync(join(dirs.inputs, name), data); written.push(name); };
+  const copyIf = (src, name) => { if (existsSync(src)) { copyFileSync(src, join(dirs.inputs, name)); written.push(name); } };
   const stagesDir = join(dirname(E.engineFile), "..", "stages");
   put("SKILL.md", readFileSync(join(stagesDir, stage, "SKILL.md")));
   put("DRIVEN.md", readFileSync(join(stagesDir, "DRIVEN.md")));
-  put("step.json", JSON.stringify({
-    schema: "detent-drive-step-v1", run_id: runId, stage, step: stepN, nonce,
-    outputs: STAGE_OUTPUTS[stage],
-    required_headings: Object.fromEntries(STAGE_OUTPUTS[stage].filter((f) => REQUIRED_HEADINGS[f]).map((f) => [f, REQUIRED_HEADINGS[f]])),
-  }, null, 2));
   const run = E.readJson(join(runDir, "run.json"));
   put("run.json", JSON.stringify({ run_id: runId, ticket_ref: run.ticket_ref, created_at: run.created_at }, null, 2));
   put("decisions.json", JSON.stringify(E.loadDecisions(runDir), null, 2));
@@ -329,9 +338,15 @@ function prepareInputs(E, ctx, stage, stepN) {
     copyIf(join(runDir, "research.md"), "research.md");
     copyIf(join(runDir, "access-report.json"), "access-report.json");
   }
+  const inputs = [...written, "step.json"].sort();
+  put("step.json", JSON.stringify({
+    schema: "detent-drive-step-v1", run_id: runId, stage, step: stepN, nonce, inputs,
+    outputs: STAGE_OUTPUTS[stage],
+    required_headings: Object.fromEntries(STAGE_OUTPUTS[stage].filter((f) => REQUIRED_HEADINGS[f]).map((f) => [f, REQUIRED_HEADINGS[f]])),
+  }, null, 2));
   lockedDown(dirs.inputs);
   chmodSync(dirs.cwd, 0o555);
-  return { ...dirs, nonce, stepDir };
+  return { ...dirs, nonce, stepDir, inputFiles: inputs };
 }
 
 // ---------------------------------------------------------------------------
@@ -454,17 +469,6 @@ function quarantine(runDir, stepN) {
 // Gate pages
 // ---------------------------------------------------------------------------
 
-function accessPanel(E, runDir) {
-  const p = join(runDir, "access-report.json");
-  if (!existsSync(p)) return "";
-  let rows;
-  try { rows = JSON.parse(readFileSync(p, "utf8")); } catch { return ""; }
-  if (!Array.isArray(rows) || rows.length === 0) return "";
-  const esc = E.escapeHtml;
-  const body = rows.map((r) => `<tr><td>${esc(r.source)}</td><td>${esc(r.status)}</td><td>${esc(r.criticality)}</td><td>${esc(r.detail || r.blocked_reason || "")}</td></tr>`).join("\n");
-  return `<h2>Access &amp; data completeness</h2>\n<table><tr><th>source</th><th>status</th><th>criticality</th><th>detail</th></tr>\n${body}\n</table>`;
-}
-
 function envPanel(E, runDir) {
   const p = join(runDir, "env.proposed.json");
   if (!existsSync(p)) return "";
@@ -493,7 +497,7 @@ function curatorStateDirFor(E) {
 
 function stopForHuman(E, ctx, stage, blockers) {
   const { runId, runDir } = ctx;
-  const noteHtml = `<p class="sub">${E.escapeHtml(INTENT_NOTE)}</p>\n${accessPanel(E, runDir)}\n${envPanel(E, runDir)}`;
+  const noteHtml = `<p class="sub">${E.escapeHtml(INTENT_NOTE)}</p>\n${envPanel(E, runDir)}`;
   const html = E.renderGateArtifact({ runId, runDir }, {
     name: blockers[0].gate || blockers[0].id, stage, decisions: blockers, noteHtml,
   });
@@ -608,7 +612,9 @@ function applyOutbox(E, ctx, stage, ro, normalized) {
     const rec = {
       id: E.nextDecisionId(decisions), raised_by: stage, blocks: d.blocks, question: d.question, options: d.options,
       cause: d.cause, ...(d.context !== undefined ? { context: d.context } : {}), ...(d.kind ? { kind: d.kind } : {}),
-      ...(d.source ? { source: d.source } : {}), status: "pending",
+      ...(d.source ? { source: d.source } : {}),
+      ...Object.fromEntries(["option_details", "recommended", "no_recommendation", "why_now", "context_excerpt"].filter((k) => d[k] !== undefined).map((k) => [k, d[k]])),
+      status: "pending",
     };
     decisions.push(rec);
     raised.push(rec.id);
@@ -779,6 +785,7 @@ export async function cmdDrive(flags, E) {
         stage, next_step: `spent ${round(ctx.spent)} of ${budget} USD; raise it and continue: ${process.env.DETENT_VERB ? "detent continue" : `detent drive --run ${runId}`} --budget <usd>`,
       });
     }
+    requireInputs(E, ctx, stage);
     if (["pending", "blocked"].includes(status.stages[stage].status)) {
       const b = E.beginStage(stage, repo, runId, runDir);
       if (!b.ok) return stopFail(E, ctx, "stage_begin_refused", "inspect the run", { stage, detail: b.refusal.reason });
@@ -805,7 +812,9 @@ export async function cmdDrive(flags, E) {
       `Inputs directory: ${io.inputs}`,
       `Outbox directory: ${io.outbox}`,
       "",
-      `Read ${join(io.inputs, "DRIVEN.md")} first, then ${join(io.inputs, "SKILL.md")}, then the other files in the inputs directory.`,
+      `Read ${join(io.inputs, "DRIVEN.md")} first, then ${join(io.inputs, "SKILL.md")}, then each of these files by path:`,
+      ...io.inputFiles.filter((f) => f !== "DRIVEN.md" && f !== "SKILL.md").map((f) => `- ${join(io.inputs, f)}`),
+      `Search ${join(io.inputs, "repo")} only for code.`,
       "DRIVEN.md overrides every engine, curator and gh step in the skill. Write only into the outbox directory.",
       `Finish by writing ${join(io.outbox, "manifest.json")} as DRIVEN.md describes.`,
     ].join("\n");
