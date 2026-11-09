@@ -10,6 +10,8 @@ tells you how to hand it over.
   `run.json`, `decisions.json`, `git-log.txt`, `repo/` (a read-only export of the
   work repo at HEAD, no history), and the earlier artifacts the stage needs
   (`ticket.json`, `brief.md`, `knowledge.json`, `research.md`, `access-report.json`).
+- `step.json` `inputs` lists every file in the inputs directory outside `repo/`. Read those
+  by path; use Glob and Grep on `repo/` only to look for code.
 - An outbox directory, the only place you can write.
 - File tools only: Read, Glob, Grep, Write, Edit, TodoWrite. No shell, no network.
 

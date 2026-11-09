@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync, mkdtempSync, realpathSync,
-  readdirSync, statSync,
+  readdirSync, statSync, rmSync,
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -48,6 +48,8 @@ if (settings && settings.apiKeyHelper) {
 appendFileSync(join(here, "stub.log"), JSON.stringify({
   args: argv, cwd: realpathSync(process.cwd()), cwdEntries: readdirSync(process.cwd()), cwdMode: statSync(process.cwd()).mode & 0o777,
   prompt, settings, settingsPath, env: process.env, stage, inputs, outbox, inputsTree: tree(inputs).slice(0, 400), apiKey,
+  stepInputs: JSON.parse(readFileSync(join(inputs, "step.json"), "utf8")).inputs,
+  mtimesNs: Object.fromEntries(tree(inputs).map((f) => [f, String(statSync(join(inputs, f), { bigint: true }).mtimeNs)])),
 }) + "\\n");
 const step = JSON.parse(readFileSync(join(inputs, "step.json"), "utf8"));
 const FILES = {
@@ -272,6 +274,35 @@ test("inputs: skill, DRIVEN.md, step.json, git-log, ticket, repo export without 
   for (const f of ["SKILL.md", "DRIVEN.md", "step.json", "git-log.txt", "ticket.json", "repo/README.md"]) assert.ok(tr.includes(f), `inputs lacks ${f}: ${tr}`);
   assert.ok(!tr.some((f) => f === "repo/.git" || f.startsWith("repo/.git/")), "no .git in the export");
   assert.match(r.calls[0].prompt, /DRIVEN\.md/);
+});
+
+test("step.json inputs equals the top-level input files, and the prompt names each by absolute path, on a large repo", () => {
+  const t = setup();
+  for (let i = 0; i < 150; i++) writeFileSync(join(t.repo, `f${i}.txt`), `file ${i}\n`);
+  const env = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.invalid" };
+  spawnSync("git", ["-C", t.repo, "add", "."], { env });
+  spawnSync("git", ["-C", t.repo, "commit", "-q", "-m", "many files"], { env });
+  const r = drive(t, {});
+  assert.deepEqual(r.calls.map((c) => c.stage), ["intake", "research", "plan"]);
+  for (const c of r.calls) {
+    const top = c.inputsTree.filter((f) => !f.startsWith("repo/"));
+    assert.deepEqual([...c.stepInputs].sort(), top.sort(), `${c.stage}: step.json inputs`);
+    for (const f of c.stepInputs) assert.ok(c.prompt.includes(join(c.inputs, f)), `${c.stage}: prompt lacks ${f}`);
+  }
+  const plan = r.calls[2].stepInputs;
+  for (const f of ["brief.md", "research.md", "access-report.json"]) assert.ok(plan.includes(f), `plan inputs lacks ${f}`);
+  assert.ok(r.calls[0].stepInputs.includes("ticket.json"));
+  assert.ok(r.calls[1].stepInputs.includes("knowledge.json"));
+});
+
+test("a missing upstream artifact stops drive with inputs_artifact_missing, not a blocked child", () => {
+  const t = setup();
+  throughResearch(t);
+  rmSync(join(t.runDir, "research.md"));
+  const r = drive(t, {}, ["--max-steps", "1"]);
+  assert.equal(r.code, 1);
+  assert.equal(JSON.parse(r.stdout).reason, "inputs_artifact_missing");
+  assert.equal(r.calls.length, 0, "no child was spawned");
 });
 
 test("settings: dontAsk, exactly two outbox allows, denies, hooks off, file outside child dirs", () => {
