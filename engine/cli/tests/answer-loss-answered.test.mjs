@@ -93,7 +93,7 @@ test("drive stops with the id, old answer, new answer and the missing re-open co
   const r = drive(t, {}, [], { STUB_DRAIN: drainFor(first, "revise") });
   assert.equal(r.code, 1, r.stdout + r.stderr);
   assert.equal(r.json.reason, "curator_feedback_unresolved");
-  const detail = String(r.json.detail);
+  const detail = JSON.stringify(readJson(join(t.runDir, "drive-last.json")).detail);
   assert.match(detail, /D-900/);
   assert.match(detail, /approve/);
   assert.match(detail, /revise/);
