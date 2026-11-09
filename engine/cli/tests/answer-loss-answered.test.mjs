@@ -129,3 +129,34 @@ test("a note-only reply shows once on the re-rendered page", () => {
   const html = readFileSync(g.html, "utf8");
   assert.equal(html.split("need the rollback plan").length - 1, 1);
 });
+
+test("a note-only reply containing an apostrophe shows once on the re-rendered page", () => {
+  const g = atPlanGate();
+  const q = `<div data-plan-question="${g.gate.id}"`;
+  writeFileSync(g.html, readFileSync(g.html, "utf8").replace(q, `${q} data-curator-answered-at="2026-11-09T00:00:00.000Z" data-curator-answered-note="don't ship &lt;yet&gt; &amp; &quot;wait&quot;"`));
+  collect(g.ctx, [{ type: "decision", question: g.gate.id, answer: null, note: `don't ship <yet> & "wait"` }]);
+  g.open();
+  const html = readFileSync(g.html, "utf8");
+  assert.equal(html.split("ship").length - 1, 1);
+});
+
+test("a refused proceed-degraded answer with a note shows the note once after re-render", () => {
+  const g = atPlanGate();
+  const p = join(g.ctx.runDir, "decisions.json");
+  const DEGRADED = "proceed degraded (accept degraded confidence)";
+  writeJson(p, readJson(p).map((d) => (d.id === g.gate.id ? { ...d, cause: "judgment", options: [...d.options, DEGRADED] } : d)));
+  g.open();
+  const q = `<div data-plan-question="${g.gate.id}"`;
+  writeFileSync(g.html, readFileSync(g.html, "utf8").replace(q, `${q} data-curator-answered="${DEGRADED}" data-curator-answered-at="2026-11-09T00:00:00.000Z" data-curator-answered-note="need sign-off first"`));
+  collect(g.ctx, [{ type: "decision", question: g.gate.id, answer: DEGRADED, note: "need sign-off first" }]);
+  g.open();
+  assert.equal(readFileSync(g.html, "utf8").split("need sign-off first").length - 1, 1);
+});
+
+test("a changed answer for an answered decision gets a headline that does not ask for an impossible answer", () => {
+  const { t, first } = withAnsweredDecision();
+  const r = drive(t, {}, [], { STUB_DRAIN: drainFor(first, "revise") });
+  assert.equal(r.json.reason, "curator_feedback_unresolved");
+  assert.doesNotMatch(r.json.next_step, /answer the gate with an exact option/);
+  assert.match(r.json.next_step, /drive-last\.json/);
+});
