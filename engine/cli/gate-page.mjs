@@ -117,7 +117,8 @@ function parseCriteria(body) {
 
 const words = (t) => new Set(String(t).toLowerCase().replace(/[`*_]/g, "").match(/[a-z0-9]{3,}/g) || []);
 
-// Pairs by word overlap only, best score first, so a reordered plan table never moves a verdict.
+// Pairs by word overlap only; ties go to exact text, then Jaccard, then order, so a reordered table never moves a verdict.
+const normText = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 function matchCriteria(criteria, rows) {
   const cands = [];
   criteria.forEach((criterion, ci) => {
@@ -126,10 +127,11 @@ function matchCriteria(criteria, rows) {
       const rw = words(r[0] || "");
       const shared = [...cw].filter((w) => rw.has(w)).length;
       const score = shared / (Math.min(cw.size, rw.size) || 1);
-      if (score >= 0.5) cands.push({ ci, ri, score });
+      const jaccard = shared / (new Set([...cw, ...rw]).size || 1);
+      if (score >= 0.5) cands.push({ ci, ri, score, exact: normText(criterion) === normText(r[0] || ""), jaccard });
     });
   });
-  cands.sort((x, y) => y.score - x.score || x.ci - y.ci || x.ri - y.ri);
+  cands.sort((x, y) => y.score - x.score || Number(y.exact) - Number(x.exact) || y.jaccard - x.jaccard || x.ci - y.ci || x.ri - y.ri);
   const rowOf = new Map();
   const taken = new Set();
   for (const c of cands) {
@@ -364,16 +366,20 @@ export function buildGatePage(run, gate, model) {
       } else {
         const { rowOf, taken } = matchCriteria(criteria, rows);
         const byRow = new Map([...rowOf].map(([ci, ri]) => [ri, criteria[ci]]));
-        const pairs = rows.map((row, ri) => ({ criterion: byRow.get(ri) ?? row[0] ?? "", row }));
-        criteria.forEach((criterion, ci) => { if (!rowOf.has(ci)) pairs.push({ criterion, row: null }); });
-        const trs = pairs.map(({ criterion, row }) =>
-          `<tr><td>${inl(criterion)}</td><td>${row ? inl(row[1] || "") : "none"}</td><td>${row ? inl(row[2] || "") : "not checked"}</td></tr>`).join("\n");
+        const pairs = rows.map((row, ri) => ({ criterion: byRow.get(ri) ?? row[0] ?? "", row, matched: !criteria.length || byRow.has(ri) }));
+        criteria.forEach((criterion, ci) => { if (!rowOf.has(ci)) pairs.push({ criterion, row: null, matched: true }); });
+        const tr = ({ criterion, row }) =>
+          `<tr><td>${inl(criterion)}</td><td>${row ? inl(row[1] || "") : "none"}</td><td>${row ? inl(row[2] || "") : "not checked"}</td></tr>`;
+        const trs = pairs.filter((p) => p.matched).map(tr).join("\n");
+        const loose = pairs.filter((p) => !p.matched);
+        const looseHtml = loose.length
+          ? `\n<h3>Plan rows that match no brief criterion</h3>\n<table>\n<thead><tr><th>Plan row</th><th>Covered by</th><th>Verdict</th></tr></thead>\n<tbody>\n${loose.map(tr).join("\n")}\n</tbody>\n</table>` : "";
         const total = criteria.length || rows.length;
-        const covered = pairs.filter((p) => p.row && /^covered/i.test(p.row[2] || "")).length;
+        const covered = pairs.filter((p) => p.matched && p.row && /^covered/i.test(p.row[2] || "")).length;
         const addition = /\b(step \d+)\b[^.]*\b(?:not asked for|addition)/i.exec(after.join(" ")) || /Additions?:\s*(step \d+)/i.exec(after.join(" "));
         const filed = /Filed as (D-\d+)/.exec(after.join(" "));
-        coverSummary = `The plan covers ${covered} of ${total} criteria${addition && filed ? `; ${addition[1]} is an addition, kept as ${filed[1]}${known.has(filed[1]) ? `, which asks “${String(known.get(filed[1]).question || "").trim()}”` : ""}` : ""}.`;
-        coverHtml = `<h2>Does the plan cover the brief?</h2>\n${prose(before)}\n<table>\n<thead><tr><th>Acceptance criterion</th><th>Covered by</th><th>Verdict</th></tr></thead>\n<tbody>\n${trs}\n</tbody>\n</table>\n${prose(after)}`;
+        coverSummary = `The plan covers ${covered} of ${total} ${total === 1 ? "criterion" : "criteria"}${addition && filed ? `; ${addition[1]} is an addition, kept as ${filed[1]}${known.has(filed[1]) ? `, which asks “${String(known.get(filed[1]).question || "").trim()}”` : ""}` : ""}.`;
+        coverHtml = `<h2>Does the plan cover the brief?</h2>\n${prose(before)}\n<table>\n<thead><tr><th>Acceptance criterion</th><th>Covered by</th><th>Verdict</th></tr></thead>\n<tbody>\n${trs}\n</tbody>\n</table>${looseHtml}\n${prose(after)}`;
       }
     }
   }
