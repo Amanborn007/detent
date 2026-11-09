@@ -89,7 +89,7 @@ test("intent gate page opens with a verdict sentence that explains Approve and R
   const lines = text.split("\n");
   assert.match(lines[0], /^You are deciding whether the plan for Amanborn007\/detent-demo#1 is ready to implement\.?$/);
   assert.ok(text.includes("Approve unlocks implementation"), text.slice(0, 600));
-  assert.ok(text.includes("Revise sends the plan back with your note"));
+  assert.ok(text.includes("Send it back returns the plan to planning with your note"));
 });
 
 test("the goal and acceptance criteria are on the page before any collapsed artifact", () => {
