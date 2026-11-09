@@ -367,8 +367,7 @@ export function buildGatePage(run, gate, model) {
 
   const pending = gate.decisions.map((d) => {
     const intentOpts = isIntent && d.gate === "intent";
-    // gate-page-brief.test.mjs still pins the string form; drop this once that test moves to {key, reason}.
-    const recObj = typeof d.recommended === "string" ? { key: d.recommended, reason: d.recommendation_reason } : d.recommended;
+    const recObj = d.recommended;
     if (recObj && !(d.options || []).includes(recObj.key)) throw new Error(`${d.id}: recommended.key ${JSON.stringify(recObj.key)} is not one of the options`);
     const rec = recObj ? recObj.key : null;
     const details = d.option_details || {};
