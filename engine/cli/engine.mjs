@@ -1309,6 +1309,9 @@ ${docHtml || `<p class="sub">No stage artifact has been written yet.</p>`}
   return file;
 }
 
+// curator escapes only & < > " in the attributes it stamps.
+const unescapeCuratorAttr = (v) => v.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+
 // `curator log` and `curator answer` edit the page on disk, so a re-render must not discard them.
 function carryCuratorMarks(prior, page, decisions) {
   let next = page;
@@ -1330,12 +1333,11 @@ function carryCuratorMarks(prior, page, decisions) {
     if (oldAt === -1 || newAt === -1) continue;
     const oldTag = prior.slice(oldAt, prior.indexOf(">", oldAt) + 1);
     // A pending decision's answer stamp was refused or never seen by the engine, so only the note survives.
+    // A note already listed under "Notes you left" is not stamped a second time.
+    const listed = new Set((d.human_notes || []).map((n) => n.note));
     const marks = oldTag.match(/\s+data-curator-answered-(?:at|note)="[^"]*"/g);
-    if (!marks) continue;
-    // A note-only reply is already listed under "Notes you left", so stamping it again would show it twice.
     const note = oldTag.match(/\sdata-curator-answered-note="([^"]*)"/)?.[1];
-    if (note !== undefined && !/\sdata-curator-answered="/.test(oldTag) &&
-        (d.human_notes || []).some((n) => escapeHtml(n.note || "") === note)) continue;
+    if (!marks || (note !== undefined && listed.has(unescapeCuratorAttr(note)))) continue;
     const tagEnd = next.indexOf(">", newAt);
     next = next.slice(0, tagEnd) + marks.join("") + next.slice(tagEnd);
   }

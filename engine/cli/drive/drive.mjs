@@ -728,8 +728,11 @@ export async function cmdDrive(flags, E) {
       const c = E.collectResult(runId, runDir, d.items);
       const lost = c.unresolved.filter((u) => !u.recorded);
       if (lost.length) {
+        const conflict = lost.some((u) => /is already answered '/.test(u.reason));
         return stopFail(E, ctx, "curator_feedback_unresolved",
-          "curator feedback could not be recorded (see detail in drive-last.json); answer the gate with an exact option in curator, then re-run drive",
+          conflict
+            ? "curator sent a different answer for an already answered decision, which was not applied; drive-last.json detail says which decision and what to do"
+            : "curator feedback could not be recorded (see detail in drive-last.json); answer the gate with an exact option in curator, then re-run drive",
           { detail: JSON.stringify(lost) });
       }
     }
