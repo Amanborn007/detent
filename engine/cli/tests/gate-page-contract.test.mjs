@@ -70,14 +70,19 @@ test("the demo fixture intent gate raises no contract warning", () => {
   assert.deepEqual(contract, []);
 });
 
-test("a D-00x gate raises no contract warning", () => {
-  const { contract } = openGate({
-    ticket: "octo/repo#7",
-    files: { "brief.md": "# Brief: octo/repo#7\n\n## Goal\nDo the thing the ticket asks for.\n\n## Acceptance criteria\n- [ ] done\n" },
-    decisions: [{ id: "D-001", raised_by: "intake", blocks: ["implement"], question: "Which one?", options: ["a", "b"], status: "pending" }],
-    gate: "D-001",
-  });
-  assert.deepEqual(contract, []);
+test("a D-00x gate with bare string options warns C5 and C6 for each option, and none with option_details", () => {
+  const files = { "brief.md": "# Brief: octo/repo#7\n\n## Goal\nDo the thing the ticket asks for.\n\n## Acceptance criteria\n- [ ] done\n" };
+  const base = { id: "D-001", raised_by: "intake", blocks: ["implement"], question: "Which one?", options: ["a", "b"], status: "pending" };
+  const bare = openGate({ ticket: "octo/repo#7", files, decisions: [base], gate: "D-001" }).contract;
+  for (const o of ["a", "b"]) {
+    for (const c of ["C5", "C6"]) assert.ok(bare.some((w) => w.check === c && w.detail.includes(`"${o}"`)), `${c} ${o}: ${JSON.stringify(bare)}`);
+  }
+  const details = {
+    a: { label: "Take the first path", consequence: "Ships the first path to every user.", then: "Then the implement stage builds the first path." },
+    b: { label: "Take the second path", consequence: "Ships the second path to every user.", then: "Then the implement stage builds the second path." },
+  };
+  const full = openGate({ ticket: "octo/repo#7", files, decisions: [{ ...base, option_details: details }], gate: "D-001" }).contract;
+  assert.deepEqual(full, []);
 });
 
 test("a page missing data-plan-brief yields a warning event naming C1", () => {
