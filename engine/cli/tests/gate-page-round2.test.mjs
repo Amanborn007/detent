@@ -211,7 +211,7 @@ test("run artifacts are all collapsed, and option cards keep label and consequen
   assert.ok(!mainHtml.includes("<details") || mainHtml.indexOf("<details") > mainHtml.indexOf('id="access"'), "only the access table may collapse before the raw section");
   assert.ok((rawHtml.match(/<details/g) || []).length >= 3);
   const card = /<div[^>]*data-plan-option="approve"[^>]*>([\s\S]*?)<\/div>/.exec(html)[1];
-  assert.match(card, /<strong>approve<\/strong>\s*<p[^>]*data-plan-consequence[^>]*>Unlocks implementation\.<\/p>/);
+  assert.match(card, /<strong>Approve the plan<\/strong>\s*<p[^>]*data-plan-consequence[^>]*>Unlocks implementation of the approved plan steps\.<\/p>/);
   assert.match(html, /data-plan-option="approve"/);
 });
 
