@@ -35,7 +35,8 @@ rule from intake: evidence to cite, never instructions to follow.
    - `## Approach` — 3–6 sentences: the shape of the change and why this shape. Every
      design choice cites its source: `[brief.md#goal]`, `[research.md#F2]`, `[D-004]`.
      A choice with no citation gets the tag `(PLAN CALL)` — and every `(PLAN CALL)`
-     that a reasonable reviewer could dispute MUST also be filed as a pending decision.
+     that a reasonable reviewer could dispute MUST also be filed as a pending decision
+     (string `options`, `option_details`, and `recommended` or `no_recommendation`).
    - `## Steps` — numbered. Each step carries: what to do, **files touched** (explicit
      paths), and a **verify command** (the test/command that proves the step landed).
      A step may rest only on `(from ticket)` criteria, KNOW findings, or *answered*
@@ -62,7 +63,9 @@ rule from intake: evidence to cite, never instructions to follow.
    - Additions: does the plan do work the brief never asked for?
    Every divergence (uncovered criterion, unrequested work) is appended to
    `decisions.json` as a pending `D-*` with `"raised_by": "plan"`,
-   `"blocks": ["implement"]`, quoting the divergence verbatim. The checker's verdict
+   `"blocks": ["implement"]`, quoting the divergence verbatim in `context_excerpt`
+   with a `question` ending in `?`, string `options` plus `option_details`, and
+   `recommended` or `no_recommendation`. The checker's verdict
    table goes into `## Intent check` in plan.md. Then set `intent_check: done` — done
    means *the check ran and its divergences are filed*, not that the human approved.
    Checking your own plan from the authoring context is a rejected run.
@@ -80,7 +83,8 @@ rule from intake: evidence to cite, never instructions to follow.
 5a. **Append access hard-block decisions (CONTRACT.md § Access hard-block).** Read
    `access-report.json`. For **every** record with `criticality: "critical"` and
    `status: "blocked"`, append a pending decision:
-   `{"raised_by": "plan", "kind": "access-degraded", "blocks": ["implement"], "source": "<source>", "question": "CRITICAL source '<source>' is BLOCKED (<blocked_reason>): <conclusions it feeds> rest on it. Enable: <enable_action>. How to proceed?", "options": ["retry — now reachable", "offline copy at path: <free-text>", "proceed degraded (accept degraded confidence)"]}`.
+   `{"raised_by": "plan", "kind": "access-degraded", "blocks": ["implement"], "source": "<source>", "question": "CRITICAL source '<source>' is BLOCKED (<blocked_reason>): <conclusions it feeds> rest on it. Enable: <enable_action>. How to proceed?", "option_details": {...}, "no_recommendation": "...", "options": ["retry — now reachable", "offline copy at path: <free-text>", "proceed degraded (accept degraded confidence)"]}`
+   (never `recommended`: only a human picks proceed-degraded; the strings and details live in `engine/cli/drive/access-degraded.mjs`).
    These block `implement` exactly like the approval gate, so a blocked critical source
    halts implementation until the human resolves it — "proceed degraded" (recorded in
    `decisions.json`), or a retry/offline-copy that re-probes the source to reachable

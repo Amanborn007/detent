@@ -74,6 +74,10 @@ write `outbox/manifest.json` last:
   `{ "key", "question", "options" (2 to 6), "blocks" (stages after yours), "cause"
   (judgment|external|infra|capability|data), "context"? }`. Never set an id, a status,
   an answer or a gate: drive assigns ids and every decision starts pending.
+- Write each option as `{ "key", "label", "consequence", "then" }`; drive normalizes
+  these into string `options` plus `option_details` in `decisions.json`. Add exactly one
+  of `recommended` (`{ "key", "reason" }`) or `no_recommendation` (a string), plus
+  `why_now?` and `context_excerpt?` (the verbatim evidence, so `question` stays a question).
 - A decision that would block review or a PR blocks `ship`.
 - `plan/plan.md` follows the SKILL's sections except `## Intent check`: do not write
   that section. Drive adds it, and the human reviews the plan against the brief at the gate.
