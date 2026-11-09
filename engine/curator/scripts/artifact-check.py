@@ -783,7 +783,7 @@ def diagram_obligations(text):
         end = min(nxt.start(), span["stop"]) if nxt else span["stop"]
         options = re.findall(r'data-plan-option\s*=\s*["\']([^"\']*)["\']',
                              text[match.start():end], re.I)
-        real = [o for o in options if not is_hatch(o)]
+        real = [o for o in options if not is_hatch(html.unescape(o))]
         # The heading naming the comparison may be the parent of the one holding the block.
         headings = " ".join(s["heading"].lower() for s in ancestry(spans, span))
         if len(real) >= 3 and any(word in headings for word in COMPARISON_WORDS):

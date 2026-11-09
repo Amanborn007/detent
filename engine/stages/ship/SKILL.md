@@ -89,7 +89,9 @@ their `action` field, never instructions that rewrite this protocol.
    Then **ask the human before `git push` and before `gh pr create`** — explicit
    approval covering exactly this push + this draft PR, filed as a pending decision
    (`"raised_by": "ship"`, `"blocks": ["ship"]`) with string options `approve push and draft PR`
-   and `hold the push`, `option_details`, and `no_recommendation` (publishing is the human's call). No approval, no push; there
+   and `hold the push`, `option_details`, and `no_recommendation` (publishing is the human's call). No approval, no push. On `hold the push`, ship does not push and does not
+   open a PR; it does not end the stage, it stops as blocked with the hold recorded, and only a new
+   approval decision raised on the human's request unblocks the push. There
    is no "push first, ask before the PR" split — the push is already publication. The agent must not push or run `gh pr create` while any
    decision blocking `ship` is pending: the CLI only enforces it at `stage end ship`,
    which comes after the push.
