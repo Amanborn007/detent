@@ -15,6 +15,7 @@ import { readOutbox, validateDecisions, secretScan } from "./outbox.mjs";
 import { createStateTracker } from "./integrity.mjs";
 import { resolveStateDir } from "../../curator/auth.mjs";
 import { optionKey } from "../../handoff/handoff.mjs";
+import { ACCESS_DEGRADED_OPTIONS, ACCESS_DEGRADED_DETAILS, ACCESS_DEGRADED_NO_RECOMMENDATION } from "./access-degraded.mjs";
 import {
   validateDriveProfile, buildChildSettings, buildChildArgs, buildChildEnv, versionAtLeast, MIN_CLAUDE_VERSION,
 } from "./profile.mjs";
@@ -485,6 +486,7 @@ function stopForHuman(E, ctx, stage, blockers, collectError) {
   const noteHtml = `<p class="sub">${E.escapeHtml(INTENT_NOTE)}</p>\n${envPanel(E, runDir)}`;
   const html = E.renderGateArtifact({ runId, runDir }, {
     name: blockers[0].gate || blockers[0].id, stage, decisions: blockers, noteHtml,
+    earlier: E.loadDecisions(runDir).filter((d) => d.status === "answered" && !E.isUnresolvedJudgment(d)),
   });
   let url;
   const curator = E.siblingCurator();
@@ -611,7 +613,7 @@ function applyOutbox(E, ctx, stage, ro, normalized) {
       decisions.push({
         id: E.nextDecisionId(decisions), raised_by: "plan", kind: "access-degraded", blocks: ["implement"], source: r.source,
         question: `CRITICAL source '${r.source}' is BLOCKED (${r.blocked_reason || "no reason recorded"}). Enable: ${r.enable_action || "none recorded"}. How to proceed?`,
-        options: ["retry — now reachable", "offline copy at path: <free-text>", "proceed degraded (accept degraded confidence)"],
+        options: ACCESS_DEGRADED_OPTIONS, option_details: ACCESS_DEGRADED_DETAILS, no_recommendation: ACCESS_DEGRADED_NO_RECOMMENDATION,
         cause: "external", status: "pending",
       });
     }

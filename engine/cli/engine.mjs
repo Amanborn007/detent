@@ -1078,6 +1078,12 @@ function cmdGateOpen(gateId, flags) {
       "list pending gates with: engine next, or check decisions.json",
       { known: decisions.map((d) => d.gate || d.id) });
   }
+  (decision.options || []).forEach((o, i) => {
+    if (typeof o !== "string") {
+      refuse(`decision ${decision.id} has a non-string option at index ${i}; options must be an array of string keys`,
+        "put label, consequence and then under option_details keyed by the option string");
+    }
+  });
   // Which stage does this gate belong to? Named gates map via STAGE_END_GATES;
   // plain decisions render against the first stage they block.
   let stage = null;
@@ -1362,7 +1368,7 @@ function driveInjection() {
     STAGES, STAGE_ARTIFACTS, STAGE_END_GATES, out, refuse, fail, nowIso, readJson, appendEvent, detentRoot, repoOf, findRun,
     loadStatus, loadDecisions, saveDecisions, nextDecisionId, pendingBlockers, syncGateAnsweredEvents, beginStage, endStage,
     raiseEndGate, renderGateArtifact, drainCuratorFor, collectResult, siblingCurator, escapeHtml, parseYamlSubset, runExec,
-    engineFile: ENGINE_FILE,
+    isUnresolvedJudgment, engineFile: ENGINE_FILE,
   };
 }
 
