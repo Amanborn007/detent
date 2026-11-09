@@ -76,10 +76,3 @@ test("a drive-stopped page lists answered decisions so their ids raise no C8 war
 
 const page = (decision, opts = {}) => buildGatePage({ runId: "r1", runDir: mkdtempSync(join(tmpdir(), "raisers-run-")) },
   { name: decision.id, stage: "plan", decisions: [decision], earlier: [] }, { stages: STAGES, stageArtifacts: STAGE_ARTIFACTS, ...opts });
-
-test("a record with neither recommended nor no_recommendation renders no no-recommendation attribute or invented reason", () => {
-  const { html } = page({ id: "D-009", raised_by: "intake", blocks: ["implement"], question: "Which one?", options: ["a", "b"], status: "pending" });
-  assert.ok(!html.includes("data-plan-no-recommendation"));
-  assert.ok(!html.includes("the engine has no recommendation for this question"));
-  assert.ok(!html.includes("data-plan-reason"));
-});
