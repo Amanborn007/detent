@@ -1332,6 +1332,10 @@ function carryCuratorMarks(prior, page, decisions) {
     // A pending decision's answer stamp was refused or never seen by the engine, so only the note survives.
     const marks = oldTag.match(/\s+data-curator-answered-(?:at|note)="[^"]*"/g);
     if (!marks) continue;
+    // A note-only reply is already listed under "Notes you left", so stamping it again would show it twice.
+    const note = oldTag.match(/\sdata-curator-answered-note="([^"]*)"/)?.[1];
+    if (note !== undefined && !/\sdata-curator-answered="/.test(oldTag) &&
+        (d.human_notes || []).some((n) => escapeHtml(n.note || "") === note)) continue;
     const tagEnd = next.indexOf(">", newAt);
     next = next.slice(0, tagEnd) + marks.join("") + next.slice(tagEnd);
   }
@@ -1431,20 +1435,28 @@ function applyFeedback(runDir, items) {
     const d = decisions.find((x) => x.id === item.question);
     const base = { id: item.question, answer: item.answer ?? null, ...(item.note ? { note: item.note } : {}) };
     // The curator drain empties its queue, so an unresolved item survives only if it is recorded here.
-    const keep = (reason, record) => {
-      // Changes the decision's render hash so the page is rewritten and drops the refused answer stamp.
-      if (d && item.answer != null) d.rejected_answer = { answer: item.answer, at: new Date().toISOString() };
-      if (record && (item.note || item.answer != null)) recordHumanNote(d, item, seenNotes);
-      unresolved.push({ ...base, reason, ...(record ? { recorded: true } : {}) });
+    // `recorded` is true only when nothing the human wrote is lost, so drive may carry on past it.
+    const keep = (reason, { recorded = false, reject = false } = {}) => {
+      // Rewrites a pending decision's page, which drops the refused answer stamp; an answered decision's page is not rewritten by it.
+      if (reject && d && item.answer != null) d.rejected_answer = { answer: item.answer, at: new Date().toISOString() };
+      if (item.note) recordHumanNote(d, item, seenNotes);
+      unresolved.push({ ...base, reason, ...(recorded ? { recorded: true } : {}) });
     };
     if (!d) { unresolved.push({ ...base, reason: "no such decision" }); continue; }
-    if (d.status !== "pending" && !isUnresolvedJudgment(d)) { keep(`decision is ${d.status}, not pending`, true); continue; }
+    if (d.status !== "pending" && !isUnresolvedJudgment(d)) {
+      if (item.answer == null) { keep(`decision is ${d.status}, not pending`, { recorded: !!item.note }); continue; }
+      if (optionKey(item.answer) === optionKey(d.answer)) { keep(`decision is already answered '${d.answer}'`, { recorded: true }); continue; }
+      keep(`${d.id} is already answered '${d.answer}' and curator sent '${item.answer}'. No engine command re-opens an answered decision, ` +
+        `so the new answer was not applied; the existing answer stands unless a human edits ${d.id} in decisions.json`);
+      continue;
+    }
     if (typeof item.answer !== "string" || !Array.isArray(d.options) || !d.options.includes(item.answer)) {
-      keep(item.answer == null ? "no option chosen" : `'${item.answer}' is not one of the options`, item.answer == null);
+      keep(item.answer == null ? "no option chosen" : `'${item.answer}' is not one of the options`,
+        { recorded: item.answer == null && !!item.note, reject: true });
       continue;
     }
     if (isUnresolvedJudgment({ cause: d.cause, answer: item.answer })) {
-      keep("a judgment decision cannot be resolved by the proceed-degraded answer");
+      keep("a judgment decision cannot be resolved by the proceed-degraded answer", { reject: true });
       continue;
     }
     Object.assign(d, {
