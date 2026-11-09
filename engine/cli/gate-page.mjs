@@ -10,8 +10,9 @@ const THEME_FILE = join(dirname(fileURLToPath(import.meta.url)), "..", "curator"
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESC[c]);
 
+const INTENT_LABEL = { approve: "Approve the plan", revise: "Send it back" };
 const INTENT_EXPLAIN = {
-  approve: "Unlocks implementation.",
+  approve: "Unlocks implementation of the approved plan steps.",
   revise: "Sends the plan back to planning with your note.",
 };
 const INTENT_THEN = {
@@ -375,7 +376,8 @@ export function buildGatePage(run, gate, model) {
     const cards = (d.options || []).map((o) => {
       const explain = intentOpts ? INTENT_EXPLAIN[o] : null;
       const then = intentOpts ? INTENT_THEN[o] : null;
-      return `<div class="option" data-plan-option="${esc(o)}"><strong>${esc(o)}</strong>${explain ? `\n<p class="o-note" data-plan-consequence>${esc(explain)}</p>` : ""}${then ? `\n<p class="o-note o-then" data-plan-then>${esc(then)}</p>` : ""}</div>`;
+      const label = (intentOpts && INTENT_LABEL[o]) || o;
+      return `<div class="option" data-plan-option="${esc(o)}"><strong>${esc(label)}</strong>${explain ? `\n<p class="o-note" data-plan-consequence>${esc(explain)}</p>` : ""}${then ? `\n<p class="o-note o-then" data-plan-then>${esc(then)}</p>` : ""}</div>`;
     }).join("\n");
     return `<div id="decision-${esc(d.id)}" data-plan-question="${esc(d.id)}" data-plan-required data-plan-shape="pick-one" ${attrs}>
 <h3 class="q-label">${inl(d.question || "")}</h3>
