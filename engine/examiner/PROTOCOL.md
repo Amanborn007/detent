@@ -77,7 +77,8 @@ The agent may say a further round looks unnecessary. It may not stop on that jud
 ## Where the answers live
 
 **Inside an engine run**, real decision blocks appended to `decisions.json` with
-`"kind": "examiner"` and `"blocks": ["implement"]`. Never a ledger that lives only in the
+`"kind": "examiner"` and `"blocks": ["implement"]`, each with string `options`, `option_details`
+(`label`, `consequence`, `then`), and `recommended` or `no_recommendation` (CONTRACT.md). Never a ledger that lives only in the
 artifact. A gate is file state, not a conversational promise, and questions kept out of
 `decisions.json` skip `rejected_options` and `decision-rationale.jsonl`, so the next
 session relitigates every one of them.

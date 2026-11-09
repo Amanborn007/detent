@@ -148,7 +148,8 @@ cite them as inputs and go deeper, into the code.
        one hop out from every touched unit, named explicitly (repo, service, or
        module), each with the evidence that put it on the list.
      An honest "blast radius unclear beyond X — could not trace consumers of Y"
-     is allowed and becomes a pending decision if it blocks safe planning;
+     is allowed and becomes a pending decision if it blocks safe planning (options
+     `option_details`-ed, the unclear part quoted in `context_excerpt`);
      an OMITTED blast-radius section fails the run. The plan stage sizes its
      rollout/testing against this map, and reviewers check the diff against it.
    - `## What could help that already exists` — MANDATORY, even if the honest content
@@ -159,7 +160,8 @@ cite them as inputs and go deeper, into the code.
      finding; the human still confirms via the decision gate — research proposes,
      curator disposes: add the proposed answer to the finding, do NOT write an
      `answer` into decisions.json), `still open`, or `superseded` (explain). NEW
-     questions surfaced by research get appended to `decisions.json` as pending
+     questions surfaced by research (each with `option_details`, then `recommended`
+     or `no_recommendation`, per CONTRACT.md) get appended to `decisions.json` as pending
      `D-*` blocks with `"raised_by": "research"`.
    - `## Risks & gotchas` — sharp edges found (migrations, feature-flag interactions,
      load-bearing hacks), each attributed and confidence-tagged like a finding.

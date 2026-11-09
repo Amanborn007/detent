@@ -397,8 +397,8 @@ export function buildGatePage(run, gate, model) {
     const whyNow = intentOpts ? "Implementation cannot start until the plan is approved or sent back."
       : d.why_now ? d.why_now
       : blocks.length ? `The ${blocks.join(" and ")} stage cannot start until this is answered.` : "The run is waiting on this answer.";
-    const noRec = intentOpts ? INTENT_NO_RECOMMENDATION : d.no_recommendation;
-    const attrs = rec ? `data-plan-recommended="${esc(rec)}"` : noRec ? `data-plan-no-recommendation="${esc(noRec)}"` : "";
+    const attrs = rec ? `data-plan-recommended="${esc(rec)}"`
+      : `data-plan-no-recommendation="${esc(intentOpts ? INTENT_NO_RECOMMENDATION : d.no_recommendation || "the engine has no recommendation for this question")}"`;
     const cards = (d.options || []).map((o) => {
       const det = details[o] || {};
       const explain = intentOpts ? INTENT_EXPLAIN[o] : det.consequence;
