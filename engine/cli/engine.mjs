@@ -1438,18 +1438,18 @@ function applyFeedback(runDir, items) {
     const base = { id: item.question, answer: item.answer ?? null, ...(item.note ? { note: item.note } : {}) };
     // The curator drain empties its queue, so an unresolved item survives only if it is recorded here.
     // `recorded` is true only when nothing the human wrote is lost, so drive may carry on past it.
-    const keep = (reason, { recorded = false, reject = false } = {}) => {
+    const keep = (reason, { recorded = false, reject = false, conflict } = {}) => {
       // Rewrites a pending decision's page, which drops the refused answer stamp; an answered decision's page is not rewritten by it.
       if (reject && d && item.answer != null) d.rejected_answer = { answer: item.answer, at: new Date().toISOString() };
       if (item.note) recordHumanNote(d, item, seenNotes);
-      unresolved.push({ ...base, reason, ...(recorded ? { recorded: true } : {}) });
+      unresolved.push({ ...base, reason, ...(recorded ? { recorded: true } : {}), ...(conflict ? { conflict } : {}) });
     };
     if (!d) { unresolved.push({ ...base, reason: "no such decision" }); continue; }
     if (d.status !== "pending" && !isUnresolvedJudgment(d)) {
       if (item.answer == null) { keep(`decision is ${d.status}, not pending`, { recorded: !!item.note }); continue; }
       if (optionKey(item.answer) === optionKey(d.answer)) { keep(`decision is already answered '${d.answer}'`, { recorded: true }); continue; }
       keep(`${d.id} is already answered '${d.answer}' and curator sent '${item.answer}'; no engine command re-opens an answered decision, ` +
-        `so the new answer was not applied; the existing answer stands unless a human edits ${d.id} in decisions.json`);
+        `so the new answer was not applied; the existing answer stands unless a human edits ${d.id} in decisions.json`, { conflict: "already_answered" });
       continue;
     }
     if (typeof item.answer !== "string" || !Array.isArray(d.options) || !d.options.includes(item.answer)) {
