@@ -597,7 +597,9 @@ function applyOutbox(E, ctx, stage, ro, normalized) {
     const rec = {
       id: E.nextDecisionId(decisions), raised_by: stage, blocks: d.blocks, question: d.question, options: d.options,
       cause: d.cause, ...(d.context !== undefined ? { context: d.context } : {}), ...(d.kind ? { kind: d.kind } : {}),
-      ...(d.source ? { source: d.source } : {}), status: "pending",
+      ...(d.source ? { source: d.source } : {}),
+      ...Object.fromEntries(["option_details", "recommended", "no_recommendation", "why_now", "context_excerpt"].filter((k) => d[k] !== undefined).map((k) => [k, d[k]])),
+      status: "pending",
     };
     decisions.push(rec);
     raised.push(rec.id);

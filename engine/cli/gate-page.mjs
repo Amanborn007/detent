@@ -367,23 +367,29 @@ export function buildGatePage(run, gate, model) {
 
   const pending = gate.decisions.map((d) => {
     const intentOpts = isIntent && d.gate === "intent";
-    const rec = typeof d.recommended === "string" && (d.options || []).includes(d.recommended) ? d.recommended : null;
+    // gate-page-brief.test.mjs still pins the string form; drop this once that test moves to {key, reason}.
+    const recObj = typeof d.recommended === "string" ? { key: d.recommended, reason: d.recommendation_reason } : d.recommended;
+    if (recObj && !(d.options || []).includes(recObj.key)) throw new Error(`${d.id}: recommended.key ${JSON.stringify(recObj.key)} is not one of the options`);
+    const rec = recObj ? recObj.key : null;
+    const details = d.option_details || {};
     const blocks = [...new Set((d.blocks || []).map((b) => STAGE_FOR_BLOCK[b] || b))];
     const whyNow = intentOpts ? "Implementation cannot start until the plan is approved or sent back."
+      : d.why_now ? d.why_now
       : blocks.length ? `The ${blocks.join(" and ")} stage cannot start until this is answered.` : "The run is waiting on this answer.";
     const attrs = rec ? `data-plan-recommended="${esc(rec)}"`
-      : `data-plan-no-recommendation="${esc(intentOpts ? INTENT_NO_RECOMMENDATION : "the engine has no recommendation for this question")}"`;
+      : `data-plan-no-recommendation="${esc(intentOpts ? INTENT_NO_RECOMMENDATION : d.no_recommendation || "the engine has no recommendation for this question")}"`;
     const cards = (d.options || []).map((o) => {
-      const explain = intentOpts ? INTENT_EXPLAIN[o] : null;
-      const then = intentOpts ? INTENT_THEN[o] : null;
-      const label = (intentOpts && INTENT_LABEL[o]) || o;
+      const det = details[o] || {};
+      const explain = intentOpts ? INTENT_EXPLAIN[o] : det.consequence;
+      const then = intentOpts ? INTENT_THEN[o] : det.then;
+      const label = (intentOpts && INTENT_LABEL[o]) || det.label || o;
       return `<div class="option" data-plan-option="${esc(o)}"><strong>${esc(label)}</strong>${explain ? `\n<p class="o-note" data-plan-consequence>${esc(explain)}</p>` : ""}${then ? `\n<p class="o-note o-then" data-plan-then>${esc(then)}</p>` : ""}</div>`;
     }).join("\n");
     return `<div id="decision-${esc(d.id)}" data-plan-question="${esc(d.id)}" data-plan-required data-plan-shape="pick-one" ${attrs}>
 <h3 class="q-label">${inl(d.question || "")}</h3>
 <p class="small" data-plan-why-now>${esc(whyNow)}</p>
 ${rec || intentOpts ? "" : `<p class="small">recommended option: no recommendation given</p>`}
-${rec && d.recommendation_reason ? `<p data-plan-reason>${esc(d.recommendation_reason)}</p>` : ""}
+${rec && recObj.reason ? `<p data-plan-reason>${esc(recObj.reason)}</p>` : ""}
 <div class="options">
 ${cards}
 </div>
@@ -434,7 +440,7 @@ ${coverHtml ? `<section id="cover">\n${coverHtml}\n</section>` : ""}
 ${accessBlocked ? "" : accessSection}
 </section>
 ${rawHtml ? `<section id="raw">\n<h2>Run artifacts</h2>\n<p class="small">Everything above is drawn from these files, as written.</p>\n${rawHtml}\n</section>` : ""}
-<footer>run ${esc(runId)} · gate ${esc(gate.name)} · stage ${esc(stage)}</footer>
+<footer>run ${esc(runId)} · gate ${/^D-\d+$/.test(gate.name) ? `<abbr title="decision ${esc(gate.name)}">${esc(gate.name)}</abbr>` : esc(gate.name)} · stage ${esc(stage)}</footer>
 </main>
 </body>
 </html>
