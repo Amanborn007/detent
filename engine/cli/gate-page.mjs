@@ -246,7 +246,7 @@ export function buildGatePage(run, gate, model) {
   let next;
   if (isIntent) {
     verdict = `You are deciding whether the plan for ${ticketLabel} is ready to implement.`;
-    ask = "Decide whether the plan is ready to implement. Approve the plan unlocks implementation; Send it back returns the plan to planning with your note.";
+    ask = "Decide whether the plan is ready to implement. Approve unlocks implementation; Send it back returns the plan to planning with your note.";
     next = "If you approve, the implement stage runs the plan steps; if you send it back, the plan stage reruns with your note.";
   } else if (stage === "ship") {
     verdict = `You are deciding whether ${ticketLabel} may be pushed as a draft pull request.`;
