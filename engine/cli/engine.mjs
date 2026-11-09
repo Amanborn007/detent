@@ -1446,7 +1446,7 @@ function applyFeedback(runDir, items) {
     if (d.status !== "pending" && !isUnresolvedJudgment(d)) {
       if (item.answer == null) { keep(`decision is ${d.status}, not pending`, { recorded: !!item.note }); continue; }
       if (optionKey(item.answer) === optionKey(d.answer)) { keep(`decision is already answered '${d.answer}'`, { recorded: true }); continue; }
-      keep(`${d.id} is already answered '${d.answer}' and curator sent '${item.answer}'. No engine command re-opens an answered decision, ` +
+      keep(`${d.id} is already answered '${d.answer}' and curator sent '${item.answer}'; no engine command re-opens an answered decision, ` +
         `so the new answer was not applied; the existing answer stands unless a human edits ${d.id} in decisions.json`);
       continue;
     }
