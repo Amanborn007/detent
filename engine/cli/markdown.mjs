@@ -185,7 +185,7 @@ function anchorFor(text, ctx) {
  * Renders Markdown source to safe HTML, demoting headings two levels so they nest under a page's h2.
  * Options (all off by default): `breaks` keeps line breaks inside a paragraph; `tasks` turns GFM task
  * items into ticks (`"all"` ticks every list item); `idPrefix` and `onAnchor` publish heading and
- * leading-id anchors (F2, R1); `cite(file, anchor)` returns an href for `[file#anchor]` or null;
+ * leading-id anchors; `cite(file, anchor)` returns an href for `[file#anchor]` or null;
  * `refs(id)` returns the safe HTML that replaces a `D-nnn` mention, or null to leave it.
  */
 export function renderMarkdown(src, opts = {}) {

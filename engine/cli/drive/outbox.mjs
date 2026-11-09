@@ -227,6 +227,7 @@ export function validateDecisions(list, { stage, stages = DEFAULT_STAGES } = {})
         }
         details[o.key] = det;
       }
+      if (optionKeys.some((k) => ["__proto__", "constructor", "prototype"].includes(k))) rej("bad_options", `${w}: option key ${JSON.stringify(optionKeys.find((k) => ["__proto__", "constructor", "prototype"].includes(k)))} is reserved`);
       if (optionKeys.some((k) => typeof k !== "string" || !OPTION_KEY_RE.test(k)) || new Set(optionKeys).size !== optionKeys.length) {
         rej("bad_options", `${w}: every option needs a distinct key of 1-200 chars`);
       }

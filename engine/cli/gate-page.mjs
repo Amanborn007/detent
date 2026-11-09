@@ -117,24 +117,27 @@ function parseCriteria(body) {
 
 const words = (t) => new Set(String(t).toLowerCase().replace(/[`*_]/g, "").match(/[a-z0-9]{3,}/g) || []);
 
-// Equal counts pair by order, the way the plan template lists them; otherwise by word overlap.
+// Pairs by word overlap only, best score first, so a reordered plan table never moves a verdict.
 function matchCriteria(criteria, rows) {
-  if (criteria.length === rows.length) return criteria.map((criterion, i) => ({ criterion, row: rows[i] }));
-  const used = new Set();
-  return criteria.map((criterion) => {
+  const cands = [];
+  criteria.forEach((criterion, ci) => {
     const cw = words(criterion);
-    let best = -1;
-    let score = 0;
-    rows.forEach((r, i) => {
-      if (used.has(i)) return;
+    rows.forEach((r, ri) => {
       const rw = words(r[0] || "");
       const shared = [...cw].filter((w) => rw.has(w)).length;
-      const s = shared / (Math.min(cw.size, rw.size) || 1);
-      if (s > score) { score = s; best = i; }
+      const score = shared / (Math.min(cw.size, rw.size) || 1);
+      if (score >= 0.5) cands.push({ ci, ri, score });
     });
-    if (best >= 0 && score >= 0.5) { used.add(best); return { criterion, row: rows[best] }; }
-    return { criterion, row: null };
   });
+  cands.sort((x, y) => y.score - x.score || x.ci - y.ci || x.ri - y.ri);
+  const rowOf = new Map();
+  const taken = new Set();
+  for (const c of cands) {
+    if (rowOf.has(c.ci) || taken.has(c.ri)) continue;
+    rowOf.set(c.ci, c.ri);
+    taken.add(c.ri);
+  }
+  return { rowOf, taken };
 }
 
 // A decision can block a name that is not a stage ("pr"); it belongs to the stage that pushes.
@@ -340,6 +343,7 @@ export function buildGatePage(run, gate, model) {
   }
 
   let coverHtml = "";
+  let coverSummary = null;
   if (isIntent && plan !== null) {
     if (intentCheck === null) {
       coverHtml = `<h2>Does the plan cover the brief?</h2>\n${notice("plan/plan.md", "## Intent check", "plan/plan.md has no ## Intent check section; the raw file is shown below")}`;
@@ -354,11 +358,23 @@ export function buildGatePage(run, gate, model) {
         .map((l) => l.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim()));
       const accBody = brief ? sectionOf(brief, /^acceptance criteria$/i) : null;
       const criteria = accBody ? parseCriteria(accBody) : [];
-      const pairs = criteria.length ? matchCriteria(criteria, rows) : rows.map((r) => ({ criterion: r[0] || "", row: r }));
-      const trs = pairs.map(({ criterion, row }) =>
-        `<tr><td>${inl(criterion)}</td><td>${row ? inl(row[1] || "") : "none"}</td><td>${row ? inl(row[2] || "") : "not checked"}</td></tr>`).join("\n");
       const prose = (ls) => (ls.join("\n").trim() ? md(ls.join("\n")) : "");
-      coverHtml = `<h2>Does the plan cover the brief?</h2>\n${prose(before)}\n<table>\n<thead><tr><th>Acceptance criterion</th><th>Covered by</th><th>Verdict</th></tr></thead>\n<tbody>\n${trs}\n</tbody>\n</table>\n${prose(after)}`;
+      if (rows.length === 0) {
+        coverHtml = `<h2>Does the plan cover the brief?</h2>\n${prose(before)}${accBody ? `\n<h3>Acceptance criteria</h3>\n${md(accBody, { tasks: "all" })}` : ""}\n${prose(after)}`;
+      } else {
+        const { rowOf, taken } = matchCriteria(criteria, rows);
+        const byRow = new Map([...rowOf].map(([ci, ri]) => [ri, criteria[ci]]));
+        const pairs = rows.map((row, ri) => ({ criterion: byRow.get(ri) ?? row[0] ?? "", row }));
+        criteria.forEach((criterion, ci) => { if (!rowOf.has(ci)) pairs.push({ criterion, row: null }); });
+        const trs = pairs.map(({ criterion, row }) =>
+          `<tr><td>${inl(criterion)}</td><td>${row ? inl(row[1] || "") : "none"}</td><td>${row ? inl(row[2] || "") : "not checked"}</td></tr>`).join("\n");
+        const total = criteria.length || rows.length;
+        const covered = pairs.filter((p) => p.row && /^covered/i.test(p.row[2] || "")).length;
+        const addition = /\b(step \d+)\b[^.]*\b(?:not asked for|addition)/i.exec(after.join(" ")) || /Additions?:\s*(step \d+)/i.exec(after.join(" "));
+        const filed = /Filed as (D-\d+)/.exec(after.join(" "));
+        coverSummary = `The plan covers ${covered} of ${total} criteria${addition && filed ? `; ${addition[1]} is an addition, kept as ${filed[1]}${known.has(filed[1]) ? `, which asks “${String(known.get(filed[1]).question || "").trim()}”` : ""}` : ""}.`;
+        coverHtml = `<h2>Does the plan cover the brief?</h2>\n${prose(before)}\n<table>\n<thead><tr><th>Acceptance criterion</th><th>Covered by</th><th>Verdict</th></tr></thead>\n<tbody>\n${trs}\n</tbody>\n</table>\n${prose(after)}`;
+      }
     }
   }
 
@@ -387,6 +403,7 @@ export function buildGatePage(run, gate, model) {
     return `<div id="decision-${esc(d.id)}" data-plan-question="${esc(d.id)}" data-plan-required data-plan-shape="pick-one" ${attrs}>
 <h3 class="q-label">${inl(d.question || "")}</h3>
 <p class="small" data-plan-why-now>${esc(whyNow)}</p>
+${intentOpts ? "" : d.context_excerpt ? `<div class="q-context" data-plan-context>\n${md(d.context_excerpt)}\n</div>` : d.context ? `<p class="small">Context: ${esc(d.context)}</p>` : ""}
 ${rec || intentOpts ? "" : `<p class="small">recommended option: no recommendation given</p>`}
 ${rec && recObj.reason ? `<p data-plan-reason>${esc(recObj.reason)}</p>` : ""}
 <div class="options">
@@ -401,7 +418,8 @@ ${cards}
   if (atPlan && plan !== null) doneParts.push("the plan is written");
   const answeredBefore = earlier.filter((d) => d.status === "answered").length;
   if (answeredBefore) doneParts.push(`${answeredBefore} earlier decision${answeredBefore === 1 ? "" : "s"} answered`);
-  const done = doneParts.length ? `So far ${doneParts.join(", ")}.` : "Nothing earlier in this run has finished yet.";
+  const done = (doneParts.length ? `So far ${doneParts.join(", ")}.` : "Nothing earlier in this run has finished yet.") + (coverSummary ? ` ${coverSummary}` : "");
+  const doneHtml = esc(done).replace(/\bD-\d+\b/g, (id) => `<abbr title="decision ${id}">${id}</abbr>`);
 
   const rawHtml = docs.map((d) => {
     const body = md(d.src, { idPrefix: d.prefix, refs: rawRefs });
@@ -421,7 +439,7 @@ ${cards}
 <h1>${verdict}</h1>
 <section class="brief" data-plan-brief>
 <p data-brief="goal"><strong>Goal.</strong> ${esc(goalText)}</p>
-<p data-brief="done"><strong>Done so far.</strong> ${esc(done)}</p>
+<p data-brief="done"><strong>Done so far.</strong> ${doneHtml}</p>
 <p data-brief="ask"><strong>We need from you.</strong> ${esc(ask)}</p>
 <p data-brief="next"><strong>Then.</strong> ${esc(next)}</p>
 </section>
