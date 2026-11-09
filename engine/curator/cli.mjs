@@ -427,7 +427,7 @@ async function tabIsLive({ port, secret, file }) {
     return warn(`GET /api/status failed: ${e.message}`);
   }
   if (res.code !== 200) return warn(`GET /api/status returned ${res.code}`);
-  if (!Array.isArray(res.json.sessions)) return warn('/api/status has no sessions array');
+  if (!res.json || !Array.isArray(res.json.sessions)) return warn('/api/status has no sessions array');
   const session = res.json.sessions.find((s) => s.key === file);
   if (!session) return warn('/api/status has no session for this artifact');
   if (!('last_seen_at' in session)) return warn('the /api/status session has no last_seen_at field');
@@ -460,7 +460,9 @@ async function cmdOpen(args) {
     await stopUntrustedServer(resolved);
     resolved = { status: 'down' };
   }
-  if (resolved.status !== 'running') {
+  // A restarted daemon restores last_seen_at from state.json, so a restored value says nothing about a live tab.
+  const spawned = resolved.status !== 'running';
+  if (spawned) {
     await spawnServer();
     resolved = await resolveServer();
     if (resolved.status !== 'running') {
@@ -469,9 +471,10 @@ async function cmdOpen(args) {
   }
   const { port, secret } = resolved;
   const { code, json } = await httpJson({ method: 'POST', port, path: '/api/open', body: { file }, timeoutMs: 5000, secret });
-  if (code !== 200) fail(json.error || `server error ${code}`, json.next_step);
+  if (code !== 200) fail(json?.error || `server error ${code}`, json?.next_step);
+  if (!json || typeof json.sessionId !== 'string') fail('POST /api/open returned no sessionId', 'Run: curator status');
   const url = browserUrl(port, json.sessionId, secret, resolved.boot);
-  const tab_live = await tabIsLive({ port, secret, file });
+  const tab_live = spawned ? false : await tabIsLive({ port, secret, file });
   if (!tab_live) launchBrowser(url);
   out({ url, key: file, session: json.sessionId, tab_live, ...checked, ...(warnings.length ? { warnings } : {}), next_step: POLL_HINT(file) });
 }
