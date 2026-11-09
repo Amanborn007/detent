@@ -84,10 +84,11 @@ test("the intent decision declares itself required, pick-one, with no recommenda
 
 test("each intent option carries a label, a consequence and a then", () => {
   const { main } = example();
-  for (const [opt, conseq, then] of [["approve", /Unlocks implementation/, /implement stage runs the plan steps/], ["revise", /Sends the plan back to planning with your note/, /plan stage reruns with your note/]]) {
+  for (const [opt, label, conseq, then] of [["approve", "Approve the plan", /Unlocks implementation/, /implement stage runs the plan steps/], ["revise", "Send it back", /Sends the plan back to planning with your note/, /plan stage reruns with your note/]]) {
     const m = new RegExp(`<div[^>]*data-plan-option="${opt}"[^>]*>([\\s\\S]*?)</div>`).exec(main);
     assert.ok(m, opt);
-    assert.match(m[1], new RegExp(`<strong>${opt}</strong>`));
+    assert.match(m[1], new RegExp(`<strong>${label}</strong>`));
+    assert.match(main, new RegExp(`data-plan-option="${opt}"`));
     const c = /<p[^>]*data-plan-consequence[^>]*>([\s\S]*?)<\/p>/.exec(m[1]);
     const t = /<p[^>]*data-plan-then[^>]*>([\s\S]*?)<\/p>/.exec(m[1]);
     assert.ok(c && conseq.test(plain(c[1])), opt);
