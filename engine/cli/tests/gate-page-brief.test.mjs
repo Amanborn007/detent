@@ -115,7 +115,7 @@ test("a decision with a recommendation names the key and gives its reason", () =
   const { main } = openGate({
     ticket: "octo/repo#7",
     files: { "brief.md": "# Brief: octo/repo#7\n\n## Goal\nDo the thing the ticket asks for.\n\n## Acceptance criteria\n- [ ] done\n" },
-    decisions: [{ id: "D-001", raised_by: "intake", blocks: ["implement"], question: "Which one?", options: ["a", "b"], recommended: "b", recommendation_reason: "b keeps the old behaviour for existing callers", status: "pending" }],
+    decisions: [{ id: "D-001", raised_by: "intake", blocks: ["implement"], question: "Which one?", options: ["a", "b"], recommended: { key: "b", reason: "b keeps the old behaviour for existing callers" }, status: "pending" }],
     gate: "D-001",
   });
   const tag = /<div[^>]*data-plan-question="D-001"[^>]*>/.exec(main)[0];
