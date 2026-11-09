@@ -285,6 +285,19 @@ function section(text, heading) {
   return out.join("\n").trim();
 }
 
+const REQUIRED_INPUTS = { research: ["brief.md"], plan: ["brief.md", "research.md", "access-report.json"] };
+
+function requireInputs(E, ctx, stage) {
+  for (const name of REQUIRED_INPUTS[stage] || []) {
+    const src = join(ctx.runDir, name);
+    if (existsSync(src)) continue;
+    const ref = E.readJson(join(ctx.runDir, "run.json")).ticket_ref;
+    stopFail(E, ctx, "inputs_artifact_missing",
+      `${name} is missing and its stage is already done: restore it at ${src}, or start a new run with engine run new --ticket ${ref}`,
+      { stage, detail: src });
+  }
+}
+
 function prepareInputs(E, ctx, stage, stepN) {
   const { runDir, runId, repo, stack } = ctx;
   const stepDir = join(ST.sroot, "steps", String(stepN));
@@ -297,10 +310,6 @@ function prepareInputs(E, ctx, stage, stepN) {
   const written = [];
   const put = (name, data) => { writeFileSync(join(dirs.inputs, name), data); written.push(name); };
   const copyIf = (src, name) => { if (existsSync(src)) { copyFileSync(src, join(dirs.inputs, name)); written.push(name); } };
-  const copyRequired = (src, name) => {
-    if (!existsSync(src)) stopFail(E, ctx, "inputs_artifact_missing", `${name} is missing from the run directory; re-run the stage that writes it`, { stage, detail: src });
-    copyIf(src, name);
-  };
   const stagesDir = join(dirname(E.engineFile), "..", "stages");
   put("SKILL.md", readFileSync(join(stagesDir, stage, "SKILL.md")));
   put("DRIVEN.md", readFileSync(join(stagesDir, "DRIVEN.md")));
@@ -319,15 +328,15 @@ function prepareInputs(E, ctx, stage, stepN) {
     if (!t.ok) stopFail(E, ctx, "ticket_fetch_failed", "fix the ticket provider in stack.yaml, then re-run", { stage, detail: t.stderr });
     put("ticket.json", JSON.stringify(t.response, null, 2));
   }
-  if (stage !== "intake") copyRequired(join(runDir, "brief.md"), "brief.md");
+  if (stage !== "intake") copyIf(join(runDir, "brief.md"), "brief.md");
   if (stage === "research") {
     const brief = readFileSync(join(runDir, "brief.md"), "utf8");
     const query = section(brief, "## Goal").split("\n")[0] || String(run.ticket_ref);
     put("knowledge.json", JSON.stringify(runKnowledge(E, stack, query, String(run.ticket_ref)), null, 2));
   }
   if (stage === "plan") {
-    copyRequired(join(runDir, "research.md"), "research.md");
-    copyRequired(join(runDir, "access-report.json"), "access-report.json");
+    copyIf(join(runDir, "research.md"), "research.md");
+    copyIf(join(runDir, "access-report.json"), "access-report.json");
   }
   const inputs = [...written, "step.json"].sort();
   put("step.json", JSON.stringify({
@@ -771,6 +780,7 @@ export async function cmdDrive(flags, E) {
         stage, next_step: `spent ${round(ctx.spent)} of ${budget} USD; raise it and continue: ${process.env.DETENT_VERB ? "detent continue" : `detent drive --run ${runId}`} --budget <usd>`,
       });
     }
+    requireInputs(E, ctx, stage);
     if (["pending", "blocked"].includes(status.stages[stage].status)) {
       const b = E.beginStage(stage, repo, runId, runDir);
       if (!b.ok) return stopFail(E, ctx, "stage_begin_refused", "inspect the run", { stage, detail: b.refusal.reason });
