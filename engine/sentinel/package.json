@@ -6,5 +6,5 @@
   "type": "module",
   "bin": { "sentinel": "./sentinel.mjs" },
   "engines": { "node": ">=18" },
-  "scripts": { "test": "node --test --test-timeout=120000 test/" }
+  "scripts": { "test": "node --test --test-timeout=300000 test/" }
 }

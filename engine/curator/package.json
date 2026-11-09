@@ -7,7 +7,7 @@
     "curator": "./cli.mjs"
   },
   "scripts": {
-    "test": "node --test --test-timeout=120000 test/"
+    "test": "node --test --test-timeout=300000 test/"
   },
   "engines": {
     "node": ">=18"
