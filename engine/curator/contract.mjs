@@ -51,7 +51,8 @@ function blank(html) {
 const NAMED = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 const decode = (s) => s.replace(/&(?:#(\d+)|#x([0-9a-f]+)|(\w+));/gi, (m, d, h, n) => {
   if (n) return Object.hasOwn(NAMED, n.toLowerCase()) ? NAMED[n.toLowerCase()] : m;
-  return String.fromCodePoint(d ? Number(d) : parseInt(h, 16));
+  const cp = d ? Number(d) : parseInt(h, 16);
+  return cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF) ? m : String.fromCodePoint(cp);
 });
 
 function parse(html) {
