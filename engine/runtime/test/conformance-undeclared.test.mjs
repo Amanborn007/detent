@@ -26,7 +26,7 @@ Object.assign(process.env, {
 delete process.env.DETENT_RUNTIME;
 conformanceSuite({ name: "openai-compatible", makeFake: makeOpenAIFake, undeclared: ${JSON.stringify(undeclared)} });
 `);
-  const r = spawnSync(process.execPath, ["--test", file], { encoding: "utf8" });
+  const r = spawnSync(process.execPath, ["--test", file], { encoding: "utf8", env: { ...process.env, NODE_TEST_CONTEXT: undefined } });
   return { status: r.status, out: r.stdout + r.stderr };
 };
 
