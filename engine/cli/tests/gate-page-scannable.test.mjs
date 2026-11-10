@@ -173,3 +173,36 @@ test("pointer cursors sit under html[data-curator=connected], and motion sits in
   assert.ok(!/\b(animation|transition)\s*:/.test(outside), "motion outside the media query");
   for (const m of css.matchAll(/(?:animation|transition)[^;{}]*?(\d+)ms/g)) assert.ok(Number(m[1]) >= 100 && Number(m[1]) <= 300, m[0]);
 });
+
+test("an engine-worded intent question is shown as a reader question, with the decision id unchanged", () => {
+  const stored = "Intent gate: does plan/plan.md faithfully implement brief.md? Approve to unlock implement; revise to loop back to plan.";
+  const { html } = render({ files: full(), decisions: [{ ...INTENT, question: stored }] });
+  assert.match(html, /<div data-plan-question="D-009"/);
+  assert.match(html, /<h3[^>]*>\s*Does the plan build what the brief asks for\?\s*<\/h3>/);
+  assert.ok(!html.includes("Intent gate:") && !html.includes("loop back to plan"));
+  const asked = render({ files: full(), decisions: [INTENT] }).html;
+  assert.ok(asked.includes(`>${Q}</h3>`), "a stored reader question is kept as written");
+  assert.deepEqual(checkPage(html).warnings.filter((w) => w.id === "C3"), []);
+});
+
+test("the h1 never cuts the goal mid-phrase with an ellipsis, and prefers the ticket title", () => {
+  const h1 = (html) => /<h1>([\s\S]*?)<\/h1>/.exec(html)[1];
+  const long = BRIEF.replace("Users can export a monthly summary as a file.", "Users can export a monthly summary of every account as a single file from a scheduled job that runs nightly.");
+  const cut = h1(render({ files: { ...full(), "brief.md": long } }).html);
+  assert.ok(!cut.includes("…") && cut.endsWith("plan ready to implement?"), cut);
+  const subject = /“(.*)”/.exec(cut)[1];
+  assert.ok(subject.length <= 70 && long.includes(subject), subject);
+  assert.ok(!/\b(a|an|the|of|to|from|and|or|with)$/i.test(subject), subject);
+  const titled = h1(render({ files: { ...full(), "ticket.json": { title: "Monthly export" } } }).html);
+  assert.equal(titled, "Is the “Monthly export” plan ready to implement?");
+});
+
+test("blocked sources keep the access section open but show only glyph, word and name until a cell is opened", () => {
+  const blocked = { source: "metrics store", status: "blocked", criticality: "important", needed_for: "counts", blocked_reason: "no token ".repeat(150), enable_action: "register it" };
+  const { html } = render({ files: full(ROWS, [...REACHED, blocked, { ...blocked, source: "skill tracker" }]) });
+  const sec = /<section id="access">[\s\S]*?<\/section>/.exec(html)[0];
+  assert.match(sec, /<details class="sec" open>/);
+  assert.match(sec, /<details class="sub cell-more">\s*<summary>[^<]+<\/summary>/);
+  assert.ok(sec.includes("metrics store") && sec.includes("register it"));
+  assert.deepEqual(checkPage(html).warnings.filter((w) => w.id === "C2"), []);
+});
