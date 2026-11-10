@@ -1,9 +1,5 @@
 # Detent
 
-[![test](https://github.com/Amanborn007/detent/actions/workflows/test.yml/badge.svg)](https://github.com/Amanborn007/detent/actions/workflows/test.yml)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-c8501a.svg)](https://code.claude.com/docs/en/plugins)
-
 **Ticket in. Draft PR out. The plan waits for your yes before any code is written.**
 
 ## The problem
@@ -15,7 +11,7 @@ Branch protection and required review already stop an agent PR from merging. The
 One committed run shows both, on [detent-demo#1](https://github.com/Amanborn007/detent-demo/issues/1) ("Add a maxLength option to slugify"). It ended in [PR #2](https://github.com/Amanborn007/detent-demo/pull/2), merged 2026-10-21. The change is a toy one in a demo repo, so this shows the mechanism and nothing about how often it matters. The decisions are in [decisions.json](docs/examples/2026-10-20-amanborn007-detent-demo-1/decisions.json).
 
 - **D-002.** The plan added a documentation step the ticket never asked for. The run asked instead of silently doing it. The answer was "keep step 4".
-- **D-004 and D-005.** At ship there was no reviewer socket and no verifier socket. The only review was the agent's own pass, which "found no blocking issue", and the evidence was gathered by hand. The human refused both ("wanted a reviewer independent of the author", "evidence from the author is not independent"), and both sockets were then wired. The reasons were written after the run, see [docs/examples/README.md](docs/examples/README.md).
+- **D-004 and D-005.** At ship there was no reviewer socket and no verifier socket. The only review was the agent's own pass, which "found no blocking issue", and the evidence was gathered by hand. The human refused both ("wanted a reviewer independent of the author", "evidence from the author is not independent"), and both sockets were then wired.
 - **D-007.** The wired `claude-reviewer`, a separate headless Claude call, found that an empty or alphanumeric separator lets the `maxLength` cut split words. The PR fixed it by rejecting a word-character separator when `maxLength` is set, with the failing test committed first.
 
 ## See it run
@@ -114,7 +110,7 @@ for f in hooks/tests/*.sh scripts/tests/*.sh engine/scripts/tests/*.sh; do bash 
 
 The suite needs to bind `127.0.0.1` and write to `/tmp`. Failures that read `listen EPERM` or `Operation not permitted` mean the sandbox blocked one of those.
 
-[CI run 42786785915](https://github.com/Amanborn007/detent/actions/runs/42786785915) on main at 0731283, 2026-11-10, passed on ubuntu and macOS with 2089 tests, 2065 pass, 0 fail, 24 skipped, and owl 88 pass, 0 fail. Of the 24 skips, 21 need `DETENT_LIVE_CLAUDE=1` or `DETENT_LIVE_HOSTBOX=1`, 2 need a live OpenAI-compatible endpoint (`DETENT_LIVE_OLLAMA` or `DETENT_LIVE_OPENAI`), and 1 is a sandbox probe that only runs when nested.
+[CI run 42786785915](https://github.com/Amanborn007/detent/actions/runs/42786785915) on main at 0731283, 2026-11-10, passed on ubuntu and macOS with 2089 tests, 2065 pass, 0 fail, 24 skipped, and owl 88 pass, 0 fail. The 24 skips are tests gated on `DETENT_LIVE_CLAUDE=1`, `DETENT_LIVE_HOSTBOX=1`, `DETENT_LIVE_OLLAMA` or `DETENT_LIVE_OPENAI`, plus one sandbox probe that runs only when nested.
 
 Some of the edge cases it covers:
 
@@ -135,7 +131,8 @@ Failing tests are committed before the fix. When a committed test has to change,
 - Curator auth does not protect against another process running as you. See [SECURITY.md](SECURITY.md).
 - In the example, `respond` converged on its first scan because no bot had commented on the PR (`respond/round-1.json`).
 - The regex tagger in `engine/index` is the only one tested. The tree-sitter path runs only if you install the optional deps, and it is untested ([PR #22](https://github.com/Amanborn007/detent/pull/22)).
-- With `DETENT_ROOT` unset, on a fresh clone, `curator open` fails with ENOENT on `<clone>/.local`. Run `mkdir .local` in the clone (checked 2026-11-10). The fix is [PR #51](https://github.com/Amanborn007/detent/pull/51).
+- With `DETENT_ROOT` unset, `curator open` fails with ENOENT on `<clone>/.local` until that directory exists. `scripts/detent-install.sh` sets `DETENT_ROOT`, and `mkdir .local` in the clone also avoids it. The fix is [PR #51](https://github.com/Amanborn007/detent/pull/51).
+
 ## Read more
 
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/DECISIONS.md](docs/DECISIONS.md), [CHANGELOG.md](CHANGELOG.md), [GUIDE.md](GUIDE.md), [docs/REFERENCE.md](docs/REFERENCE.md), [SECURITY.md](SECURITY.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
