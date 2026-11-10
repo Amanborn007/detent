@@ -21,7 +21,8 @@ const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input'
   'source', 'track', 'wbr']);
 const SKIP_TEXT = new Set(['head', 'title', 'style', 'script', 'template', 'noscript']);
 const BLOCK_OPENERS = new Set(['p', 'div', 'section', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul',
-  'ol', 'table', 'blockquote', 'pre', 'header', 'footer', 'main']);
+  'ol', 'table', 'blockquote', 'pre', 'header', 'footer', 'main', 'details', 'figure', 'aside', 'nav',
+  'dl', 'form', 'article']);
 
 const words = (s) => (String(s).match(/\S+/g) || []).length;
 const squash = (s) => String(s).replace(/\s+/g, ' ').trim();
@@ -266,7 +267,7 @@ export function checkPage(html, opts) {
   }
 
   // C11 to C13: readability. Folded and raw-evidence content is exempt from the paragraph cap.
-  const folded = (n) => { for (let a = n.parent; a; a = a.parent) if (a.tag === 'details' || has(a, 'data-plan-raw')) return true; return false; };
+  const folded = (n) => { for (let a = n; a; a = a.parent) if (a.tag === 'details' || has(a, 'data-plan-raw')) return true; return false; };
   for (const p of all.filter((n) => n.tag === 'p' && !folded(n))) {
     const n = words(visible(p));
     if (n > 60) W('C11', lineOf(src, p.start), `a paragraph runs ${n} words; keep it to 60 or fewer, or fold it into <details>`);
@@ -276,8 +277,8 @@ export function checkPage(html, opts) {
     if (n > 20) W('C12', lineOf(src, c.start), `a consequence runs ${n} words; keep it to 20 or fewer`);
   }
   for (const d of all.filter((n) => n.tag === 'details')) {
-    const sum = d.kids.find((k) => isEl(k) && k.tag === 'summary');
-    if (!sum || visible(sum) === '') W('C13', lineOf(src, d.start), 'a <details> has no summary text; say what is inside so the reader can decide to open it');
+    const sum = d.kids.find(isEl);
+    if (!sum || sum.tag !== 'summary' || visible(sum) === '') W('C13', lineOf(src, d.start), 'a <details> has no summary text; say what is inside so the reader can decide to open it');
   }
 
   return { errors: rep.errors, warnings: rep.warnings };

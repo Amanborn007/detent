@@ -2,7 +2,7 @@
 
 A curator screen is an ordered selection of the blocks below, and it may carry as many jobs as the work actually has. A runbook that also settles four decisions and maps two flows is one screen carrying a verdict, a brief, four decision blocks and two mechanism blocks. A block with nothing in it is left out rather than filled with a placeholder.
 
-One order is fixed. The `<h1>` states the finding in one line, the brief comes right after it, every decision comes after the brief, and everything else (evidence, access panel, diagrams) comes after the last decision under a `Background` heading. A reader who stops after the decisions has still been asked everything.
+One order is fixed. The `<h1>` states the finding in one line (on a decision page it may instead be the question being asked), the brief comes right after it, every decision comes after the brief, and everything else (evidence, access panel, diagrams) comes after the last decision under a `Background` heading. A reader who stops after the decisions has still been asked everything. The allowed alternative is the decision at the end: the brief still says what is being asked, a "Jump to the decision" link sits under it, and the background is folded (see "Readable decision pages").
 
 Recipes name a default starting set of blocks for a kind of work. They are starting sets, not walls. Add a block a recipe does not list the moment the work has that content.
 
@@ -66,7 +66,7 @@ The option key (`data-plan-option="phased"`) is the answer string sent back to y
 
 Gives the reader the answer in the first line so they can stop reading and act.
 
-Must contain one sentence stating the answer, the recommendation, or the state of the work. It is the page's `<h1>`. Where the answer is conditional, the condition sits in the same sentence.
+Must contain one sentence stating the answer, the recommendation, or the state of the work. It is the page's `<h1>`; on a decision page the `<h1>` may instead be the question being asked, with the answer in the brief. Where the answer is conditional, the condition sits in the same sentence.
 
 Must not contain a preamble, a scope statement, a list of what the screen covers, or a restatement of the question. It is not a summary of the screen; it is the conclusion of the screen.
 
