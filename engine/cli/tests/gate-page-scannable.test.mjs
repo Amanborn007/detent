@@ -173,6 +173,31 @@ test("pointer cursors sit under html[data-curator=connected], and motion sits in
   for (const m of css.matchAll(/(?:animation|transition)[^;{}]*?(\d+)ms/g)) assert.ok(Number(m[1]) >= 100 && Number(m[1]) <= 300, m[0]);
 });
 
+test("a qualified verdict is partial, never met", () => {
+  const mapped = (verdict) => /data-verdict="(met|partial|missing|unknown)"/.exec(render({ files: full([["alpha export writes a file", "step 1", verdict]]) }).html)[1];
+  for (const v of ["Covered, partially", "Covered (partial)", "Met partially", "Yes — but only for ASCII", "covered except step 3", "Covered only in part"]) assert.equal(mapped(v), "partial", v);
+  for (const [v, want] of [["covered", "met"], ["Yes", "met"], ["Not covered", "missing"], ["TBD", "unknown"]]) assert.equal(mapped(v), want, v);
+});
+
+test("a blocked or partial source opens its details, a reached one does not", () => {
+  const rows = [...REACHED, { source: "metrics store", status: "blocked", criticality: "important", blocked_reason: "no token", enable_action: "register it" },
+    { source: "slow api", status: "partial", criticality: "supporting", detail: "times out" }];
+  const sec = /<section id="access">[\s\S]*?<\/section>/.exec(render({ files: full(ROWS, rows) }).html)[0];
+  const cells = sec.split('<div class="cell"').slice(1);
+  assert.equal(cells.length, 4);
+  assert.deepEqual(cells.map((c) => /<details class="sub cell-more" open>/.test(c)), [false, false, true, true]);
+});
+
+test("the ticket ref is in the Goal row, escaped, and not in the h1", () => {
+  const { html } = render({ files: { ...full(), "run.json": { ticket_ref: "octo/repo#5<x>" } } });
+  assert.match(html, /<p data-brief="goal"><strong>Goal \(octo\/repo#5&lt;x&gt;\)<\/strong>/);
+  assert.ok(!/<h1>[^<]*octo/.test(html));
+  assert.match(render({ files: full() }).html, /<strong>Goal \(run-1\)<\/strong>/);
+  const bad = render({ files: { ...full(), "run.json": "{not json" } });
+  const w = bad.warnings.find((x) => x.file === "run.json");
+  assert.ok(w && !/instead of the ticket/.test(w.detail) && /Goal row/.test(w.detail), JSON.stringify(w));
+});
+
 test("an engine-worded intent question is shown as a reader question, with the decision id unchanged", () => {
   const stored = "Intent gate: does plan/plan.md faithfully implement brief.md? Approve to unlock implement; revise to loop back to plan.";
   const { html } = render({ files: full(), decisions: [{ ...INTENT, question: stored }] });
