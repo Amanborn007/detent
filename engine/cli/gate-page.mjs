@@ -556,7 +556,7 @@ export function buildGatePage(run, gate, model) {
     }
   }
 
-  const earlierSection = earlier.length ? secBlock("earlier", "Earlier decisions", `${earlier.length} answered`,
+  const earlierSection = earlier.length ? secBlock("earlier", "Already answered", `${earlier.length} answered`,
     "Each earlier answer below shaped this plan.", `<ul class="earlier">\n${earlier.map((d) =>
       `<li id="decision-${esc(d.id)}">${inl(d.question || "")} → <strong>${esc(d.answer)}</strong>${d.note ? ` (${esc(d.note)})` : ""} <span class="small"><abbr title="decision ${esc(d.id)}">${esc(d.id)}</abbr></span></li>`).join("\n")}\n</ul>`, false) : "";
 
