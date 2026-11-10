@@ -67,7 +67,7 @@ test("the brief keeps four plain rows and the page has no script", () => {
 
 test("tiles show criteria met, sources reached and earlier decisions answered", () => {
   const { html } = render({ files: full(), earlier: [answered("D-001", "First thing?"), answered("D-002", "Second thing?")] });
-  const glance = /<div class="glance"[\s\S]*?<\/div>\s*<\/div>\s*(?=<)/.exec(html) || /class="glance"[\s\S]{0,2500}/.exec(html);
+  const glance = [html.slice(html.indexOf('class="glance"'), html.indexOf('<section id="background">'))];
   const t = textOf(glance[0]);
   assert.match(t, /1 of 4 met/);
   assert.match(t, /2 of 2 reached/);
@@ -124,7 +124,7 @@ test("plan steps are a numbered stepper with one folded detail per step", () => 
 
 test("access is a status grid with glyph and word, and a blocked source auto-opens it", () => {
   const ok = render({ files: full() }).html;
-  assert.equal((ok.match(/data-verdict="reached"/g) || []).length, 2);
+  assert.equal((ok.match(/<span class="mark" data-verdict="reached">/g) || []).length, 2);
   assert.match(ok, /<span class="mark" data-verdict="reached">✓ reached<\/span>/);
   const blocked = render({ files: full(ROWS, [...REACHED, { source: "metrics store", status: "blocked", criticality: "supporting", needed_for: "counts", blocked_reason: "no token", enable_action: "register it" }]) }).html;
   assert.match(blocked, /<span class="mark" data-verdict="blocked">✕ blocked<\/span>/);
