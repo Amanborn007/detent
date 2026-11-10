@@ -16,7 +16,7 @@ const CAUSES = ["judgment", "external", "infra", "capability", "data"];
 const OUTCOMES = ["failed", "abandoned", "superseded"];
 const FORBIDDEN_DECISION_KEYS = [
   "id", "gate", "status", "answer", "answered_by", "answered_via", "answered_at",
-  "exercise_state", "withdrawn", "withdrawn_at", "degraded_assumption", "rejected_options",
+  "exercise_state", "withdrawn", "withdrawn_at", "degraded_assumption", "rejected_options", "human_notes", "rejected_answer",
 ];
 const DECISION_KEYS = [
   "key", "question", "options", "blocks", "cause", "context", "kind", "source",

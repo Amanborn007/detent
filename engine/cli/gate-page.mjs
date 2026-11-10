@@ -154,6 +154,13 @@ function resolveStage(gate, stages) {
   return null;
 }
 
+function humanNotesHtml(d) {
+  if (!Array.isArray(d.human_notes) || d.human_notes.length === 0) return "";
+  const items = d.human_notes.map((n) =>
+    `<li>${esc(n.at || "")}${n.answer_if_any ? ` (leaning ${esc(n.answer_if_any)})` : ""}: ${esc(n.note || "")}</li>`).join("");
+  return `<div class="human-notes"><p class="small">Notes you left on this decision</p><ul>${items}</ul></div>`;
+}
+
 // Contract results are warn-level: reported as warning events, never blocking the page.
 export function contractWarnings(html) {
   const { errors, warnings } = checkPage(html);
@@ -406,12 +413,13 @@ export function buildGatePage(run, gate, model) {
       const label = (intentOpts && INTENT_LABEL[o]) || det.label || o;
       return `<div class="option" data-plan-option="${esc(o)}"><strong>${esc(label)}</strong>${explain ? `\n<p class="o-note" data-plan-consequence>${esc(explain)}</p>` : ""}${then ? `\n<p class="o-note o-then" data-plan-then>${esc(then)}</p>` : ""}</div>`;
     }).join("\n");
-    return `<div id="decision-${esc(d.id)}" data-plan-question="${esc(d.id)}" data-plan-required data-plan-shape="pick-one" ${attrs}>
+    return `<div data-plan-question="${esc(d.id)}" id="decision-${esc(d.id)}" data-plan-required data-plan-shape="pick-one" ${attrs}>
 <h3 class="q-label">${inl(d.question || "")}</h3>
 <p class="small" data-plan-why-now>${esc(whyNow)}</p>
 ${intentOpts ? "" : d.context_excerpt ? `<div class="q-context" data-plan-context>\n${md(d.context_excerpt)}\n</div>` : d.context ? `<p class="small">Context: ${esc(d.context)}</p>` : ""}
 ${rec || intentOpts ? "" : `<p class="small">recommended option: no recommendation given</p>`}
 ${rec && recObj.reason ? `<p data-plan-reason>${esc(recObj.reason)}</p>` : ""}
+${humanNotesHtml(d)}
 <div class="options">
 ${cards}
 </div>

@@ -821,7 +821,7 @@ function stripPriorMarks(block) {
 // Marks the block's own leading (question) open tag with the answer.
 function markAnswered(block, { escapedAnswer, iso, escapedNote }) {
   return block.replace(/^<[a-zA-Z][a-zA-Z0-9-]*\b[^>]*>/, (tag) => {
-    let attrs = ` data-curator-answered="${escapedAnswer}" data-curator-answered-at="${iso}"`;
+    let attrs = escapedAnswer === null ? ` data-curator-answered-at="${iso}"` : ` data-curator-answered="${escapedAnswer}" data-curator-answered-at="${iso}"`;
     if (escapedNote !== undefined) attrs += ` data-curator-answered-note="${escapedNote}"`;
     return insertAttrBeforeClose(tag, attrs);
   });
@@ -844,15 +844,19 @@ function markOption(block, escapedAnswer, id, rawAnswer) {
 // and `stampDecisions`. Throws on refusal (no match / not unique / no such
 // option); never touches `data-curator-chosen`, the SDK's transient mark.
 function applyAnswer(file, { question, answer, note }) {
-  const escapedAnswer = escapeHtml(answer);
+  const escapedAnswer = answer === null ? null : escapeHtml(answer);
   const escapedNote = note !== undefined ? escapeHtml(note) : undefined;
   const iso = new Date().toISOString();
   mutateArtifact(file, (html) => {
     const { start, end } = scopeQuestionBlock(html, question, file);
     let block = html.slice(start, end);
-    block = stripPriorMarks(block);
+    // The chosen option is transient after a reload, so a note typed on an answered question arrives as answer:null.
+    const keepAnswer = escapedAnswer === null && /^<[^>]*\sdata-curator-answered="/.test(block);
+    block = keepAnswer
+      ? block.replace(/\s+data-curator-answered-at="[^"]*"|\s+data-curator-answered-note="[^"]*"/g, () => '')
+      : stripPriorMarks(block);
     block = markAnswered(block, { escapedAnswer, iso, escapedNote });
-    block = markOption(block, escapedAnswer, question, answer);
+    if (escapedAnswer !== null) block = markOption(block, escapedAnswer, question, answer);
     return html.slice(0, start) + block + html.slice(end);
   });
 }
