@@ -39,8 +39,7 @@ const textOf = (h) => h.replace(/<style[\s\S]*?<\/style>/g, "").replace(/<[^>]+>
 test("the h1 is the question: an intent gate asks whether the plan is ready, a decision gate asks its own question", () => {
   const h1 = (html) => /<h1>([\s\S]*?)<\/h1>/.exec(html)[1].replace(/<[^>]+>/g, "").trim();
   const intent = h1(render({ files: full() }).html);
-  assert.match(intent, /^Is the .+ plan ready to implement\?$/);
-  assert.ok(intent.includes("Users can export a monthly summary"), intent);
+  assert.equal(intent, "Is this plan ready to implement?");
   const d = { id: "D-001", raised_by: "intake", blocks: ["implement"], question: "Which format should the file use", options: ["csv", "json"], status: "pending" };
   assert.equal(h1(render({ files: { "brief.md": BRIEF }, decisions: [d], name: "D-001" }).html), "Which format should the file use?");
   assert.equal(h1(render({ files: { "brief.md": BRIEF }, decisions: [{ ...d, question: "Which format?" }], name: "D-001" }).html), "Which format?");
@@ -185,14 +184,12 @@ test("an engine-worded intent question is shown as a reader question, with the d
   assert.deepEqual(checkPage(html).warnings.filter((w) => w.id === "C3"), []);
 });
 
-test("the h1 never cuts the goal mid-phrase with an ellipsis, and prefers the ticket title", () => {
+test("the h1 quotes the ticket title when there is one, and never a cut goal otherwise", () => {
   const h1 = (html) => /<h1>([\s\S]*?)<\/h1>/.exec(html)[1];
   const long = BRIEF.replace("Users can export a monthly summary as a file.", "Users can export a monthly summary of every account as a single file from a scheduled job that runs nightly.");
-  const cut = h1(render({ files: { ...full(), "brief.md": long } }).html);
-  assert.ok(!cut.includes("…") && cut.endsWith("plan ready to implement?"), cut);
-  const subject = /“(.*)”/.exec(cut)[1];
-  assert.ok(subject.length <= 70 && long.includes(subject), subject);
-  assert.ok(!/\b(a|an|the|of|to|from|and|or|with)$/i.test(subject), subject);
+  assert.equal(h1(render({ files: { ...full(), "brief.md": long } }).html), "Is this plan ready to implement?");
+  const headed = h1(render({ files: { ...full(), "brief.md": long.replace("# Brief", "# Brief: octo/repo#1 - Nightly export") } }).html);
+  assert.equal(headed, "Is the “Nightly export” plan ready to implement?");
   const titled = h1(render({ files: { ...full(), "ticket.json": { title: "Monthly export" } } }).html);
   assert.equal(titled, "Is the “Monthly export” plan ready to implement?");
 });
