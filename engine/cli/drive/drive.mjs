@@ -15,6 +15,7 @@ import { readOutbox, validateDecisions, secretScan } from "./outbox.mjs";
 import { createStateTracker } from "./integrity.mjs";
 import { resolveStateDir } from "../../curator/auth.mjs";
 import { optionKey } from "../../handoff/handoff.mjs";
+import { ACCESS_DEGRADED_OPTIONS, ACCESS_DEGRADED_DETAILS, ACCESS_DEGRADED_NO_RECOMMENDATION } from "./access-degraded.mjs";
 import {
   validateDriveProfile, buildChildSettings, buildChildArgs, buildChildEnv, versionAtLeast, MIN_CLAUDE_VERSION,
 } from "./profile.mjs";
@@ -289,6 +290,19 @@ function section(text, heading) {
   return out.join("\n").trim();
 }
 
+const REQUIRED_INPUTS = { research: ["brief.md"], plan: ["brief.md", "research.md", "access-report.json"] };
+
+function requireInputs(E, ctx, stage) {
+  for (const name of REQUIRED_INPUTS[stage] || []) {
+    const src = join(ctx.runDir, name);
+    if (existsSync(src)) continue;
+    const ref = E.readJson(join(ctx.runDir, "run.json")).ticket_ref;
+    stopFail(E, ctx, "inputs_artifact_missing",
+      `${name} is missing and its stage is already done: restore it at ${src}, or start a new run with engine run new --ticket ${ref}`,
+      { stage, detail: src });
+  }
+}
+
 function prepareInputs(E, ctx, stage, stepN) {
   const { runDir, runId, repo, stack } = ctx;
   const stepDir = join(ST.sroot, "steps", String(stepN));
@@ -298,16 +312,12 @@ function prepareInputs(E, ctx, stage, stepN) {
   ST.stepDir = stepDir;
   ST.outbox = dirs.outbox;
   const nonce = randomBytes(16).toString("hex");
-  const put = (name, data) => writeFileSync(join(dirs.inputs, name), data);
-  const copyIf = (src, name) => { if (existsSync(src)) copyFileSync(src, join(dirs.inputs, name)); };
+  const written = [];
+  const put = (name, data) => { writeFileSync(join(dirs.inputs, name), data); written.push(name); };
+  const copyIf = (src, name) => { if (existsSync(src)) { copyFileSync(src, join(dirs.inputs, name)); written.push(name); } };
   const stagesDir = join(dirname(E.engineFile), "..", "stages");
   put("SKILL.md", readFileSync(join(stagesDir, stage, "SKILL.md")));
   put("DRIVEN.md", readFileSync(join(stagesDir, "DRIVEN.md")));
-  put("step.json", JSON.stringify({
-    schema: "detent-drive-step-v1", run_id: runId, stage, step: stepN, nonce,
-    outputs: STAGE_OUTPUTS[stage],
-    required_headings: Object.fromEntries(STAGE_OUTPUTS[stage].filter((f) => REQUIRED_HEADINGS[f]).map((f) => [f, REQUIRED_HEADINGS[f]])),
-  }, null, 2));
   const run = E.readJson(join(runDir, "run.json"));
   put("run.json", JSON.stringify({ run_id: runId, ticket_ref: run.ticket_ref, created_at: run.created_at }, null, 2));
   put("decisions.json", JSON.stringify(E.loadDecisions(runDir), null, 2));
@@ -333,9 +343,15 @@ function prepareInputs(E, ctx, stage, stepN) {
     copyIf(join(runDir, "research.md"), "research.md");
     copyIf(join(runDir, "access-report.json"), "access-report.json");
   }
+  const inputs = [...written, "step.json"].sort();
+  put("step.json", JSON.stringify({
+    schema: "detent-drive-step-v1", run_id: runId, stage, step: stepN, nonce, inputs,
+    outputs: STAGE_OUTPUTS[stage],
+    required_headings: Object.fromEntries(STAGE_OUTPUTS[stage].filter((f) => REQUIRED_HEADINGS[f]).map((f) => [f, REQUIRED_HEADINGS[f]])),
+  }, null, 2));
   lockedDown(dirs.inputs);
   chmodSync(dirs.cwd, 0o555);
-  return { ...dirs, nonce, stepDir };
+  return { ...dirs, nonce, stepDir, inputFiles: inputs };
 }
 
 // ---------------------------------------------------------------------------
@@ -458,17 +474,6 @@ function quarantine(runDir, stepN) {
 // Gate pages
 // ---------------------------------------------------------------------------
 
-function accessPanel(E, runDir) {
-  const p = join(runDir, "access-report.json");
-  if (!existsSync(p)) return "";
-  let rows;
-  try { rows = JSON.parse(readFileSync(p, "utf8")); } catch { return ""; }
-  if (!Array.isArray(rows) || rows.length === 0) return "";
-  const esc = E.escapeHtml;
-  const body = rows.map((r) => `<tr><td>${esc(r.source)}</td><td>${esc(r.status)}</td><td>${esc(r.criticality)}</td><td>${esc(r.detail || r.blocked_reason || "")}</td></tr>`).join("\n");
-  return `<h2>Access &amp; data completeness</h2>\n<table><tr><th>source</th><th>status</th><th>criticality</th><th>detail</th></tr>\n${body}\n</table>`;
-}
-
 function envPanel(E, runDir) {
   const p = join(runDir, "env.proposed.json");
   if (!existsSync(p)) return "";
@@ -495,11 +500,12 @@ function curatorStateDirFor(E) {
   return join(realpathSync(existing), ...tail);
 }
 
-function stopForHuman(E, ctx, stage, blockers, collectError, extra = {}) {
+function stopForHuman(E, ctx, stage, blockers, extra = {}) {
   const { runId, runDir } = ctx;
-  const noteHtml = `<p class="sub">${E.escapeHtml(INTENT_NOTE)}</p>\n${accessPanel(E, runDir)}\n${envPanel(E, runDir)}`;
+  const noteHtml = `<p class="sub">${E.escapeHtml(INTENT_NOTE)}</p>\n${envPanel(E, runDir)}`;
   const html = E.renderGateArtifact({ runId, runDir }, {
     name: blockers[0].gate || blockers[0].id, stage, decisions: blockers, noteHtml,
+    earlier: E.loadDecisions(runDir).filter((d) => d.status === "answered" && !E.isUnresolvedJudgment(d)),
   });
   let url;
   const curator = E.siblingCurator();
@@ -513,7 +519,7 @@ function stopForHuman(E, ctx, stage, blockers, collectError, extra = {}) {
   }
   const ids = blockers.map((d) => d.id);
   return stopOk(E, ctx, "needs_human", {
-    stage, decisions: ids, html, ...(url ? { url } : {}), ...(collectError ? { collect_error: true } : {}),
+    stage, decisions: ids, html, ...(url ? { url } : {}),
     next_step: process.env.DETENT_VERB
       ? "answer the gate with detent decide (or detent approve / detent revise at your own terminal), then detent continue"
       : `answer in curator${url ? ` (${url})` : ` (open ${html})`}, then run: detent drive --run ${runId}`,
@@ -613,7 +619,9 @@ function applyOutbox(E, ctx, stage, ro, normalized) {
     const rec = {
       id: E.nextDecisionId(decisions), raised_by: stage, blocks: d.blocks, question: d.question, options: d.options,
       cause: d.cause, ...(d.context !== undefined ? { context: d.context } : {}), ...(d.kind ? { kind: d.kind } : {}),
-      ...(d.source ? { source: d.source } : {}), status: "pending",
+      ...(d.source ? { source: d.source } : {}),
+      ...Object.fromEntries(["option_details", "recommended", "no_recommendation", "why_now", "context_excerpt"].filter((k) => d[k] !== undefined).map((k) => [k, d[k]])),
+      status: "pending",
     };
     decisions.push(rec);
     raised.push(rec.id);
@@ -625,7 +633,7 @@ function applyOutbox(E, ctx, stage, ro, normalized) {
       decisions.push({
         id: E.nextDecisionId(decisions), raised_by: "plan", kind: "access-degraded", blocks: ["implement"], source: r.source,
         question: `CRITICAL source '${r.source}' is BLOCKED (${r.blocked_reason || "no reason recorded"}). Enable: ${r.enable_action || "none recorded"}. How to proceed?`,
-        options: ["retry — now reachable", "offline copy at path: <free-text>", "proceed degraded (accept degraded confidence)"],
+        options: ACCESS_DEGRADED_OPTIONS, option_details: ACCESS_DEGRADED_DETAILS, no_recommendation: ACCESS_DEGRADED_NO_RECOMMENDATION,
         cause: "external", status: "pending",
       });
     }
@@ -730,14 +738,28 @@ export async function cmdDrive(flags, E) {
   }
 
   // Curator answers are collected only here, before any child exists.
-  let collectError = false;
   if (E.loadDecisions(runDir).some((d) => d.status === "pending" || E.isUnresolvedJudgment(d))) {
+    let d;
     try {
-      const d = E.drainCuratorFor(runId, runDir);
-      if (d.items.length) E.collectResult(runId, runDir, d.items);
+      d = E.drainCuratorFor(runId, runDir);
     } catch (e) {
-      collectError = true;
-      process.stderr.write(`drive: collecting curator feedback failed (continuing): ${e.message}\n`);
+      return stopFail(E, ctx, "curator_collect_failed",
+        `collecting curator feedback failed: ${e.message.slice(0, 400)}. Fix it (try \`curator status\`), then re-run drive`,
+        { detail: e.message });
+    }
+    if (d.items.length) {
+      const c = E.collectResult(runId, runDir, d.items);
+      const lost = c.unresolved.filter((u) => !u.recorded);
+      if (lost.length) {
+        const conflicts = lost.filter((u) => u.conflict === "already_answered");
+        const retry = "curator feedback could not be recorded (see detail in drive-last.json); answer the gate with an exact option in curator, then re-run drive";
+        const headline = conflicts.length === 0 ? retry
+          : conflicts.length === lost.length
+            ? "curator sent a different answer for an already answered decision, which was not applied; drive-last.json detail says which decision and what to do"
+            : `${retry}. Separately, ${conflicts.map((u) => u.id).join(", ")} already answered and curator sent a different answer, which was not applied: see drive-last.json`;
+        return stopFail(E, ctx, "curator_feedback_unresolved", headline,
+          { detail: JSON.stringify(lost) });
+      }
     }
   }
 
@@ -747,7 +769,7 @@ export async function cmdDrive(flags, E) {
     const status = E.loadStatus(runDir);
     const next = nextAction(E, status, decisions, runDir);
     if (next.action === "done") return stopOk(E, ctx, "done", { stage: null, next_step: "all stages are done" });
-    if (next.action === "needs_human") return stopForHuman(E, ctx, next.stage, next.blockers, collectError);
+    if (next.action === "needs_human") return stopForHuman(E, ctx, next.stage, next.blockers);
     if (next.action === "before_implement" && implement) {
       if (budget - ctx.spent < IMPLEMENT_BUDGET_FLOOR_USD) {
         return stopOk(E, ctx, "budget", {
@@ -768,7 +790,7 @@ export async function cmdDrive(flags, E) {
       if (ST.stopping) await new Promise(() => {});
       if (o.kind === "fail") return stopFail(E, ctx, o.reason, o.next_step, { stage: "implement", detail: o.detail, extra: o.extra });
       if (o.kind === "ok") return stopOk(E, ctx, o.stopped, o.fields);
-      return stopForHuman(E, ctx, "implement", o.blockers, false, o.extra);
+      return stopForHuman(E, ctx, "implement", o.blockers, o.extra);
     }
     if (next.action === "before_implement") {
       return stopOk(E, ctx, "before_implement", {
@@ -802,6 +824,7 @@ export async function cmdDrive(flags, E) {
         stage, next_step: `spent ${round(ctx.spent)} of ${budget} USD; raise it and continue: ${process.env.DETENT_VERB ? "detent continue" : `detent drive --run ${runId}`} --budget <usd>`,
       });
     }
+    requireInputs(E, ctx, stage);
     if (["pending", "blocked"].includes(status.stages[stage].status)) {
       const b = E.beginStage(stage, repo, runId, runDir);
       if (!b.ok) return stopFail(E, ctx, "stage_begin_refused", "inspect the run", { stage, detail: b.refusal.reason });
@@ -828,7 +851,9 @@ export async function cmdDrive(flags, E) {
       `Inputs directory: ${io.inputs}`,
       `Outbox directory: ${io.outbox}`,
       "",
-      `Read ${join(io.inputs, "DRIVEN.md")} first, then ${join(io.inputs, "SKILL.md")}, then the other files in the inputs directory.`,
+      `Read ${join(io.inputs, "DRIVEN.md")} first, then ${join(io.inputs, "SKILL.md")}, then each of these files by path:`,
+      ...io.inputFiles.filter((f) => f !== "DRIVEN.md" && f !== "SKILL.md").map((f) => `- ${join(io.inputs, f)}`),
+      `Search ${join(io.inputs, "repo")} only for code.`,
       "DRIVEN.md overrides every engine, curator and gh step in the skill. Write only into the outbox directory.",
       `Finish by writing ${join(io.outbox, "manifest.json")} as DRIVEN.md describes.`,
     ].join("\n");

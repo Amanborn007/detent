@@ -76,8 +76,9 @@ legal ONLY for a **multi-workspace run** — and entering that mode is a
   front door — stage 0 — enforces one-repo scoping at draft time, so a
   multi-repo ticket reaching the engine is by definition a pre-existing one).
 - **The gate.** Research appends a pending decision (`blocks: ["plan"]`)
-  presenting exactly two options, and plan may not proceed until a human
-  answers it in curator:
+  presenting exactly two options (stored as the string keys `split-first` and
+  `multi-workspace`, with `option_details` and `recommended: split-first`),
+  and plan may not proceed until a human answers it in curator:
   1. **split-first (DEFAULT)** — propose per-repo subtasks via the stage-0
      drafting flow (human-approved like any drafted set); ONE run per
      subtask; the original ticket becomes the coordination parent. Each
@@ -154,7 +155,13 @@ blocks as gates for the human.
     "raised_by": "intake",
     "blocks": ["implement"],
     "question": "Ticket says 'retry failed webhooks' — retry forever with backoff, or cap at N attempts then dead-letter?",
-    "options": ["capped retries + dead-letter", "infinite backoff", "other (specify)"],
+    "options": ["capped retries + dead-letter", "infinite backoff"],
+    "option_details": {
+      "capped retries + dead-letter": { "label": "Cap the retries", "consequence": "Retries stop after a set count and the event is parked.", "then": "Then the plan adds a dead-letter table." },
+      "infinite backoff": { "label": "Retry forever", "consequence": "Retries continue with backoff until the partner answers.", "then": "Then the plan skips the dead-letter table." }
+    },
+    "recommended": { "key": "capped retries + dead-letter", "reason": "A cap keeps a dead partner from piling up retries." },
+    "why_now": "Planning cannot start until the retry policy is known.",
     "context": "brief.md#unknowns U1",
     "status": "pending"
   },
@@ -175,6 +182,22 @@ blocks as gates for the human.
 
 Field rules:
 - `id`: `D-` + zero-padded ordinal, unique within the run; assigned at append time.
+- `options`: an array of plain STRING keys, never objects. Gate collect, the
+  approve/revise check, decide-why and the page all compare them exactly, so a
+  key is also the answer a human's choice records.
+- `option_details` (required for a human-facing decision): an object keyed by
+  the exact option strings, each `{ "label", "consequence", "then" }`. `label`
+  is a reader's name for the option, different from its key; `consequence` says
+  in 4+ words what choosing it does; `then` says what happens next.
+- `recommended` (`{ "key", "reason" }`, `key` one of the options, `reason` 5+
+  words) OR `no_recommendation` (a string of 5+ words saying why none): exactly
+  one of them. Never recommend an answer only a human may give, such as
+  proceed-degraded or a push approval.
+- `why_now` (optional): one sentence on why the run cannot wait.
+- `context_excerpt` (optional): the evidence itself, quoted in words (3+), never a
+  bare path or id. Use it for text that must stay verbatim, so `question` can be
+  a real question ending in `?`.
+- A drive child writes these in the outbox form instead; see `stages/DRIVEN.md`.
 - `blocks`: which pipeline stages may NOT run while this decision is `pending`.
   Default `["implement"]` — research and plan may proceed past an open question
   (plan must present pending decisions in its curator render), but nothing that

@@ -69,8 +69,9 @@ your current context, hand recheck off; do not run it yourself.
      step silently skipped, extra behavior with no step, substantive off-list files,
      a weakened or missing planned test → each becomes a pending decision:
      `"raised_by": "recheck"`, `"blocks": ["ship"]`, question quoting the divergence
-     with its evidence (sha, file:line), options
-     `["accept deviation", "route back to plan", "route back to implement"]`.
+     with its evidence (sha, file:line) in `context_excerpt`, string `options`
+     `["accept deviation", "route back to plan", "route back to implement"]` with
+     `option_details` for each, and `no_recommendation` (the human picks the route).
    The human picks the route; you never route the run yourself.
 
 6. **Write `recheck.md`** (in `${DETENT_ROOT}/.sdlc/<run-id>/`) with exactly:

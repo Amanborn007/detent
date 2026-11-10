@@ -12,8 +12,9 @@ page type of their own. A Run screen that also carries two decisions and a diagr
 normal case. A setup runbook is 43 headings, 4 decisions, 2 diagrams and 9
 tables, and it is a single coherent screen.
 
-Two rules survive every recipe. Verdict is always the first block, so a reader who stops
-after one card still has the answer. Diagram count comes from the content and never from
+Two rules survive every recipe. The `<h1>` is always the verdict and the brief follows it,
+then every decision, then the rest under `Background`, so a reader who stops after the
+decisions has still been asked everything. Diagram count comes from the content and never from
 the page: a distinct flow or call path gets one each, three or more options get a
 cost-against-precedent quadrant, counts and shares get a bar or a line, what exists
 against what is new gets a before-and-after, branching steps get a flowchart, and a
@@ -29,20 +30,26 @@ switch.
 
 When there is a fork in the work and the reader has to pick a way forward.
 
-1. Verdict
-2. What forces the choice
-3. Approaches — one block per option, each with what it is, its cost, its precedent, and
-   what it breaks
-4. What I would refuse
-5. Not yet proven
-6. Decisions needed
+1. Verdict, as the `<h1>`
+2. Brief — goal, done, ask, next
+3. Decisions needed — one block per fork, each with a recommendation and a consequence per option
+4. Background: what forces the choice
+5. Approaches — one block per option, each with what it is, its cost, its precedent, and
+   what it breaks, then an optional comparison table
+6. What I would refuse
+7. Not yet proven
+
+Decisions sit right after the brief, not at the end. Everything after them is evidence for
+the reader who wants to check the recommendation. Annotation hints stay out of the page,
+because the shell shows them.
 
 Diagrams it will almost always owe: a cost-against-precedent quadrant once there are
 three or more approaches, and one flow per approach that changes how the system is wired.
+They go under Background, after every decision.
 
-How it goes wrong: the recommendation is buried in the approaches instead of stated in
-the verdict, so the reader has to reconstruct the answer by comparing options. Pick the
-approach in the first line and let the approach blocks explain the pick.
+How it goes wrong: the decision is buried under the approaches, or the options carry no
+consequence, so the reader has to reconstruct what each click does. State the recommendation
+and its reason in the decision block itself.
 
 ---
 

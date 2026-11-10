@@ -322,3 +322,47 @@ test("secretScan: clean text, literals, short literals ignored", () => {
   assert.ok(!r.pattern.includes(lit));
   assert.deepEqual(secretScan(["abc short"], ["short"]), { hit: false });
 });
+
+const od = (over = {}) => ({ key: "a", label: "Use A", consequence: "Ships the A path to every user.", then: "Then the implement stage builds A.", ...over });
+const REC = { key: "a", reason: "A is the smaller change and keeps the API stable." };
+
+test("validateDecisions: object options normalize to key strings plus option_details", () => {
+  const r = validateDecisions([dec({ options: [od(), od({ key: "b", label: "Use B" })], recommended: REC, why_now: "Implement cannot start yet.", context_excerpt: "The brief says X." })], { stage: "plan", stages: STAGES });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const d = r.decisions[0];
+  assert.deepEqual(d.options, ["a", "b"]);
+  assert.equal(d.option_details.a.label, "Use A");
+  assert.equal(d.option_details.b.label, "Use B");
+  assert.deepEqual(d.recommended, REC);
+  assert.equal(d.why_now, "Implement cannot start yet.");
+  assert.equal(d.context_excerpt, "The brief says X.");
+});
+
+test("validateDecisions: string options and no_recommendation are still accepted", () => {
+  const r = validateDecisions([dec({ no_recommendation: "Both are equally safe, you know the roadmap." })], { stage: "plan", stages: STAGES });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.decisions[0].options, ["a", "b"]);
+  assert.equal(r.decisions[0].option_details, undefined);
+  assert.equal(r.decisions[0].no_recommendation, "Both are equally safe, you know the roadmap.");
+});
+
+test("validateDecisions: option object and recommendation rejections", () => {
+  const b = od({ key: "b" });
+  assert.equal(dReason([dec({ options: [od({ key: "" }), b] })]), "bad_options");
+  assert.equal(dReason([dec({ options: [{ label: "x" }, b] })]), "bad_options");
+  assert.equal(dReason([dec({ options: [od(), od()] })]), "bad_options");
+  assert.equal(dReason([dec({ options: [od(), "a"] })]), "bad_options");
+  assert.equal(dReason([dec({ options: [od(), od({ key: "b", extra: 1 })] })]), "unknown_key");
+  assert.equal(dReason([dec({ options: [od(), od({ key: "b", label: "l".repeat(201) })] })]), "bad_options");
+  assert.equal(dReason([dec({ options: [od(), od({ key: "b", consequence: "c".repeat(501) })] })]), "bad_options");
+  assert.equal(dReason([dec({ options: [od(), od({ key: "b", then: "t".repeat(501) })] })]), "bad_options");
+  assert.equal(dReason([dec({ recommended: { key: "zzz", reason: "r".repeat(20) } })]), "bad_recommendation");
+  assert.equal(dReason([dec({ recommended: { key: "a", reason: "" } })]), "bad_recommendation");
+  assert.equal(dReason([dec({ recommended: { key: "a", reason: "r".repeat(501) } })]), "bad_recommendation");
+  assert.equal(dReason([dec({ recommended: { key: "a", reason: "r".repeat(20), x: 1 } })]), "bad_recommendation");
+  assert.equal(dReason([dec({ recommended: "a" })]), "bad_recommendation");
+  assert.equal(dReason([dec({ recommended: REC, no_recommendation: "Because there is no clear winner." })]), "bad_recommendation");
+  assert.equal(dReason([dec({ no_recommendation: "n".repeat(501) })]), "bad_recommendation");
+  assert.equal(dReason([dec({ why_now: "w".repeat(501) })]), "bad_why_now");
+  assert.equal(dReason([dec({ context_excerpt: "c".repeat(2001) })]), "bad_context_excerpt");
+});

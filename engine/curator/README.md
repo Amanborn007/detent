@@ -97,15 +97,47 @@ across a server restart. A killed `poll` loses nothing — just re-run it.
 
 ## Decision blocks in artifacts
 
+A page with a decision opens with the finding as the `<h1>`, a four-part brief, then
+every decision, then `Background`. The full skeleton and the rules on it are in
+[`blocks.md`](blocks.md); a short one looks like this.
+
 ```html
-<div data-plan-question="rollout-strategy">
-  <div data-plan-option="Phased">Phased rollout ...</div>
-  <div data-plan-option="Big-bang">Big-bang cutover ...</div>
+<h1>Search can move to the new index without downtime</h1>
+<section data-plan-brief>
+  <p data-brief="goal"><b>What we are trying to do:</b> …</p>
+  <p data-brief="done"><b>What is already done:</b> …</p>
+  <p data-brief="ask"><b>What i need from you:</b> …</p>
+  <p data-brief="next"><b>What happens after you answer:</b> …</p>
+</section>
+<div data-plan-question="rollout" data-plan-recommended="phased" data-plan-required data-plan-shape="pick-one">
+  <h3>Should we move traffic in phases?</h3>
+  <p data-plan-why-now>Why now: …</p>
+  <p data-plan-reason>Recommended: phased, because …</p>
+  <div data-plan-option="phased"><strong>Phased rollout</strong>
+    <p data-plan-consequence>…</p><p data-plan-then>If chosen: …</p></div>
+  <div data-plan-option="cutover"><strong>Single cutover</strong>
+    <p data-plan-consequence>…</p><p data-plan-then>If chosen: …</p></div>
 </div>
+<h2>Background</h2>
 ```
 
-The SDK makes options clickable, highlights the chosen one, and queues exactly
-one answer per question. It also appends a free-text **"Why / note"**
+`contract.mjs` checks this shape. `curator check` runs it and reports each miss as a
+`warning:` line carrying its check id (C1 to C10). While `CONTRACT_LEVEL` is `'warn'`
+nothing fails; when it flips to `'error'` the first seven checks refuse the page. Run it
+alone with `node contract.mjs --page <file>`, which prints JSON. It needs `node` on the
+PATH, and the check fails with a next step if it is missing.
+
+The key (`data-plan-option="phased"`) is the answer that comes back to you, so keep it
+short and stable. The label and the consequence are for the reader and are written in full.
+Pages carry no hint about alt-click or clicking an option: the shell shows those.
+
+The SDK draws the options as side-by-side cards in the page's own `--accent`,
+marks the recommended one with the word "Recommended" and its reason, shows
+"Required" on required decisions, and makes each card a keyboard-reachable radio
+(Enter or Space chooses). It highlights the chosen one and queues exactly
+one answer per question. Once the shell delivers the decision it posts
+`decision-sent`, and the panel reads "Sent — awaiting agent" with the mark and
+note kept; `decision-cleared` still retracts. It also appends a free-text **"Why / note"**
 field under each block; when filled it rides along with the answer as
 `note` in the queued decision item. Supply your own field by placing a
 `data-curator-note` element inside the block and the SDK will use that instead

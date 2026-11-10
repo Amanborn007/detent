@@ -12,7 +12,10 @@ because the rules postdate them.
 
 import html
 import os
+import json
 import re
+import shutil
+import subprocess
 import sys
 
 # The detent guide artifact carries its own dark panel theme and pill vocabulary, settled in
@@ -121,10 +124,10 @@ PERCENT = re.compile(r"\d+(?:\.\d+)?\s*%")
 # One share quoted inside a sentence is not a set of figures worth charting; three is.
 PERCENT_CELLS_FOR_CHART = 3
 
-# An option that is an escape hatch rather than a real alternative. Matched whole, never as a prefix
-# or substring, so "No change to API; migrate storage" stays a real approach.
-HATCH = frozenset({"other", "none", "dismiss", "snooze", "skip", "later", "cancel", "no change",
-                   "do nothing", "not now", "no action", "defer", "park"})
+# Hatch options (other, skip, ...) are decided by contract.mjs, the one place the list lives. Its
+# output for the page under check lands here before the diagram rule reads it.
+CONTRACT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "contract.mjs")
+PAGE_HATCH_KEYS = frozenset()
 COMPARISON_WORDS = ("approach", "option", "alternative", "path", "candidate", "recommend", "versus",
                     " vs ")
 
@@ -661,15 +664,39 @@ def check_stacked_tables(text):
 
 
 def is_hatch(label):
-    """An escape hatch, not a real alternative.
+    """An escape hatch, as contract.mjs judged it for this page's option keys."""
+    return label in PAGE_HATCH_KEYS
 
-    Matched on the whole label. Substring matching threw away "No change to API; migrate storage",
-    and anchoring at the start threw away the same one, because "no change" leads a real approach as
-    readily as it names a hatch. A hatch is the entire option or it is not a hatch. Triage triples
-    stay quiet through the comparison-heading gate in diagram_obligations, not through this.
+
+def run_contract(path):
+    """The decision-page contract, run in node. Returns (problems, hatch_keys).
+
+    Missing node is a failure with a next step, never a pass: a page that was not checked has not
+    passed. Contract findings are reported at the level contract.mjs assigns them.
     """
-    text = re.sub(r"[\s.!—-]+$", "", label.strip().lower())
-    return "(specify)" in text or text in HATCH
+    node = os.environ.get("CURATOR_NODE")
+    if node:
+        if not (os.path.isfile(node) and os.access(node, os.X_OK)):
+            return ([(FAIL, 0, "CURATOR_NODE is set to %r, which is not an executable file. Fix or "
+                      "unset it, then run this check again" % node)], frozenset())
+    else:
+        node = shutil.which("node")
+    if not node:
+        return ([(FAIL, 0, "cannot run the decision contract: node is not on PATH. Install Node 18+ "
+                  "or add it to PATH, then run this check again")], frozenset())
+    done = subprocess.run([node, CONTRACT, "--page", path], capture_output=True, text=True)
+    try:
+        report = json.loads(done.stdout)
+    except ValueError:
+        report = None
+    if done.returncode != 0 or report is None:
+        return ([(FAIL, 0, "the decision contract crashed: %s" % (done.stderr.strip() or "no output"))],
+                frozenset())
+    problems = []
+    for level, key in ((FAIL, "errors"), (WARN, "warnings")):
+        for item in report[key]:
+            problems.append((level, item["line"], "contract %s: %s" % (item["id"], item["msg"])))
+    return problems, frozenset(report.get("hatch", []))
 
 
 def sections(text):
@@ -756,7 +783,7 @@ def diagram_obligations(text):
         end = min(nxt.start(), span["stop"]) if nxt else span["stop"]
         options = re.findall(r'data-plan-option\s*=\s*["\']([^"\']*)["\']',
                              text[match.start():end], re.I)
-        real = [o for o in options if not is_hatch(o)]
+        real = [o for o in options if not is_hatch(html.unescape(o))]
         # The heading naming the comparison may be the parent of the one holding the block.
         headings = " ".join(s["heading"].lower() for s in ancestry(spans, span))
         if len(real) >= 3 and any(word in headings for word in COMPARISON_WORDS):
@@ -826,7 +853,13 @@ def check_file(path):
     # The stylesheet is CSS, not markup, so the markup checks do not read it either.
     markup = blank_spans(text, [(m.start(1), m.end(1)) for m in STYLE_BLOCK.finditer(text)])
 
-    problems = check_required(markup, text, active)
+    global PAGE_HATCH_KEYS
+    # The contract only applies to a page with a decision, so other pages need no node.
+    if QUESTION.search(markup):
+        contract_problems, PAGE_HATCH_KEYS = run_contract(path)
+    else:
+        contract_problems, PAGE_HATCH_KEYS = [], frozenset()
+    problems = check_required(markup, text, active) + contract_problems
     for check in BESPOKE:
         if BADGE_CHECKS.get(check) and BADGE_CHECKS[check] not in active:
             continue

@@ -74,7 +74,10 @@ appends pending decisions to `decisions.json`, and owns the `intake` key in
    For EVERY `U*`, append a matching `D-*` block to `decisions.json` with
    `"status": "pending"`, `"raised_by": "intake"`, `"blocks": ["implement"]`
    (use `["plan"]` if planning itself is impossible without the answer — e.g. the
-   affected repo is unknown). These render later as curator decision gates.
+   affected repo is unknown). These render later as curator decision gates. Store
+   `options` as string keys plus `option_details` (`label`, `consequence`, `then`
+   per key), then `recommended` or `no_recommendation`, `why_now`, and optionally
+   `context_excerpt` (CONTRACT.md, `decisions.json` schema).
    *Curator via subagents (CONTRACT.md):* when these gates are rendered, the
    curator mechanics (artifact authoring, open, the poll loop) run in a
    subagent — the main conversation receives only the distilled answers,

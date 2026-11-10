@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, cpSync
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stopCuratorDaemon } from "../../curator/test/daemon-kit.mjs";
 
 export const ENGINE = join(dirname(fileURLToPath(import.meta.url)), "..", "engine.mjs");
 export const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
@@ -15,7 +16,6 @@ export const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures"
 let HOME = null;
 export function detentHome() { return HOME; }
 
-const CURATOR_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "curator", "cli.mjs");
 const stateDirs = new Set();
 
 /** The curator state dir a test's engine() calls use unless the test names its own (the curator's own default under DETENT_ROOT). */
@@ -24,13 +24,13 @@ export function curatorStateDir() {
   return join(HOME, ".local", "curator");
 }
 
-/** Stop any curator daemon recorded in a state dir this file's tests used, through curator's own `stop`. */
+/** Queue a state dir this test chose, so its daemon is stopped when the file's tests finish. */
+export function trackCuratorStateDir(dir) { stateDirs.add(dir); }
+export function trackedCuratorStateDirs() { return stateDirs; }
+
+/** Stop any curator daemon recorded in a state dir this file's tests chose, through curator's own `stop`. */
 export function stopCuratorDaemons() {
-  for (const dir of stateDirs) {
-    if (!existsSync(join(dir, "state.json"))) continue;
-    const r = spawnSync(process.execPath, [CURATOR_CLI, "stop"], { encoding: "utf8", env: { ...process.env, CURATOR_STATE_DIR: dir, CURATOR_NO_BROWSER: "1" } });
-    if (r.status !== 0) throw new Error(`curator stop failed for ${dir}: ${r.stdout}${r.stderr}`);
-  }
+  for (const dir of stateDirs) stopCuratorDaemon(dir);
 }
 after(stopCuratorDaemons);
 
@@ -44,17 +44,28 @@ const GIT_ENV = {
   GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.invalid",
 };
 
+/** The env engine() hands its child. CURATOR_STATE_DIR is only ever one the helper chose, never one inherited from the shell. */
+export function engineEnv(extra = {}) {
+  const env = {
+    ...process.env, ...(HOME ? { DETENT_ROOT: HOME } : {}),
+    NODE_TEST_CONTEXT: process.env.NODE_TEST_CONTEXT || "child-v8", CURATOR_OWNER_PID: String(process.pid),
+    CURATOR_NO_BROWSER: "1", ...extra,
+  };
+  if (!("CURATOR_STATE_DIR" in extra)) {
+    if (HOME) env.CURATOR_STATE_DIR = curatorStateDir();
+    else delete env.CURATOR_STATE_DIR;
+  }
+  for (const k of Object.keys(env)) if (env[k] === undefined) delete env[k]; // a test opts out of a default with { KEY: undefined }
+  if (env.CURATOR_STATE_DIR) stateDirs.add(env.CURATOR_STATE_DIR);
+  return env;
+}
+
 /** Run the engine CLI; returns {code, json, stdout, stderr}. json = last stdout line parsed. */
 export function engine(args, opts = {}) {
   // TEST_CLONE (a helper-only key, never passed on) runs the engine from a copied clone whose bundled curator is a stub.
   const { TEST_CLONE, ...extra } = opts.env || {};
   const bin = TEST_CLONE ? join(TEST_CLONE, "clone", "engine", "cli", "engine.mjs") : ENGINE;
-  const env = {
-    ...process.env, ...(HOME ? { DETENT_ROOT: HOME } : {}),
-    CURATOR_NO_BROWSER: "1", ...(HOME ? { CURATOR_STATE_DIR: curatorStateDir() } : {}), ...extra,
-  };
-  for (const k of Object.keys(env)) if (env[k] === undefined) delete env[k]; // a test opts out of a default with { KEY: undefined }
-  if (env.CURATOR_STATE_DIR) stateDirs.add(env.CURATOR_STATE_DIR);
+  const env = engineEnv(extra);
   const r = spawnSync(process.execPath, [bin, ...args], {
     encoding: "utf8",
     cwd: opts.cwd,
