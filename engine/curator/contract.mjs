@@ -105,6 +105,7 @@ function textOf(node) {
 const visible = (node) => squash(textOf(node));
 const has = (node, attr) => Object.hasOwn(node.attrs, attr);
 const find = (node, pred) => { for (const n of walk(node)) if (pred(n)) return n; return null; };
+const contains = (node, target) => node === target || find(node, (n) => n === target) !== null;
 const findAll = (node, pred) => [...walk(node)].filter(pred);
 
 // Text of a part with its leading <b>/<strong> label removed.
@@ -201,13 +202,14 @@ export function checkPage(html, opts) {
     }
   }
 
-  // C2: words before the first question
+  // C2: visible words before the first question
   const first = questions[0];
   let count = 0;
   (function scan(n) {
     for (const k of n.kids) {
       if (k === first) return true;
       if (!isEl(k)) count += words(k.text);
+      else if (k.tag === 'details' && !has(k, 'open') && !contains(k, first)) continue; // folded: not on screen
       else if (!SKIP_TEXT.has(k.tag) && scan(k)) return true;
     }
     return false;
@@ -261,6 +263,21 @@ export function checkPage(html, opts) {
   if (ins) {
     const n = all.find((e) => !SKIP_TEXT.has(e.tag) && e.kids.some((k) => !isEl(k) && /alt[- ]click|click (an|the) option/i.test(squash(k.text))));
     W('C10', n ? lineOf(src, n.start) : 1, `the page tells the reader how to annotate or click ("${ins[0]}"); the shell owns those instructions`);
+  }
+
+  // C11 to C13: readability. Folded and raw-evidence content is exempt from the paragraph cap.
+  const folded = (n) => { for (let a = n.parent; a; a = a.parent) if (a.tag === 'details' || has(a, 'data-plan-raw')) return true; return false; };
+  for (const p of all.filter((n) => n.tag === 'p' && !folded(n))) {
+    const n = words(visible(p));
+    if (n > 60) W('C11', lineOf(src, p.start), `a paragraph runs ${n} words; keep it to 60 or fewer, or fold it into <details>`);
+  }
+  for (const c of all.filter((n) => has(n, 'data-plan-consequence'))) {
+    const n = words(visible(c));
+    if (n > 20) W('C12', lineOf(src, c.start), `a consequence runs ${n} words; keep it to 20 or fewer`);
+  }
+  for (const d of all.filter((n) => n.tag === 'details')) {
+    const sum = d.kids.find((k) => isEl(k) && k.tag === 'summary');
+    if (!sum || visible(sum) === '') W('C13', lineOf(src, d.start), 'a <details> has no summary text; say what is inside so the reader can decide to open it');
   }
 
   return { errors: rep.errors, warnings: rep.warnings };

@@ -143,7 +143,14 @@ export class SessionStore {
     const session = this.get(key);
     if (!session || !Array.isArray(prompts) || prompts.length === 0) return;
     const at = new Date().toISOString();
-    for (const id of this.idsFor(prompts)) session.delivered.push({ id, at });
+    const ids = this.idsFor(prompts);
+    const seen = new Set(session.delivered.map((d) => d.id));
+    const fresh = new Set(ids.filter((id) => !seen.has(id))).size;
+    for (const id of ids) session.delivered.push({ id, at });
+    if (fresh > 0) {
+      session.chat.push({ from: 'system', text: `the agent received ${fresh} ${fresh === 1 ? 'item' : 'items'} and is working on it`, at });
+      session.version += 1;
+    }
     if (session.delivered.length > DELIVERED_CAP) session.delivered.splice(0, session.delivered.length - DELIVERED_CAP);
     this.flush();
   }
@@ -556,6 +563,7 @@ export function chromePage(session) {
   .msg { font-size: 12.5px; margin: 6px 0; overflow-wrap: anywhere; }
   .msg .who { font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; opacity: .6; margin-right: 6px; }
   .msg.agent .who { color: #2563c9; opacity: 1; }
+  .msg.system { opacity: .6; font-style: italic; }
   #banner { display: none; padding: 8px 14px; background: #b0b6bd; color: #17191c; font-size: 13px; font-weight: 600; flex: none; }
   body.ended #banner { display: block; }
   #nokey { display: none; padding: 8px 14px; background: #f2cf8a; color: #17191c; font-size: 13px; font-weight: 600; flex: none; }
@@ -999,7 +1007,7 @@ export function chromePage(session) {
     div.className = 'msg ' + from;
     var who = document.createElement('span');
     who.className = 'who';
-    who.textContent = from === 'agent' ? 'agent' : 'you';
+    who.textContent = from === 'agent' ? 'agent' : from === 'system' ? 'curator' : 'you';
     div.appendChild(who);
     div.appendChild(document.createTextNode(text));
     chatEl.appendChild(div);

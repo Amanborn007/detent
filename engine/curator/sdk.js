@@ -7,6 +7,9 @@
 (function () {
   'use strict';
 
+  // Pages carry an offline banner; only a page this script reached can send a decision.
+  document.documentElement.dataset.curator = 'connected';
+
   function post(msg) {
     window.parent.postMessage(Object.assign({ curator: true }, msg), '*');
   }
@@ -283,7 +286,8 @@
       '[data-curator-note-label]{font:600 11px/1.3 -apple-system,system-ui,sans-serif;letter-spacing:.03em;text-transform:uppercase;opacity:.62;}' +
       '[' + NOTE + ']{width:100%;min-height:42px;resize:vertical;border:1px solid rgba(128,128,128,.45);border-radius:6px;' +
       'padding:6px 8px;font:13px/1.4 -apple-system,system-ui,sans-serif;background:rgba(128,128,128,.06);color:inherit;}' +
-      '[' + NOTE + ']:focus{outline:2px solid ' + A + ';outline-offset:0;}';
+      '[' + NOTE + ']:focus{outline:2px solid ' + A + ';outline-offset:0;}' +
+      'html[data-curator=connected] .curator-offline{display:none;}';
     (document.head || document.documentElement).appendChild(style);
 
     document.addEventListener('click', function (e) {
