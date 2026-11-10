@@ -136,7 +136,7 @@ test('a rejected tick does not count as the tab being seen', async () => {
   assert.equal(s.lastSeenAt, null);
 });
 
-test('lastSeenAt is persisted with the session', () => {
+test('lastSeenAt does not survive a daemon restart', () => {
   const stateFile = stateFileName();
   const store = new SessionStore({ stateFile });
   const file = artifact();
@@ -144,7 +144,7 @@ test('lastSeenAt is persisted with the session', () => {
   store.markSeen(file, 1234567890000, { flush: true });
   const again = new SessionStore({ stateFile });
   again.loadState();
-  assert.equal(again.get(file).lastSeenAt, 1234567890000);
+  assert.equal(again.get(file).lastSeenAt, null);
 });
 
 test('updates include the artifact file mtime so the shell can reload on republish', async () => {
