@@ -107,11 +107,11 @@ test("a plan step that depends on an open decision says it waits", () => {
   assert.ok(mainText.includes("Waits on D-001 (open, below)"), mainText);
 });
 
-test("the intent gate shows plan.md's Intent check as coverage, in the background after the decision", () => {
+test("the intent gate shows plan.md's Intent check as coverage, in the folded background before the decision", () => {
   const { mainHtml, mainText } = example();
-  const h = mainText.indexOf("Does the plan cover the brief?");
+  const h = mainText.indexOf("Criteria: 7 of 7 met");
   const decide = mainText.indexOf(NEW_QUESTION);
-  assert.ok(decide > 0 && h > decide, "coverage heading follows the decision");
+  assert.ok(h > 0 && decide > h, "the coverage summary precedes the decision");
   const rows = [...mainHtml.matchAll(/<tr><td>(.*?)<\/td><td>(.*?)<\/td><td>(.*?)<\/td><\/tr>/g)].map((m) => m.slice(1).map((c) => unescape(c.replace(/<[^>]+>/g, ""))));
   const cover = rows.filter((r) => /^(covered|not checked|partial|missing)/i.test(r[2]));
   assert.equal(cover.length, 7, JSON.stringify(rows));
@@ -177,14 +177,15 @@ test("the approve/revise gate carries no empty recommendation line, other decisi
   assert.ok(text.includes("no recommendation given"));
 });
 
-test("a fully reachable access report is one sentence with the table collapsed", () => {
+test("a fully reachable access report is one sentence with the status grid folded", () => {
   const { html, mainText } = example();
   const section = html.slice(html.indexOf('<section id="access">'), html.indexOf("</section>", html.indexOf('<section id="access">')));
   assert.ok(mainText.includes("All 4 sources were reachable, so nothing blocks this decision."));
-  assert.match(section, /<details>\s*<summary[^>]*>[^<]*<\/summary>\s*<table/);
+  assert.match(section, /<details class="sec">\s*<summary[^>]*>[\s\S]*?<\/summary>[\s\S]*?<div class="grid">/);
+  assert.equal((section.match(/<span class="mark" data-verdict="reached">✓ reached<\/span>/g) || []).length, 4);
 });
 
-test("a blocked source keeps the access table open and ahead of the background plan", () => {
+test("a blocked source opens the access grid, ahead of the background plan and the decision", () => {
   const { html } = openGate({
     ticket: "octo/repo#24",
     files: {
@@ -198,9 +199,9 @@ test("a blocked source keeps the access table open and ahead of the background p
   });
   const start = html.indexOf('<section id="access">');
   const section = html.slice(start, html.indexOf("</section>", start));
-  assert.ok(!section.includes("<details"), "no collapse when something is blocked");
-  assert.ok(section.includes("<table") && section.includes("vpn down"));
-  assert.ok(start > html.indexOf("data-plan-question=") && start < html.indexOf('id="plan"'));
+  assert.match(section, /<details class="sec" open>/, "a blocked source auto-opens the section");
+  assert.ok(section.includes('data-verdict="blocked">✕ blocked') && section.includes("vpn down"));
+  assert.ok(start < html.indexOf("data-plan-question=") && start < html.indexOf('id="plan"'));
 });
 
 test("run artifacts are all collapsed, and option cards keep label and consequence apart", () => {
@@ -208,7 +209,8 @@ test("run artifacts are all collapsed, and option cards keep label and consequen
   const opens = [...html.matchAll(/<details([^>]*)>/g)].map((m) => m[1]);
   assert.ok(opens.length >= 3);
   assert.ok(opens.every((a) => !/\bopen\b/.test(a)), "nothing is expanded on a well-formed run");
-  assert.ok(!mainHtml.includes("<details") || mainHtml.indexOf("<details") > mainHtml.indexOf('id="access"'), "only the access table may collapse before the raw section");
+  assert.ok(!mainHtml.includes("<details") || mainHtml.indexOf("<details") > mainHtml.indexOf('id="background"'), "background folds start inside the background section");
+  assert.ok(!/<details/.test(mainHtml.slice(mainHtml.indexOf('<section id="decide">'))), "nothing folds in the decision");
   assert.ok((rawHtml.match(/<details/g) || []).length >= 3);
   const card = /<div[^>]*data-plan-option="approve"[^>]*>([\s\S]*?)<\/div>/.exec(html)[1];
   assert.match(card, /<strong>Approve the plan<\/strong>\s*<p[^>]*data-plan-consequence[^>]*>Unlocks implementation of the approved plan steps\.<\/p>/);
@@ -223,7 +225,9 @@ test("the round two page passes the curator artifact check", () => {
 
 test("the intent decision block carries no engine file path and no bare decision id", () => {
   const { html } = example();
-  const block = html.slice(html.indexOf('<section id="decide">'), html.indexOf('<section id="raw">'));
+  const start = html.indexOf('<section id="decide">');
+  const block = html.slice(start, html.indexOf("</section>", start));
+  assert.ok(block.includes("data-plan-question="), "the slice holds the decision");
   assert.ok(!block.includes("Context: plan/plan.md"), "the intent gate always reviews plan.md, so the path is noise");
   assert.ok(!/<p class="small">D-\d+<\/p>/.test(block), "a lone decision id tells a reviewer nothing");
 });

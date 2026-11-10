@@ -1214,7 +1214,7 @@ function pendingFor(decisions, decision) {
 }
 
 // Bump when the page's markup changes without its inputs changing, so existing pages re-render.
-const GATE_TEMPLATE_VERSION = 2;
+const GATE_TEMPLATE_VERSION = 3;
 
 function renderGateArtifact({ runId, runDir }, gate) {
   const plansDir = join(detentRoot(), ".plans");

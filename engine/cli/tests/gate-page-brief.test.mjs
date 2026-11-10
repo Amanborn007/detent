@@ -66,7 +66,8 @@ test("the h1 is followed by a brief with four plain lines, before any decision o
   }
   assert.ok(briefLine(main, "goal").includes("Callers can cap how long a slug gets"));
   assert.match(briefLine(main, "done"), /2 earlier decisions answered/);
-  assert.ok(main.slice(0, q).indexOf("plan/plan.md") < 0, "no engine file path before the decision");
+  const firstScreen = main.slice(h1, main.indexOf("</section>", brief));
+  assert.ok(firstScreen.indexOf("plan/plan.md") < 0, "no engine file path in the h1 or the brief");
 });
 
 test("the intent decision declares itself required, pick-one, with no recommendation and a stated reason", () => {
@@ -124,9 +125,9 @@ test("a decision with a recommendation names the key and gives its reason", () =
   assert.match(main, /<p[^>]*data-plan-reason[^>]*>[^<]*keeps the old behaviour/);
 });
 
-test("background follows the decision: plan, earlier answers, coverage, access, then the raw artifacts", () => {
+test("background comes before the decision: coverage, plan, access, earlier answers, then the decision and the raw artifacts", () => {
   const { html } = example();
   const at = (needle) => html.indexOf(needle);
-  const order = [at("data-plan-question="), at('id="plan"'), at('id="earlier"'), at('id="cover"'), at('id="access"'), at('<section id="raw">')];
+  const order = [at('id="cover"'), at('id="plan"'), at('id="access"'), at('id="earlier"'), at("data-plan-question="), at('<section id="raw">')];
   assert.ok(order.every((i, k) => i > 0 && (k === 0 || i > order[k - 1])), order.join(","));
 });

@@ -22,40 +22,119 @@ const INTENT_THEN = {
 const INTENT_NO_RECOMMENDATION = "the engine has no recommendation here, you are the check on whether the plan matches the brief";
 
 const EXTRA_CSS = `
-  :root { color-scheme: light; }
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark; } }
+  :root { color-scheme: light; --ok:#3d7a4f; --ok-tint:#dcefe0; --warn:#9a6a12; --warn-tint:#f6e9cc;
+    --bad:#a2412f; --bad-tint:#f5ddd7; --shadow:rgba(22,39,60,.10); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark;
+    --ok:#7cc493; --ok-tint:#1c3324; --warn:#e2b35c; --warn-tint:#3a2e15; --bad:#e98b78; --bad-tint:#3d211b; --shadow:rgba(0,0,0,.35); } }
   :root[data-theme="dark"] { color-scheme: dark; --paper:#14181c; --paper-2:#1b2026; --ink:#e8e6e2;
-    --muted:#98a2af; --soft:#b8c2cf; --rule:#2b3037; --accent:#7fc3cd; --accent-tint:#1d3a40; }
-  h1 { font-size:26px; }
+    --muted:#98a2af; --soft:#b8c2cf; --rule:#2b3037; --accent:#7fc3cd; --accent-tint:#1d3a40;
+    --ok:#7cc493; --ok-tint:#1c3324; --warn:#e2b35c; --warn-tint:#3a2e15; --bad:#e98b78; --bad-tint:#3d211b; --shadow:rgba(0,0,0,.35); }
+  body { padding-inline:max(20px,env(safe-area-inset-left)); }
+  h1 { font-size:30px; margin:0 0 16px; overflow-wrap:anywhere; }
   h2 { margin-top:48px; }
+  h2.bg { font-size:20px; margin:40px 0 8px; }
   .small { font-family:var(--mono); font-size:11px; color:var(--muted); letter-spacing:.02em; }
   .dref { color:var(--muted); font-size:.9em; }
   .box.notice { border-left-color:var(--accent); }
   .checks { list-style:none; padding-left:0; }
   .checks li { display:flex; gap:.5rem; }
   .tick { font-family:var(--mono); color:var(--accent); flex:none; }
-  .steps li { margin:.9rem 0; }
-  .step-meta { font-size:14px; color:var(--soft); margin-top:.15rem; }
-  .step-meta .k { font-family:var(--mono); font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
-  .earlier { list-style:none; padding-left:0; }
+  .earlier { list-style:none; padding-left:0; margin:.4rem 0; }
   .earlier li { padding:.5rem 0; border-bottom:1px solid var(--rule); }
-  .brief { border-left:3px solid var(--accent); padding:.1rem 0 .1rem 1rem; margin:1rem 0 2rem; }
-  .brief p { margin:.35rem 0; }
   .q-label { font-size:1.15rem; margin:.2rem 0; }
-  .o-then { color:var(--muted); }
-  .option strong { font-weight:600; }
-  .options { display:grid; grid-template-columns:repeat(auto-fit,minmax(14rem,1fr)); gap:.7rem; margin:.8rem 0 .4rem; }
-  .option { border:1px solid var(--rule); border-radius:6px; padding:.7rem 1rem; cursor:pointer; background:var(--paper-2); }
-  .option:hover { border-color:var(--accent); }
-  .o-name { font-weight:600; }
-  .o-note { margin-top:.25rem; font-size:14px; color:var(--soft); }
-  [data-curator-chosen] { border-color:var(--accent); background:var(--accent-tint); }
-  details { margin:.8rem 0; }
-  summary { cursor:pointer; font-family:var(--mono); font-size:13px; }
-  .doc { border-left:3px solid var(--rule); padding:.2rem 0 .2rem 1.2rem; margin:.5rem 0 1.5rem; font-size:15px; }
+  .o-then { color:var(--soft); }
+  .jump { margin:.25rem 0 1.25rem; font-size:.9rem; }
+  .jump a { color:var(--accent); }
+
+  [data-plan-brief] { margin:0 0 20px; padding:4px 18px; background:var(--paper-2); border-radius:8px; }
+  [data-plan-brief] [data-brief] { display:grid; grid-template-columns:9.5rem 1fr; gap:12px; margin:0; padding:9px 0; border-bottom:1px solid var(--rule); }
+  [data-plan-brief] [data-brief]:last-child { border-bottom:0; }
+  [data-plan-brief] strong { font:11px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--muted); padding-top:3px; font-weight:400; }
+  @media (max-width:520px) { [data-plan-brief] [data-brief] { grid-template-columns:1fr; gap:0; } }
+
+  .glance { display:grid; grid-template-columns:repeat(auto-fit,minmax(13rem,1fr)); gap:12px; margin:24px 0 8px; }
+  .tile { padding:12px 14px; border:1px solid var(--rule); border-radius:8px; }
+  .tile .k { font:10px var(--mono); letter-spacing:.12em; text-transform:uppercase; color:var(--muted); }
+  .tile .v { font-family:var(--serif); font-size:24px; line-height:1.2; }
+  .tile .s { font-size:13px; color:var(--soft); }
+  .meter { height:8px; border-radius:999px; background:var(--paper-2); overflow:hidden; margin:6px 0 4px; display:flex; }
+  .meter i { display:block; height:100%; }
+  .meter .m-met { background:var(--ok); }
+  .meter .m-part { background:var(--warn); }
+  .meter .m-bad { background:var(--bad); }
+  .meter .m-unk { background:var(--muted); }
+
+  details.sec { border:1px solid var(--rule); border-radius:8px; margin:10px 0; background:var(--paper); }
+  details.sec > summary { padding:12px 16px; list-style:none; display:flex; flex-wrap:wrap; gap:4px 10px; align-items:baseline; font-family:var(--sans); font-size:16px; }
+  details.sec > summary::-webkit-details-marker { display:none; }
+  details.sec > summary::before { content:"▸"; color:var(--muted); display:inline-block; width:1em; }
+  details.sec[open] > summary::before { content:"▾"; }
+  details.sec > summary b { font-weight:600; }
+  details.sec > summary span { color:var(--soft); }
+  .body { padding:0 16px 14px; }
+  .take { font-weight:600; margin:2px 0 12px; }
+  .body ul { margin:.4rem 0; padding-left:1.1rem; }
+  .body li { margin:.25rem 0; }
+  details.sub { border-top:1px solid var(--rule); margin:0; }
+  details.sub > summary { padding:8px 0; font-family:var(--sans); font-size:15px; }
+  details.sub .inner { padding:0 0 10px 1.2rem; font-size:14px; }
+  .inner .row { margin:.2rem 0; }
+  .inner .row b { font:10px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--muted); font-weight:400; margin-right:6px; }
+  .doc { border-left:3px solid var(--rule); padding:.2rem 0 .2rem 1.2rem; margin:.5rem 0 1.5rem; font-size:15px; overflow-wrap:anywhere; }
   .doc h3 { font-size:1.15rem; margin:1.2rem 0 .4rem; }
   .doc h4 { font-size:1rem; margin:1.4rem 0 .4rem; }
   .doc h5, .doc h6 { font-size:.95rem; margin:1rem 0 .3rem; }
+  details { margin:.8rem 0; }
+  summary { font-family:var(--mono); font-size:13px; }
+  .raw-table { overflow-x:auto; }
+
+  .mark { font:11px var(--mono); letter-spacing:.06em; white-space:nowrap; }
+  .mark[data-verdict=met], .mark[data-verdict=reached] { color:var(--ok); }
+  .mark[data-verdict=partial] { color:var(--warn); }
+  .mark[data-verdict=missing], .mark[data-verdict=blocked] { color:var(--bad); }
+  .mark[data-verdict=unknown] { color:var(--muted); }
+  .crit { list-style:none; padding:0 !important; margin:0; }
+  .crit li { display:grid; grid-template-columns:6rem 1fr; gap:10px; padding:7px 0; border-bottom:1px solid var(--rule); margin:0 !important; }
+  .crit li:last-child { border-bottom:0; }
+  .crit .why { display:block; font-size:13px; color:var(--soft); }
+  @media (max-width:520px) { .crit li { grid-template-columns:1fr; gap:2px; } }
+
+  .stepper-wrap { overflow-x:auto; margin:4px 0 14px; padding-bottom:4px; }
+  .stepper { display:flex; list-style:none; padding:0 !important; margin:0; min-width:calc(var(--n,4) * 6rem); }
+  .stepper li { flex:1; position:relative; text-align:center; font-size:12px; line-height:1.3; color:var(--soft); margin:0 !important; padding:0 3px; }
+  .stepper li::before { content:""; position:absolute; top:13px; left:-50%; width:100%; height:2px; background:var(--rule); z-index:0; }
+  .stepper li:first-child::before { display:none; }
+  .stepper .dot { position:relative; z-index:1; display:inline-grid; place-items:center; width:28px; height:28px; border-radius:50%;
+    background:var(--paper); border:2px solid var(--accent); color:var(--ink); font:12px var(--mono); margin-bottom:4px; }
+  .stepper .st { display:block; }
+
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(14rem,1fr)); gap:8px; }
+  .cell { border:1px solid var(--rule); border-left-width:4px; border-radius:6px; padding:8px 10px; font-size:14px; overflow-wrap:anywhere; }
+  .cell[data-verdict=reached] { border-left-color:var(--ok); }
+  .cell[data-verdict=blocked] { border-left-color:var(--bad); background:var(--bad-tint); }
+  .cell[data-verdict=partial] { border-left-color:var(--warn); }
+  .cell .n { font-weight:600; display:block; }
+  .cell .d { color:var(--soft); font-size:13px; }
+
+  .options { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(15rem,100%),1fr)); gap:14px; margin:.8rem 0 .4rem; }
+  .option { position:relative; border:1px solid var(--rule); border-radius:10px; padding:16px 18px 14px; background:var(--paper); }
+  .option strong { display:block; font-size:18px; font-weight:600; margin-bottom:4px; }
+  .opt-rec { border:2px solid var(--accent); box-shadow:0 0 0 4px var(--accent-tint); }
+  .o-note { margin:.3rem 0; font-size:15px; color:var(--soft); }
+  [data-plan-why-now] { color:var(--soft); }
+  html[data-curator=connected] .option, html[data-curator=connected] [data-plan-option] { cursor:pointer; }
+  .option[aria-checked="true"] { border-color:var(--ink); box-shadow:0 0 0 3px var(--ink); }
+  [data-curator-chosen] { border-color:var(--accent); background:var(--accent-tint); }
+
+  @keyframes fill { from { transform:scaleX(0); } to { transform:scaleX(1); } }
+  @keyframes open { from { opacity:0; transform:translateY(-3px); } to { opacity:1; transform:none; } }
+  @media (prefers-reduced-motion: no-preference) {
+    .meter i { transform-origin:left; animation:fill 300ms ease-out both; }
+    details[open] > .body, details[open] > .inner { animation:open 200ms ease-out; }
+    .option { transition:transform 150ms ease-out, box-shadow 150ms ease-out, border-color 150ms ease-out; }
+    html[data-curator=connected] .option:hover { transform:translateY(-2px); box-shadow:0 6px 16px var(--shadow); }
+    details.sec > summary::before { transition:transform 150ms ease-out; }
+  }
 `;
 
 function themeCss() {
@@ -161,6 +240,45 @@ function humanNotesHtml(d) {
   return `<div class="human-notes"><p class="small">Notes you left on this decision</p><ul>${items}</ul></div>`;
 }
 
+const GLYPH = { met: "✓", partial: "◐", missing: "✕", unknown: "?", reached: "✓", blocked: "✕" };
+const mark = (v) => `<span class="mark" data-verdict="${v}">${GLYPH[v]} ${v}</span>`;
+const hasNotice = (html) => html.includes('class="box notice"');
+
+// Fixed vocabulary; an unrecognised verdict is unknown, never missing.
+function verdictOf(text) {
+  const t = String(text || "").toLowerCase().replace(/[`*_]/g, "").trim();
+  if (/^(covered|met|yes)\b/.test(t)) return "met";
+  if (/^partial/.test(t)) return "partial";
+  if (/^(missing|not covered|no)\b/.test(t)) return "missing";
+  return "unknown";
+}
+
+function capWords(text, max) {
+  const w = String(text).split(/\s+/).filter(Boolean);
+  return w.length <= max ? w.join(" ") : `${w.slice(0, max).join(" ")}…`;
+}
+
+// First clause of a sentence, for a name where the source has no title.
+function clause(text, max) {
+  const first = String(text).replace(/[`*_]/g, "").trim().split(/[.;:]\s|,\s|\s—\s|\.$/)[0].trim();
+  return first.length <= max ? first : `${first.slice(0, max).replace(/\s+\S*$/, "")}…`;
+}
+const stepTitle = (text) => clause(text.replace(/^CONDITIONAL on D-\d{3,}[.,]?\s*/, ""), 60);
+const shortGoal = (text) => clause(text, 60);
+
+function meter(parts, label) {
+  const total = parts.reduce((s, [, k]) => s + k, 0);
+  if (!total) return "";
+  const segs = parts.filter(([, k]) => k).map(([cls, k]) => `<i class="${cls}" style="width:${((k / total) * 100).toFixed(1)}%"></i>`).join("");
+  return `<div class="meter" role="img" aria-label="${esc(label)}">${segs}</div>`;
+}
+
+// Each background section opens with one takeaway; the summary says what is inside.
+function fold(title, summary, take, body, open) {
+  return `<details class="sec"${open ? " open" : ""}>\n<summary><b>${esc(title)}:</b> <span>${esc(summary)}</span></summary>\n<div class="body">\n<p class="take">${esc(take)}</p>\n${body}\n</div>\n</details>`;
+}
+const secBlock = (id, title, summary, take, body, open) => `<section id="${id}">\n${fold(title, summary, take, body, open)}\n</section>`;
+
 // Contract results are warn-level: reported as warning events, never blocking the page.
 export function contractWarnings(html) {
   const { errors, warnings } = checkPage(html);
@@ -199,7 +317,6 @@ export function buildGatePage(run, gate, model) {
     const h = /^#\s+Brief:\s*\S+?\s+(?:-|:|—)\s+(.+)$/m.exec(brief);
     if (h) title = h[1].trim();
   }
-  const ticketLabel = title ? `${esc(ref)}, “${esc(title)}”,` : esc(ref);
 
   const known = new Map();
   for (const d of [...(gate.earlier || []), ...gate.decisions]) known.set(d.id, d);
@@ -253,87 +370,101 @@ export function buildGatePage(run, gate, model) {
 
   const isIntent = gate.name === "intent";
   const n = gate.decisions.length;
-  let verdict;
   let ask;
   let next;
   if (isIntent) {
-    verdict = `You are deciding whether the plan for ${ticketLabel} is ready to implement.`;
     ask = "Decide whether the plan is ready to implement. Approve unlocks implementation; Send it back returns the plan to planning with your note.";
     next = "If you approve, the implement stage runs the plan steps; if you send it back, the plan stage reruns with your note.";
   } else if (stage === "ship") {
-    verdict = `You are deciding whether ${ticketLabel} may be pushed as a draft pull request.`;
     ask = "Answer every question below; your answers decide whether the engine will push the branch and open a draft pull request.";
     next = "Nothing is pushed until every question here is answered, then the engine pushes the branch and opens a draft pull request.";
   } else {
-    verdict = `You are answering ${n} open question${n === 1 ? "" : "s"} that block the ${esc(stage)} stage for ${ticketLabel}.`;
     ask = `Answer the ${n === 1 ? "question" : `${n} questions`} below so the ${stage} stage can start.`;
     next = `The ${stage} stage does not start until every question on this page is answered, then the run continues.`;
   }
 
-  let access = "";
+  let accessRows = null;
   let accessBlocked = false;
+  let accessSection = "";
   if (atResearch) {
     const raw = read("access-report.json");
     if (raw === null) {
-      access = missingFile("access-report.json", "access-report.json is missing, so the page cannot say which sources were reachable.");
+      accessSection = secBlock("access", "Access", "report missing", "The page cannot say which sources were reachable.",
+        missingFile("access-report.json", "access-report.json is missing, so the page cannot say which sources were reachable."), true);
     } else {
       let rows = null;
       try { rows = JSON.parse(raw); } catch { rows = null; }
       if (!Array.isArray(rows)) {
         warnings.push({ code: "gate_page_unreadable", file: "access-report.json", section: null, detail: "access-report.json is not a JSON list" });
-        access = `<div class="box notice" role="note"><p>access-report.json could not be read as JSON, so the raw file is shown here.</p></div>\n<pre>${esc(raw)}</pre>`;
+        accessSection = secBlock("access", "Access", "report unreadable", "The raw file is shown instead of a status grid.",
+          `<div class="box notice" role="note"><p>access-report.json could not be read as JSON, so the raw file is shown here.</p></div>\n<pre>${esc(raw)}</pre>`, true);
       } else if (rows.length === 0) {
-        access = "<p>The access report lists no sources.</p>";
+        accessSection = secBlock("access", "Access", "no sources listed", "The access report lists no sources.", "", false);
       } else {
-        const trs = rows.map((r) => {
-          const detail = [r.detail, r.blocked_reason && `Blocked: ${r.blocked_reason}`, r.enable_action && `To unblock: ${r.enable_action}`,
+        accessRows = rows;
+        const accessWord = { reachable: "reached", blocked: "blocked", partial: "partial" };
+        const cells = rows.map((r) => {
+          const v = accessWord[r.status] || "unknown";
+          const detail = [r.criticality && `${String(r.criticality).replace(/^./, (c) => c.toUpperCase())}.`, r.needed_for && `Needed for ${r.needed_for}.`, r.detail,
+            r.blocked_reason && `Blocked: ${r.blocked_reason}`, r.enable_action && `To unblock: ${r.enable_action}`,
             r.criticality === "critical" && r.status === "blocked" && "Hard-blocking: implementation cannot start until this is resolved."]
             .filter(Boolean).join(" ");
-          return `<tr><td>${esc(r.source ?? "")}</td><td>${esc(r.status ?? "")}</td><td>${esc(r.criticality ?? "")}</td><td>${esc(r.needed_for ?? "")}</td><td>${esc(detail)}</td></tr>`;
+          return `<div class="cell" data-verdict="${v}"><span class="n">${mark(v)} ${esc(r.source ?? "")}</span><span class="d">${esc(detail)}</span></div>`;
         }).join("\n");
         const bad = rows.filter((r) => r.status !== "reachable").length;
-        const table = `<table>\n<thead><tr><th>Source</th><th>Status</th><th>Criticality</th><th>Needed for</th><th>Detail</th></tr></thead>\n<tbody>\n${trs}\n</tbody>\n</table>`;
         accessBlocked = bad > 0;
-        access = bad === 0
-          ? `<p>All ${rows.length} sources were reachable, so nothing blocks this decision.</p>\n<details><summary>Source table</summary>\n${table}\n</details>`
-          : `${table}\n<p>${bad} of ${rows.length} sources were not fully reachable; conclusions that rest on them carry degraded confidence.</p>`;
+        accessSection = secBlock("access", "Access", `${rows.length - bad} of ${rows.length} sources reached`,
+          bad === 0 ? `All ${rows.length} sources were reachable, so nothing blocks this decision.`
+            : `${bad} of ${rows.length} sources were not fully reachable; conclusions that rest on them carry degraded confidence.`,
+          `<div class="grid">\n${cells}\n</div>`, bad > 0);
       }
     }
   }
-  const accessSection = access ? `<section id="access">\n<h2>Access and data completeness</h2>\n${access}\n</section>` : "";
 
   const intentCheck = isIntent && plan !== null ? sectionOf(plan, /^intent check$/i) : null;
   let goalText;
   let goal = "";
+  let goalCount = 0;
+  let hasGoal = false;
   if (brief === null) {
     goalText = "The brief is missing, so this page cannot state the goal.";
     goal = missingFile("brief.md", "brief.md is missing, so the goal and acceptance criteria cannot be shown.");
   } else {
     const g = sectionOf(brief, /^goal$/i);
     const a = sectionOf(brief, /^acceptance criteria$/i);
-    if (g) goalText = g.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/[`*_]/g, "").replace(/\s+/g, " ").trim();
-    else {
+    if (g) {
+      hasGoal = true;
+      goalText = g.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/[`*_]/g, "").replace(/\s+/g, " ").trim();
+    } else {
       goalText = "The brief has no Goal section, so the goal is not stated here.";
       goal = notice("brief.md", "## Goal", "brief.md has no ## Goal section; the raw file is shown below");
     }
-    if (a) goal += intentCheck !== null ? "" : `\n<h3>Acceptance criteria</h3>\n${md(a, { tasks: "all" })}`;
-    else goal += `\n${notice("brief.md", "## Acceptance criteria", "brief.md has no ## Acceptance criteria section; the raw file is shown below")}`;
+    if (a) {
+      goalCount = parseCriteria(a).length;
+      goal += intentCheck !== null ? "" : `\n<h3>Acceptance criteria</h3>\n${md(a, { tasks: "all" })}`;
+    } else goal += `\n${notice("brief.md", "## Acceptance criteria", "brief.md has no ## Acceptance criteria section; the raw file is shown below")}`;
   }
-  goal = goal.trim() ? `<h2>The brief</h2>\n${goal}` : "";
+  const goalSection = goal.trim()
+    ? `<section id="goal">\n${fold("The brief", hasNotice(goal) ? "a section is missing" : `${goalCount} acceptance criteri${goalCount === 1 ? "on" : "a"}`,
+      hasNotice(goal) ? "Part of the brief is missing; the raw file is shown below." : "These are the criteria the plan is checked against.", goal, hasNotice(goal))}\n</section>` : "";
 
-  let planHtml = "";
+  let planSection = "";
   if (atPlan) {
     if (plan === null) {
-      planHtml = `<h2>The plan</h2>\n${missingFile("plan/plan.md", "plan/plan.md is missing, so the plan cannot be shown.")}`;
+      planSection = secBlock("plan", "Plan", "file missing", "The plan file is missing, so the plan cannot be shown.", missingFile("plan/plan.md", "plan/plan.md is missing, so the plan cannot be shown."), true);
     } else {
       let inner = "";
+      let open = false;
       const stepsBody = sectionOf(plan, /^(plan )?steps$/i);
       const steps = stepsBody ? parseSteps(stepsBody) : [];
       if (steps.length) {
-        const lis = steps.map((st) => `<li>${inl(st.text.replace(/\bCONDITIONAL on (D-\d{3,})/, (m, id) =>
-          (known.has(id) ? `${known.get(id).status === "answered" ? "Depends on" : "Waits on"} ${id}` : m)))}${st.files ? `<div class="step-meta"><span class="k">Files:</span> ${inl(st.files)}</div>` : ""}${st.verify ? `<div class="step-meta"><span class="k">Verify:</span> ${inl(st.verify)}</div>` : ""}</li>`).join("\n");
-        inner += `<h3>Steps</h3>\n<ol class="steps">\n${lis}\n</ol>`;
+        const dep = (t) => t.replace(/\bCONDITIONAL on (D-\d{3,})/, (m, id) => (known.has(id) ? `${known.get(id).status === "answered" ? "Depends on" : "Waits on"} ${id}` : m));
+        const titles = steps.map((st) => stepTitle(st.text));
+        const lis = titles.map((t, i) => `<li><span class="dot">${i + 1}</span><span class="st">${esc(t)}</span></li>`).join("\n");
+        const subs = steps.map((st, i) => `<details class="sub">\n<summary><b>${i + 1} · ${esc(titles[i])}</b></summary>\n<div class="inner">\n<p class="row">${inl(dep(st.text))}</p>${st.files ? `\n<p class="row"><b>Files</b> ${inl(st.files)}</p>` : ""}${st.verify ? `\n<p class="row"><b>Verify</b> ${inl(st.verify)}</p>` : ""}\n</div>\n</details>`).join("\n");
+        inner += `<div class="stepper-wrap" style="--n:${steps.length}"><ol class="stepper">\n${lis}\n</ol></div>\n${subs}`;
       } else {
+        open = true;
         inner += notice("plan/plan.md", "## Steps", stepsBody === null
           ? "plan/plan.md has no ## Steps section; the raw file is shown below"
           : "plan/plan.md has a ## Steps section with no numbered steps; the raw file is shown below");
@@ -343,19 +474,36 @@ export function buildGatePage(run, gate, model) {
       else if (steps.some((s) => s.files)) {
         const all = [...new Set(steps.filter((s) => s.files).map((s) => s.files))];
         inner += `\n<h3>Files touched</h3>\n<ul>${all.map((f) => `<li>${inl(f)}</li>`).join("")}</ul>`;
-      } else inner += `\n${notice("plan/plan.md", "## Files touched", "plan/plan.md has no ## Files touched section; the raw file is shown below")}`;
+      } else {
+        open = true;
+        inner += `\n${notice("plan/plan.md", "## Files touched", "plan/plan.md has no ## Files touched section; the raw file is shown below")}`;
+      }
+      const verified = steps.filter((s) => s.verify).length;
+      planSection = fold("Plan", steps.length ? `${steps.length} step${steps.length === 1 ? "" : "s"}, ${verified} with a verify command` : "no numbered steps",
+        steps.length ? "Open a step to see its files and how it is checked." : "The plan has no numbered steps to show.", inner, open);
       const risks = sectionOf(plan, /^risks/i);
-      if (risks) inner += `\n<h3>Risks</h3>\n${md(risks)}`;
-      else inner += `\n${notice("plan/plan.md", "## Risks", "plan/plan.md has no ## Risks section; the raw file is shown below")}`;
-      planHtml = `<h2>The plan</h2>\n${inner}`;
+      let riskBody;
+      let riskSummary;
+      if (risks) {
+        const count = (risks.match(/^\s{0,3}(?:[-*+]|\d+[.)])\s/gm) || []).length;
+        riskBody = md(risks);
+        riskSummary = count ? `${count} listed` : "see below";
+      } else {
+        riskBody = notice("plan/plan.md", "## Risks", "plan/plan.md has no ## Risks section; the raw file is shown below");
+        riskSummary = "none stated";
+      }
+      planSection += `\n${fold("Risks", riskSummary, risks ? "Each risk below names the step that answers it." : "The plan states no risks.", riskBody, !risks)}`;
+      planSection = `<section id="plan">\n${planSection}\n</section>`;
     }
   }
 
-  let coverHtml = "";
+  let coverSection = "";
   let coverSummary = null;
+  let critCounts = null;
   if (isIntent && plan !== null) {
     if (intentCheck === null) {
-      coverHtml = `<h2>Does the plan cover the brief?</h2>\n${notice("plan/plan.md", "## Intent check", "plan/plan.md has no ## Intent check section; the raw file is shown below")}`;
+      coverSection = secBlock("cover", "Criteria", "the plan has no intent check", "Nothing checked the plan against the brief.",
+        notice("plan/plan.md", "## Intent check", "plan/plan.md has no ## Intent check section; the raw file is shown below"), true);
     } else {
       const lines = intentCheck.split("\n");
       const isRow = (l) => /^\s*\|/.test(l);
@@ -369,9 +517,11 @@ export function buildGatePage(run, gate, model) {
       const criteria = accBody ? parseCriteria(accBody) : [];
       const prose = (ls) => (ls.join("\n").trim() ? md(ls.join("\n")) : "");
       if (rows.length === 0) {
-        coverHtml = `<h2>Does the plan cover the brief?</h2>\n${prose(before)}${accBody ? `\n<h3>Acceptance criteria</h3>\n${md(accBody, { tasks: "all" })}` : ""}\n${prose(after)}`;
+        coverSection = secBlock("cover", "Criteria", criteria.length ? `${criteria.length} in the brief, none checked against the plan` : "none listed",
+          "The plan's intent check has no verdict table.",
+          `${prose(before)}${accBody ? `\n<h3>Acceptance criteria</h3>\n${md(accBody, { tasks: "all" })}` : ""}\n${prose(after)}`, false);
       } else {
-        const { rowOf, taken } = matchCriteria(criteria, rows);
+        const { rowOf } = matchCriteria(criteria, rows);
         const byRow = new Map([...rowOf].map(([ci, ri]) => [ri, criteria[ci]]));
         const pairs = rows.map((row, ri) => ({ criterion: byRow.get(ri) ?? row[0] ?? "", row, matched: !criteria.length || byRow.has(ri) }));
         criteria.forEach((criterion, ci) => { if (!rowOf.has(ci)) pairs.push({ criterion, row: null, matched: true }); });
@@ -381,37 +531,53 @@ export function buildGatePage(run, gate, model) {
         const loose = pairs.filter((p) => !p.matched);
         const looseHtml = loose.length
           ? `\n<h3>Plan rows that match no brief criterion</h3>\n<table>\n<thead><tr><th>Plan row</th><th>Covered by</th><th>Verdict</th></tr></thead>\n<tbody>\n${loose.map(tr).join("\n")}\n</tbody>\n</table>` : "";
+        const items = pairs.filter((p) => p.matched).map((p) => ({ ...p, v: p.row ? verdictOf(p.row[2]) : "unknown" }));
         const total = criteria.length || rows.length;
-        const covered = pairs.filter((p) => p.matched && p.row && /^covered/i.test(p.row[2] || "")).length;
+        const count = (v) => items.filter((i) => i.v === v).length;
+        critCounts = { met: count("met"), partial: count("partial"), missing: count("missing"), unknown: count("unknown"), total: items.length };
         const addition = /\b(step \d+)\b[^.]*\b(?:not asked for|addition)/i.exec(after.join(" ")) || /Additions?:\s*(step \d+)/i.exec(after.join(" "));
         const filed = /Filed as (D-\d+)/.exec(after.join(" "));
-        coverSummary = `The plan covers ${covered} of ${total} ${total === 1 ? "criterion" : "criteria"}${addition && filed ? `; ${addition[1]} is an addition, kept as ${filed[1]}${known.has(filed[1]) ? `, which asks “${String(known.get(filed[1]).question || "").trim()}”` : ""}` : ""}.`;
-        coverHtml = `<h2>Does the plan cover the brief?</h2>\n${prose(before)}\n<table>\n<thead><tr><th>Acceptance criterion</th><th>Covered by</th><th>Verdict</th></tr></thead>\n<tbody>\n${trs}\n</tbody>\n</table>${looseHtml}\n${prose(after)}`;
+        coverSummary = `The plan covers ${critCounts.met} of ${total} ${total === 1 ? "criterion" : "criteria"}${addition && filed ? `; ${addition[1]} is an addition, kept as ${filed[1]}${known.has(filed[1]) ? `, which asks “${capWords(String(known.get(filed[1]).question || "").trim(), 14)}”` : ""}` : ""}.`;
+        const why = (i) => {
+          if (!i.row) return "The plan's intent check does not mention it.";
+          const by = i.row[1] && !/^none$/i.test(i.row[1]) ? `Covered by ${inl(i.row[1])}.` : "No step covers it.";
+          return i.v === "unknown" && i.row[2] ? `${by} Verdict as written: “${esc(i.row[2])}”.` : by;
+        };
+        const li = (i) => `<li>${mark(i.v)}<span>${inl(i.criterion)}<span class="why">${why(i)}</span></span></li>`;
+        const bar = [["m-met", critCounts.met], ["m-part", critCounts.partial], ["m-bad", critCounts.missing], ["m-unk", critCounts.unknown]];
+        const summary = [`${critCounts.met} of ${critCounts.total} met`, ...["partial", "missing", "unknown"].filter((k) => critCounts[k]).map((k) => `${critCounts[k]} ${k}`)].join(", ");
+        const take = critCounts.missing ? `${critCounts.missing} ${critCounts.missing === 1 ? "criterion is" : "criteria are"} missing from the plan.`
+          : critCounts.met === critCounts.total ? "Every criterion is covered by the plan."
+            : "No criterion is missing; the rest are partial or unknown.";
+        const body = `${prose(before)}\n${meter(bar, summary)}\n<ul class="crit">\n${items.map(li).join("\n")}\n</ul>\n<details class="sub raw" data-plan-raw>\n<summary>Coverage table as written</summary>\n<div class="inner raw-table">\n<table>\n<thead><tr><th>Acceptance criterion</th><th>Covered by</th><th>Verdict</th></tr></thead>\n<tbody>\n${trs}\n</tbody>\n</table>${looseHtml}\n</div>\n</details>\n${prose(after)}`;
+        coverSection = secBlock("cover", "Criteria", summary, take, body, critCounts.missing > 0);
       }
     }
   }
 
-  const earlierHtml = earlier.length ? `<h2>Already answered</h2>\n<ul class="earlier">\n${earlier.map((d) =>
-    `<li id="decision-${esc(d.id)}">${inl(d.question || "")} → <strong>${esc(d.answer)}</strong>${d.note ? ` (${esc(d.note)})` : ""} <span class="small"><abbr title="decision ${esc(d.id)}">${esc(d.id)}</abbr></span></li>`).join("\n")}\n</ul>` : "";
+  const earlierSection = earlier.length ? secBlock("earlier", "Earlier decisions", `${earlier.length} answered`,
+    "Each earlier answer below shaped this plan.", `<ul class="earlier">\n${earlier.map((d) =>
+      `<li id="decision-${esc(d.id)}">${inl(d.question || "")} → <strong>${esc(d.answer)}</strong>${d.note ? ` (${esc(d.note)})` : ""} <span class="small"><abbr title="decision ${esc(d.id)}">${esc(d.id)}</abbr></span></li>`).join("\n")}\n</ul>`, false) : "";
 
   const pending = gate.decisions.map((d) => {
     const intentOpts = isIntent && d.gate === "intent";
     const recObj = d.recommended;
     if (recObj && !(d.options || []).includes(recObj.key)) throw new Error(`${d.id}: recommended.key ${JSON.stringify(recObj.key)} is not one of the options`);
     const rec = recObj ? recObj.key : null;
-    const details = d.option_details || {};
+    const optionDetails = d.option_details || {};
     const blocks = [...new Set((d.blocks || []).map((b) => STAGE_FOR_BLOCK[b] || b))];
     const whyNow = intentOpts ? "Implementation cannot start until the plan is approved or sent back."
       : d.why_now ? d.why_now
       : blocks.length ? `The ${blocks.join(" and ")} stage cannot start until this is answered.` : "The run is waiting on this answer.";
     const attrs = rec ? `data-plan-recommended="${esc(rec)}"`
       : `data-plan-no-recommendation="${esc(intentOpts ? INTENT_NO_RECOMMENDATION : d.no_recommendation || "the engine has no recommendation for this question")}"`;
-    const cards = (d.options || []).map((o) => {
-      const det = details[o] || {};
+    const ordered = rec ? [rec, ...(d.options || []).filter((o) => o !== rec)] : d.options || [];
+    const cards = ordered.map((o) => {
+      const det = optionDetails[o] || {};
       const explain = intentOpts ? INTENT_EXPLAIN[o] : det.consequence;
       const then = intentOpts ? INTENT_THEN[o] : det.then;
       const label = (intentOpts && INTENT_LABEL[o]) || det.label || o;
-      return `<div class="option" data-plan-option="${esc(o)}"><strong>${esc(label)}</strong>${explain ? `\n<p class="o-note" data-plan-consequence>${esc(explain)}</p>` : ""}${then ? `\n<p class="o-note o-then" data-plan-then>${esc(then)}</p>` : ""}</div>`;
+      return `<div class="option${o === rec ? " opt-rec" : ""}" data-plan-option="${esc(o)}"><strong>${esc(label)}</strong>${explain ? `\n<p class="o-note" data-plan-consequence>${esc(explain)}</p>` : ""}${then ? `\n<p class="o-note o-then" data-plan-then>${esc(then)}</p>` : ""}</div>`;
     }).join("\n");
     return `<div data-plan-question="${esc(d.id)}" id="decision-${esc(d.id)}" data-plan-required data-plan-shape="pick-one" ${attrs}>
 <h3 class="q-label">${inl(d.question || "")}</h3>
@@ -435,10 +601,36 @@ ${cards}
   const done = (doneParts.length ? `So far ${doneParts.join(", ")}.` : "Nothing earlier in this run has finished yet.") + (coverSummary ? ` ${coverSummary}` : "");
   const doneHtml = esc(done).replace(/\bD-\d+\b/g, (id) => `<abbr title="decision ${id}">${id}</abbr>`);
 
+  let h1;
+  if (isIntent) h1 = `Is the “${esc(shortGoal(hasGoal ? goalText : title || ref))}” plan ready to implement?`;
+  else if (n === 1) {
+    const q = String(gate.decisions[0].question || "").trim();
+    h1 = inl(/\?$/.test(q) ? q : `${q.replace(/[.!:\s]+$/, "")}?`);
+  } else h1 = `Can the ${esc(stage)} stage start once these ${n} questions are answered?`;
+
+  const tiles = [];
+  if (critCounts) {
+    const c = critCounts;
+    const sub = [c.partial && `${c.partial} partial`, c.missing && `${c.missing} missing`, c.unknown && `${c.unknown} unknown`].filter(Boolean).join(", ") || "none partial or missing";
+    tiles.push(["Criteria", `${c.met} of ${c.total} met`, meter([["m-met", c.met], ["m-part", c.partial], ["m-bad", c.missing], ["m-unk", c.unknown]], `${c.met} met, ${c.partial} partial, ${c.missing} missing, ${c.unknown} unknown`), sub]);
+  }
+  if (accessRows) {
+    const r = accessRows.filter((x) => x.status === "reachable").length;
+    const b = accessRows.length - r;
+    tiles.push(["Sources", `${r} of ${accessRows.length} reached`, meter([["m-met", r], ["m-bad", b]], `${r} reached, ${b} not reached`), b ? `${b} not fully reached` : "none blocked"]);
+  }
+  if (answeredBefore) tiles.push(["Earlier decisions", `${answeredBefore} answered`, "", "each one shaped this plan"]);
+  const glance = tiles.length ? `<div class="glance" aria-label="At a glance">\n${tiles.map(([k, v, bar, s]) =>
+    `<div class="tile"><div class="k">${k}</div><div class="v">${esc(v)}</div>${bar}<div class="s">${esc(s)}</div></div>`).join("\n")}\n</div>` : "";
+
   const rawHtml = docs.map((d) => {
     const body = md(d.src, { idPrefix: d.prefix, refs: rawRefs });
-    return `<details${d.open ? " open" : ""}><summary>${esc(d.rel)}</summary>\n<article class="doc">\n${body}\n</article></details>`;
+    return `<details${d.open ? " open" : ""}><summary>${esc(d.rel)}</summary>\n<article class="doc" data-plan-raw>\n${body}\n</article></details>`;
   }).join("\n");
+
+  const background = [gate.noteHtml || "", accessBlocked ? accessSection : "", goalSection, coverSection, planSection, accessBlocked ? "" : accessSection, earlierSection]
+    .filter((s) => s.trim()).join("\n");
+  const jump = n ? `<p class="jump"><a href="#decision-${esc(gate.decisions[0].id)}">Jump to the decision ↓</a></p>` : "";
 
   const html = `<!doctype html>
 <html lang="en">
@@ -450,27 +642,22 @@ ${cards}
 </head>
 <body>
 <main>
-<h1>${verdict}</h1>
+<h1>${h1}</h1>
 <section class="brief" data-plan-brief>
-<p data-brief="goal"><strong>Goal.</strong> ${esc(goalText)}</p>
-<p data-brief="done"><strong>Done so far.</strong> ${doneHtml}</p>
-<p data-brief="ask"><strong>We need from you.</strong> ${esc(ask)}</p>
-<p data-brief="next"><strong>Then.</strong> ${esc(next)}</p>
+<p data-brief="goal"><strong>Goal</strong> <span>${esc(capWords(goalText, 40))}</span></p>
+<p data-brief="done"><strong>Done so far</strong> <span>${doneHtml}</span></p>
+<p data-brief="ask"><strong>We need from you</strong> <span>${esc(ask)}</span></p>
+<p data-brief="next"><strong>Next</strong> <span>${esc(next)}</span></p>
 </section>
+<p class="curator-offline">Not connected: open this page with <code>curator open &lt;file&gt;</code> to send a decision.</p>
+${jump}
+${glance}
+${background ? `<section id="background">\n<h2 class="bg">Background</h2>\n${background}\n</section>` : ""}
 <section id="decide">
+<h2 class="bg">Your decision</h2>
 ${pending}
 </section>
-<section id="background">
-<h2>Background</h2>
-${gate.noteHtml || ""}
-${accessBlocked ? accessSection : ""}
-${goal ? `<section id="goal">\n${goal}\n</section>` : ""}
-${planHtml ? `<section id="plan">\n${planHtml}\n</section>` : ""}
-${earlierHtml ? `<section id="earlier">\n${earlierHtml}\n</section>` : ""}
-${coverHtml ? `<section id="cover">\n${coverHtml}\n</section>` : ""}
-${accessBlocked ? "" : accessSection}
-</section>
-${rawHtml ? `<section id="raw">\n<h2>Run artifacts</h2>\n<p class="small">Everything above is drawn from these files, as written.</p>\n${rawHtml}\n</section>` : ""}
+${rawHtml ? `<section id="raw">\n<h2 class="bg">Run artifacts</h2>\n<p class="small">Everything above is drawn from these files, as written.</p>\n${rawHtml}\n</section>` : ""}
 <footer>run ${esc(runId)} · gate ${/^D-\d+$/.test(gate.name) ? `<abbr title="decision ${esc(gate.name)}">${esc(gate.name)}</abbr>` : esc(gate.name)} · stage ${esc(stage)}</footer>
 </main>
 </body>
