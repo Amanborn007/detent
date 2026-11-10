@@ -52,7 +52,16 @@ function checkAncestors(dir) {
     .find((r) => abs.startsWith(r + path.sep));
   if (!root) return;
   for (let d = path.dirname(abs); d.length >= root.length; d = path.dirname(d)) {
-    const st = fs.statSync(d);
+    let st;
+    try {
+      st = fs.statSync(d);
+    } catch (e) {
+      if (e.code === 'ENOENT' || e.code === 'ENOTDIR') {
+        if (d === root) break;
+        continue; // a fresh clone has no .local yet
+      }
+      throw e;
+    }
     const fix = `Fix the permissions of ${d} (chmod go-w), or point CURATOR_STATE_DIR somewhere you own, then run: curator open <file.html>`;
     if (st.uid !== process.getuid()) throw new AuthSetupError(`${d}, a parent of the curator state dir ${dir}, is owned by another user`, fix);
     if (st.mode & 0o022) throw new AuthSetupError(`${d}, a parent of the curator state dir ${dir}, is writable by group or others`, fix);
