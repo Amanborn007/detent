@@ -221,7 +221,8 @@ test("the h1 quotes the ticket title when there is one, and never a cut goal oth
 
 test("blocked sources keep the access section open but show only glyph, word and name until a cell is opened", () => {
   const blocked = { source: "metrics store", status: "blocked", criticality: "important", needed_for: "counts", blocked_reason: "no token ".repeat(150), enable_action: "register it" };
-  const { html } = render({ files: full(ROWS, [...REACHED, blocked, { ...blocked, source: "skill tracker" }]) });
+  const wordy = REACHED.map((r) => ({ ...r, detail: "fine ".repeat(150) }));
+  const { html } = render({ files: full(ROWS, [...wordy, { ...blocked, blocked_reason: "no token" }]) });
   const sec = /<section id="access">[\s\S]*?<\/section>/.exec(html)[0];
   assert.match(sec, /<details class="sec" open>/);
   assert.match(sec, /<details class="sub cell-more">\s*<summary>[^<]+<\/summary>/);

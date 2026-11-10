@@ -249,8 +249,8 @@ const hasNotice = (html) => html.includes('class="box notice"');
 // Fixed vocabulary; an unrecognised verdict is unknown, never missing.
 function verdictOf(text) {
   const t = String(text || "").toLowerCase().replace(/[`*_]/g, "").trim();
-  if (/^(covered|met|yes)\b/.test(t)) return "met";
-  if (/^partial/.test(t)) return "partial";
+  if (/partial/.test(t)) return "partial";
+  if (/^(covered|met|yes)\b/.test(t)) return /\b(but|except|only)\b/.test(t) ? "partial" : "met";
   if (/^(missing|not covered|no)\b/.test(t)) return "missing";
   return "unknown";
 }
@@ -304,7 +304,7 @@ export function buildGatePage(run, gate, model) {
   const atResearch = stageIdx >= stages.indexOf("research");
 
   let runJson = {};
-  try { runJson = JSON.parse(read("run.json") || "{}"); } catch { warnings.push({ code: "gate_page_unreadable", file: "run.json", section: null, detail: "run.json is not valid JSON; the page names the run id instead of the ticket" }); }
+  try { runJson = JSON.parse(read("run.json") || "{}"); } catch { warnings.push({ code: "gate_page_unreadable", file: "run.json", section: null, detail: "run.json is not valid JSON; the Goal row shows the run id, not the ticket" }); }
   const ref = runJson.ticket_ref || runId;
   const brief = read("brief.md");
   const plan = read("plan/plan.md");
@@ -410,7 +410,7 @@ export function buildGatePage(run, gate, model) {
             r.blocked_reason && `Blocked: ${r.blocked_reason}`, r.enable_action && `To unblock: ${r.enable_action}`,
             r.criticality === "critical" && r.status === "blocked" && "Hard-blocking: implementation cannot start until this is resolved."]
             .filter(Boolean).join(" ");
-          return `<div class="cell" data-verdict="${v}"><span class="n">${mark(v)} ${esc(r.source ?? "")}</span>${detail ? `\n<details class="sub cell-more"><summary>Details</summary><p class="d">${esc(detail)}</p></details>` : ""}</div>`;
+          return `<div class="cell" data-verdict="${v}"><span class="n">${mark(v)} ${esc(r.source ?? "")}</span>${detail ? `\n<details class="sub cell-more"${v === "reached" ? "" : " open"}><summary>Details</summary><p class="d">${esc(detail)}</p></details>` : ""}</div>`;
         }).join("\n");
         const bad = rows.filter((r) => r.status !== "reachable").length;
         accessBlocked = bad > 0;
@@ -645,7 +645,7 @@ ${cards}
 <main>
 <h1>${h1}</h1>
 <section class="brief" data-plan-brief>
-<p data-brief="goal"><strong>Goal</strong> <span>${esc(capWords(goalText, 40))}</span></p>
+<p data-brief="goal"><strong>Goal (${esc(ref)})</strong> <span>${esc(capWords(goalText, 40))}</span></p>
 <p data-brief="done"><strong>Done so far</strong> <span>${doneHtml}</span></p>
 <p data-brief="ask"><strong>We need from you</strong> <span>${esc(ask)}</span></p>
 <p data-brief="next"><strong>Next</strong> <span>${esc(next)}</span></p>
