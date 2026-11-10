@@ -27,6 +27,7 @@ const CAPABILITIES = Object.freeze({
   containment: false,
   env: false,
   tools_allow: false,
+  approvals: Object.freeze([]),
 });
 
 const isLoopback = (host) => host === "localhost" || host === "[::1]" || /^127\.\d+\.\d+\.\d+$/.test(host);

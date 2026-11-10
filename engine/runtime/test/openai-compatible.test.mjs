@@ -22,7 +22,7 @@ test("capabilities: frozen, exactly the golden-tested set", () => {
   assert.deepEqual({ ...c }, {
     output: ["text", "json"], tools: ["none"], mcp: ["none"], settings_sources: ["none"], settings_file: false,
     auth: ["api_key"], model: true, persist_session: true, timeout: true, reports: {},
-    budget: false, add_dirs: false, deny_tools: false, containment: false, env: false, tools_allow: false,
+    budget: false, add_dirs: false, deny_tools: false, containment: false, env: false, tools_allow: false, approvals: [],
   });
   assert.equal(openai.name, "openai-compatible");
 });

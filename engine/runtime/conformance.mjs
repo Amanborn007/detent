@@ -7,8 +7,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getRuntime, CapabilityError } from "./runtime.mjs";
 
-const ENUMS = { output: ["text", "json"], tools: ["none", "inherit"], mcp: ["none", "inherit"], settings_sources: ["none", "project", "inherit"] };
+const ENUMS = { output: ["text", "json"], tools: ["none", "inherit"], mcp: ["none", "inherit"], settings_sources: ["none", "project", "inherit"], approvals: ["deny"] };
 const BOOLS = ["settings_file", "model", "persist_session", "timeout", "budget", "add_dirs", "deny_tools", "containment", "env", "tools_allow"];
+const RESERVED_BOOLS = ["budget", "add_dirs", "deny_tools", "containment", "env", "tools_allow"];
 const KEYS = [...Object.keys(ENUMS), "auth", "reports", ...BOOLS].sort();
 const RESPONSE_KEYS = ["cost_usd", "denials", "error", "raw", "runtime", "stop", "text", "turns"];
 const STOPS = ["ok", "budget", "turns", "timeout", "error"];
@@ -27,6 +28,7 @@ const scratch = () => realpathSync(mkdtempSync(join(tmpdir(), "conformance-")));
 const baseRequest = (cwd, over = {}) => ({ prompt: "say hi", cwd, output: "json", tools: "none", mcp: "none", settings: { sources: "none" }, ...over });
 
 export function conformanceSuite(fixture) {
+  if (!Array.isArray(fixture.undeclared)) throw new Error(`conformanceSuite(${fixture.name}): fixture.undeclared must be an array of the capabilities and enum values this runtime refuses`);
   const { name, makeFake } = fixture;
   const rtFor = (dir, mode) => getRuntime({ name, bins: { [name]: makeFake(dir, mode).bin } });
   const label = (s) => `conformance[${name}]: ${s}`;
@@ -70,10 +72,10 @@ export function conformanceSuite(fixture) {
     const dir = scratch();
     const rt = rtFor(dir, "ok");
     const c = rt.capabilities();
-    let probed = 0;
+    const probed = [];
     for (const { capability, over } of PROBES) {
       if (c[capability] !== false) continue;
-      probed++;
+      probed.push(capability);
       assert.throws(() => rt.run(baseRequest(dir, over)), (e) => {
         assert.ok(e instanceof CapabilityError, capability);
         assert.equal(e.capability, capability);
@@ -83,12 +85,13 @@ export function conformanceSuite(fixture) {
     }
     for (const [k, all] of Object.entries(ENUMS)) {
       for (const v of all.filter((x) => !c[k].includes(x))) {
-        probed++;
+        probed.push(`${k}=${v}`);
         const over = k === "settings_sources" ? { settings: { sources: v } } : { [k]: v };
         assert.throws(() => rt.run(baseRequest(dir, over)), CapabilityError, `${k}=${v}`);
       }
     }
-    assert.ok(probed > 0, "the probe table exercised nothing");
+    assert.deepEqual([...probed].sort(), [...fixture.undeclared].sort(), "the undeclared probes and values match this runtime's expected list");
+    assert.deepEqual(RESERVED_BOOLS.filter((k) => !PROBES.some(({ capability }) => capability === k)), [], "PROBES covers every reserved capability");
     assert.equal(existsSync(join(dir, "spawned")), false);
   });
 
