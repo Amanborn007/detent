@@ -5,7 +5,8 @@ Entries cite the PR where the decision landed, where there is one. Where no alte
 ## 1. Run state is plain files under `.sdlc/`
 
 - **Decision.** A run is a directory of files under `$DETENT_ROOT/.sdlc/<run-id>/`. There is no database and no server.
-- **Why.** Files are the only authoritative state, and `events.jsonl` is an addition that can be deleted without breaking anything (D1 in `engine/cli/README.md`). `engine/stages/CONTRACT.md` says you can `ls` and `cat` a run at any point, and that stages talk only through these files. The directory lives in the detent clone, not the work repo, because tasks routinely span several repos.
+- **Why.** You can `ls` and `cat` a run at any point, and stages talk only through these files (`engine/stages/CONTRACT.md`). `events.jsonl` is an addition that can be deleted without breaking anything (D1 in `engine/cli/README.md`). A run needs no server to be running to be read. The directory lives in the detent clone, not the work repo, because tasks routinely span several repos.
+- **Rejected.** No alternative was written down for this one. A database or a daemon holding run state is the obvious one, and it would need to be running before you could read a run.
 - **Cost accepted.** Any process of yours can edit `decisions.json` (SECURITY.md).
 - **Evidence.** [GUIDE.md](../GUIDE.md#1-the-model-in-one-page), [docs/examples/](examples/).
 
@@ -13,6 +14,7 @@ Entries cite the PR where the decision landed, where there is one. Where no alte
 
 - **Decision.** The engine runs a command, writes one JSON request to its stdin and reads one JSON response from its stdout. Exit 0 is success. Exit 1 is a provider failure, retried once and then shown to you. Exit 2 halts the stage and asks.
 - **Why.** `engine/README.md` puts all company-specific behaviour behind sockets, so the engine stays generic. #10 changed one case: an exit 1 that carries a JSON body is kept as the response and not retried, because a verifier's `verdict: fail` needs it.
+- **Rejected.** No alternative was written down. MCP tools or in-process modules are the obvious ones, and neither is recorded as considered.
 - **Cost accepted.** The CLI does not enforce the `version` field of a provider yet (`engine/README.md`). A provider written against an older contract version runs without a warning until it returns a shape the engine rejects.
 - **Evidence.** `engine/README.md`, `engine/sockets/*.md`, the comment above the retry in `engine/cli/engine.mjs`.
 
@@ -20,7 +22,8 @@ Entries cite the PR where the decision landed, where there is one. Where no alte
 
 - **Decision.** A gate is a question in `decisions.json`, rendered in curator. The engine never answers one. `detent stage end` refuses to finish the plan stage while the `intent` gate is pending. The drift and ship gates are rules in the stage prompts, recorded as pending decisions that block the stages they name.
 - **Why.** `stage end` refuses while any decision that blocks that stage is pending (`engine/cli/tests/gates.test.mjs`). The engine raises the plan gate itself, and D-003 in the example run is `raised_by: engine`. The agent files the ship and drift decisions from the stage prompt. The push happens inside the ship stage, before `stage end`, so only the prompt keeps it behind the ship decision. That is the tradeoff: the ship gate costs no CLI code, and nothing but the prompt stops a push that skipped it. Moving the push into the CLI is listed under What I would change next.
-- **Guards on the answer side.** A drive child cannot answer a gate. The outbox validator refuses `answer`, `status` and `answered_*` keys on child decisions, and the integrity digest fails the step as `state_tampered` (#17). #24 makes `approve` and `revise` refuse when `CLAUDECODE` is set, when `DETENT_DRIVE_CHILD=1`, or without a TTY. These read environment variables, so they stop an agent that calls the verbs as given. An agent that unsets `CLAUDECODE` and sets `DETENT_FORCE_TTY=1` gets past them. A drive child has no Bash and cannot try.
+- **Guards on the answer side.** A drive child cannot answer a gate. The outbox validator refuses `answer`, `status` and `answered_*` keys on child decisions, and the integrity digest fails the step as `state_tampered` (#17). #24 makes `approve` and `revise` refuse when `CLAUDECODE` is set, when `DETENT_DRIVE_CHILD=1`, or without a TTY. These read environment variables, so they stop an agent that calls the verbs as given. An agent that unsets `CLAUDECODE` and sets `DETENT_FORCE_TTY=1` gets past them. An intake, research or plan drive child has no Bash and cannot try. The `--implement` child has Bash under Claude Code's sandbox and does not get `DETENT_DRIVE_CHILD`.
+- **Rejected.** No alternative was written down. The one named under What I would change next is a push made by the CLI behind the ship decision.
 - **Cost accepted.** For the ship and drift gates the code relies on the stage prompt to file the decision. In the example run, `decisions.json` shows D-004 and D-005 raised by `ship`.
 - **Evidence.** [GUIDE.md](../GUIDE.md#3-the-stages-and-gates), `engine/cli/tests/verbs-approve.test.mjs`, `engine/cli/tests/drive.test.mjs`.
 
@@ -36,7 +39,7 @@ Entries cite the PR where the decision landed, where there is one. Where no alte
 - **Decision.** Each intake, research and plan step is one `claude -p --restricted` child with `Read`, `Glob`, `Grep`, `Write`, `Edit` and `TodoWrite`. No Bash. It starts in a read-only empty directory, reads a `git archive` export, and writes only an outbox that drive validates and secret-scans. A digest of run state is checked after every child (#17). The `--implement` child is the exception: `claude -p --restricted --tools Bash` under Claude Code's sandbox, with a shim shell and post-run transcript checks (#41, SECURITY.md).
 - **Rejected.** #8 gave children a settings profile, a Bash allowlist and a push-URL rewrite. Its own "Not covered" line said a child's test command could still run arbitrary repo code and reach the network. #17 replaced it.
 - **Why.** #8's residual risk was a child that could run a command. #17 gives an intake, research or plan child no Bash, MCP, web, hooks or subagents to run one with.
-- **Related rule.** `detent index` only ever writes `suggested.verify`, never `commands.verify`. Only a human sets `commands.verify`, with `engine env --verify` (#22). `drive --implement` runs it on the host in a no-network box (#41).
+- **Related rule.** `run new` copies the index's suggested command into `env.json` as `suggested.verify` and never writes `commands.verify` (#22). A drive child cannot set `commands.verify`, because its proposal in `env.proposed.json` is never used. In an interactive run the implement stage records it with `detent env --verify`. `drive --implement` runs it on the host in a no-network box (#41).
 - **Cost accepted.** `--restricted` is not an operating-system sandbox, `--budget` can overshoot by one turn, and a prompt-injected child can still shape gate text. SECURITY.md lists the rest.
 - **Evidence.** `engine/cli/tests/drive-surface.test.mjs` asserts the old permission model's markers are gone from `engine.mjs`.
 
@@ -44,8 +47,9 @@ Entries cite the PR where the decision landed, where there is one. Where no alte
 
 - **Decision.** The server creates a mode 0600 secret. The CLI checks an HMAC proof from the server before it sends the secret. Browser routes take a per-session key. `Host` and `Origin` are checked before the body is read. Gates run the curator CLI in this repo, never one found on `PATH` (#21).
 - **Why.** Before #21 a web page could post a gate answer with a `no-cors` `text/plain` request, and the next `detent drive` would collect it as a human answer.
+- **Rejected.** No alternative was written down. Leaving loopback open with no auth is what #21 replaced.
 - **Cost accepted.** A process of yours that can read the secret can still answer a gate (SECURITY.md). A curator on `PATH` no longer reaches gates (948e9e5).
-- **Evidence.** `engine/curator/test/auth.test.mjs`, 34 tests. They were committed first, and 33 failed on main (#21).
+- **Evidence.** `engine/curator/test/auth.test.mjs`. The 34 tests of #21 were committed first, and 33 failed on main (#21). The file now has 33 `test()` calls.
 
 ## 7. Headless model calls go through a runtime port
 
@@ -68,10 +72,12 @@ Entries cite the PR where the decision landed, where there is one. Where no alte
 ## What I would change next
 
 - Fix the lost wake-up behind #43.
-- Merge PR #51, which makes curator's ancestor check (`checkAncestors` in `engine/curator/auth.mjs`) skip parents that do not exist yet. Until it merges, `curator open` fails with ENOENT on `<clone>/.local` on a fresh clone when `DETENT_ROOT` is unset. Creating `<clone>/.local` first avoids it, and `scripts/detent-install.sh` sets `DETENT_ROOT`.
+- Merge PR #51, which makes curator's ancestor check (`checkAncestors` in `engine/curator/auth.mjs`) skip parents that do not exist yet. Until it merges, `curator open` fails with ENOENT on `<clone>/.local` on a fresh clone, whether or not `DETENT_ROOT` is set. Running `mkdir .local` in the clone first avoids it.
 - Move the ship push into the CLI behind the ship decision, so the code and not only the prompt refuses a push without it (decision 3).
 - Run `drive --implement` live, end to end. That run is unverified (#41).
 - Add a secret scan of implement commits, which SECURITY.md lists as not covered.
+- Have `detent setup` write a `reviewer` and a `verifier`, or have `detent doctor` fail without them. Today the starter `stack.yaml` has neither.
+- Remove the duplicate `drive` line from `detent --help`.
 - Run the `docs/demo` tests and `smoke.sh` in CI. `docs/demo/terminal-smoke.sh` now finishes offline.
 - Split `engine/cli/engine.mjs`, 3337 lines at 464e527, into modules along its existing section comments: run and stage, gates, sockets, and the friendly verbs.
-- Fix `cmdDecide`, which reports only the last 300 characters of a curator failure and cuts off the cause. `detent decide` also has no option to skip the wait in `curator poll`, which is why the demo scripts do not call it.
+- Fix `cmdDecide`, which reports only the last 300 characters of a curator failure, so the start of a long error is dropped. `detent decide` also has no option to skip the wait in `curator poll`, which is why the demo scripts do not call it.

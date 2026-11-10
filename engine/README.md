@@ -10,7 +10,7 @@ A run moves through seven stages: intake, research, plan, implement, recheck, sh
 - Review, verification and opening the PR all happen in ship. Ship runs the `reviewer` and `verifier` sockets, waits for your yes, then opens a draft PR.
 - The standing bot-comment loop is respond. It starts when you mark the PR ready and stops at the round cap.
 
-The `incident` socket is a hook for investigating a merged change that misbehaves. The `deploy-harness` socket sits outside the per-change run, and its contract says to call it only on an explicit trigger.
+The `incident` socket is a hook for investigating a merged change that misbehaves. The `deploy-harness` socket sits outside the per-change run, and its contract allows a call only when a human asks, or as an opt-in final gate on an approved PR.
 
 ## Sockets
 

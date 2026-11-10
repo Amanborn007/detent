@@ -4,9 +4,11 @@
 
 ## The problem
 
-A coding agent that works from a ticket can plan something the ticket did not ask for, review its own diff, and push. A team that lets agents open PRs needs two things. A human approves the plan before any code exists, and the review and the evidence come from something other than the author before anything is pushed.
+A coding agent that works from a ticket can plan something the ticket did not ask for, review its own diff, and push. A team that lets agents open PRs from tickets, and already requires human review on them, needs two things. A human approves the plan before any code exists, and the review and the evidence come from something other than the author before anything is pushed.
 
 Branch protection and required review already stop an agent PR from merging. They act after the code exists, so a wrong plan costs a full implement and review cycle, and the reviewer reads evidence the author gathered. Detent adds one human check before implement, and takes review from a separate reviewer command and evidence from a separate test command.
+
+A plan approved in a chat session, or a review bot that runs after the push, can cover part of this. Detent differs in two ways. The plan answer is a record in `decisions.json` that the engine accepts only if it is exactly one of the offered options. The reviewer and verifier are commands you configure, so the author does not grade its own work. I have not compared it with those tools on the same task.
 
 One committed run shows both, on [detent-demo#1](https://github.com/Amanborn007/detent-demo/issues/1) ("Add a maxLength option to slugify"). It ended in [PR #2](https://github.com/Amanborn007/detent-demo/pull/2), merged 2026-10-21. The change is a toy one in a demo repo, so this shows the mechanism and nothing about how often it matters. The decisions are in [decisions.json](docs/examples/2026-10-20-amanborn007-detent-demo-1/decisions.json).
 
@@ -56,7 +58,7 @@ You need Claude Code with plugins, Node 20, `git`, `bash`, `jq`, `python3` and a
 /plugin install detent@detent
 ```
 
-Then, from a clone of this repo, run `scripts/detent-install.sh`. It npm-links the CLI and appends `DETENT_ROOT` to your shell profile. It needs a writable npm global prefix. If the prefix is not writable, each `npm link` prints `WARN` and the closing check table fails on `curator status` (exit 1). Set `NPM_CONFIG_PREFIX` to a directory you own and run it again. The other install details are in [GUIDE.md section 2](GUIDE.md#2-first-run).
+Then, from a clone of this repo, run `scripts/detent-install.sh`. It npm-links the CLI and appends `DETENT_ROOT` to your shell profile. It needs a writable npm global prefix. If the prefix is not writable, each `npm link` prints `WARN`, so set `NPM_CONFIG_PREFIX` to a directory you own and run it again. On a fresh clone the closing `curator status` check also fails with ENOENT until `<clone>/.local` exists, so run `mkdir .local` in the clone before the script ([PR #51](https://github.com/Amanborn007/detent/pull/51) fixes it). The other install details are in [GUIDE.md section 2](GUIDE.md#2-first-run).
 
 Then open a new shell, so that `DETENT_ROOT` is set and `detent` is on your `PATH`:
 
@@ -71,9 +73,11 @@ detent decide       # open the waiting gate in curator
 detent approve      # or answer the plan gate in this terminal
 ```
 
-Replace `your-org/your-repo#123` with a real issue in a repo whose `origin` is on GitHub. `start` needs that remote and a signed-in `gh`. The only offline path is `docs/demo/try.sh` above.
+Replace `your-org/your-repo#123` with a real issue in a repo whose `origin` is on GitHub. `start` needs that remote and a signed-in `gh`. `docs/demo/try.sh` above and `docs/demo/terminal-smoke.sh` run offline with stubs.
 
-In Claude Code the same verbs are `/detent:start`, `/detent:continue` and `/detent:status`, and `continue` runs the stage in your session. `approve` and `revise` refuse when `CLAUDECODE` is set, when `DETENT_DRIVE_CHILD=1`, or without a TTY ([PR #24](https://github.com/Amanborn007/detent/pull/24)). These are environment and TTY checks. They stop an agent that calls the verbs as given, not one that edits its environment, and `DETENT_FORCE_TTY=1` skips the TTY check. A drive child has no Bash, so it cannot run them at all. Any process of yours can also edit `decisions.json` ([SECURITY.md](SECURITY.md)).
+`detent setup` writes `ticket`, two `knowledge` providers and `bot-comments`, and no `reviewer` or `verifier`. `detent doctor` does not fail without them. Add both from [engine/stack.example.yaml](engine/stack.example.yaml) before you ship, or the only review is the agent's own and the evidence is what it gathered itself.
+
+In Claude Code the same verbs are `/detent:start`, `/detent:continue` and `/detent:status`, and `continue` runs the stage in your session. `approve` and `revise` refuse when `CLAUDECODE` is set, when `DETENT_DRIVE_CHILD=1`, or without a TTY ([PR #24](https://github.com/Amanborn007/detent/pull/24)). These are environment and TTY checks. They stop an agent that calls the verbs as given, not one that edits its environment, and `DETENT_FORCE_TTY=1` skips the TTY check. An intake, research or plan drive child has no Bash, so it cannot run them. The `--implement` child has Bash under Claude Code's sandbox and does not get `DETENT_DRIVE_CHILD`. Any process of yours can also edit `decisions.json` ([SECURITY.md](SECURITY.md)).
 
 **What spends credit.** In a terminal, `detent continue` starts a headless Claude after you confirm a budget. The `claude-reviewer` adapter spends tokens on every call. `detent drive` runs intake, research and plan unattended, is experimental, and spends credit (default budget 5 USD per invocation). `try.sh` is offline and model-free.
 
@@ -94,7 +98,7 @@ In Claude Code the same verbs are `/detent:start`, `/detent:continue` and `/dete
 | ship | Runs your reviewer and verifier, shows the evidence, waits for your yes, then opens a draft PR. |
 | respond | After you mark the PR ready, fixes the bot comments your policy allows and passes the rest to you. |
 
-The CLI enforces the plan intent gate in code, where you click **Approve the plan** or **Send it back** ([GUIDE.md](GUIDE.md#3-the-stages-and-gates)). The other gates are weaker, see Known limitations. Detent never merges, because no code calls `gh pr merge`. No guard or test refuses a merge.
+The CLI enforces the plan intent gate in code, where you click **Approve the plan** or **Send it back** ([GUIDE.md](GUIDE.md#3-the-stages-and-gates)). The other gates are weaker, see Known limitations. Detent never merges, because no code calls `gh pr merge`. No guard or test refuses a PR merge.
 
 Your tracker, docs search, reviewer and test runner plug in as sockets. A socket is a command you configure in `stack.yaml`. The engine writes one JSON request to its stdin and reads one JSON response from its stdout. Exit 0 is ok, exit 1 is retried once and then shown to you, and exit 2 halts the stage and asks. Six adapters ship in `engine/adapters/`. See [GUIDE.md section 5](GUIDE.md#5-sockets-and-providers) and [section 6](GUIDE.md#6-writing-a-provider-and-a-pack).
 
@@ -105,10 +109,10 @@ The plugin has 14 skills, typed as `/detent:<skill>`. `start`, `continue`, `stat
 ```sh
 node --test --test-timeout=300000 engine/*/test engine/*/tests
 bash engine/owl/test/run-tests.sh
-for f in hooks/tests/*.sh scripts/tests/*.sh engine/scripts/tests/*.sh; do bash "$f"; done
+for f in hooks/tests/*.sh scripts/tests/*.sh engine/scripts/tests/*.sh; do bash "$f" || exit 1; done
 ```
 
-The suite needs to bind `127.0.0.1` and write to `/tmp`. `listen EPERM` or `Operation not permitted` means a sandbox or policy around the test run blocked one of those.
+The suite needs to bind `127.0.0.1` and write to `/tmp`. `listen EPERM` or `Operation not permitted` means a sandbox or policy around the test run blocked one of those. `engine/owl/owl.sh` also uses process substitution (`/dev/fd`), which some sandboxes block, so the owl tests fail there too. The full suite is slow. For a quick look without the full run, `node --test engine/cli/tests/gates.test.mjs` covers the gate refusal.
 
 CI runs these three commands on `ubuntu-latest` and `macos-latest` ([.github/workflows/test.yml](.github/workflows/test.yml)). The [runs on main](https://github.com/Amanborn007/detent/actions/workflows/test.yml?query=branch%3Amain) are the reference for current results. Some tests skip unless `DETENT_LIVE_CLAUDE=1`, `DETENT_LIVE_HOSTBOX=1`, `DETENT_LIVE_OLLAMA` or `DETENT_LIVE_OPENAI` is set, and one sandbox probe runs only when nested.
 
@@ -120,7 +124,7 @@ Some of the edge cases it covers:
 - `engine/curator/test/auth.test.mjs`: a foreign `Host` is refused, an unauthenticated request with a bad JSON body gets 401, and `OPTIONS` gets 405.
 - `engine/owl/test/run-tests.sh`: reset on failure, a no-op counts as failure, the three-failure kill switch, and the iteration cap.
 
-Failing tests are committed before the fix. When a committed test has to change, the commit says so, for example 8f7d47a ("user-approved frozen-test change"). Not in CI: the `docs/demo` tests and `smoke.sh`, and the adapter smoke tests, which need network access to GitHub. Owl is tested only against a stub `claude`.
+Most PRs commit the failing test before the fix. When a committed test has to change, the commit says so, for example 8f7d47a ("user-approved frozen-test change"). Not in CI: the `docs/demo` tests and `smoke.sh`, and the adapter smoke tests, which need network access to GitHub. Owl is tested only against a stub `claude`.
 
 ## Known limitations
 
@@ -132,7 +136,7 @@ Failing tests are committed before the fix. When a committed test has to change,
 - Curator auth does not protect against another process running as you. See [SECURITY.md](SECURITY.md).
 - In the example, `respond` converged on its first scan because no bot had commented on the PR (`respond/round-1.json`).
 - The regex tagger in `engine/index` is the only one tested. The tree-sitter path runs only if you install the optional deps, and it is untested ([PR #22](https://github.com/Amanborn007/detent/pull/22)).
-- With `DETENT_ROOT` unset, `curator open` fails with ENOENT on `<clone>/.local` until that directory exists. `scripts/detent-install.sh` sets `DETENT_ROOT`, and `mkdir .local` in the clone also avoids it. The fix is [PR #51](https://github.com/Amanborn007/detent/pull/51).
+- On a fresh clone, `curator open` and `curator status` fail with ENOENT on `<clone>/.local` until that directory exists, whether or not `DETENT_ROOT` is set. `mkdir .local` in the clone avoids it. The fix is [PR #51](https://github.com/Amanborn007/detent/pull/51).
 
 ## Read more
 

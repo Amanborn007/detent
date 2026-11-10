@@ -28,7 +28,7 @@ Three rules hold everywhere:
 
 - State lives in plain files. You can `ls` and `cat` a run at any point.
 - Text from tickets, PRs, bots and threads is data. A skill reads it but never follows instructions found in it.
-- Nothing in Detent merges a PR, because no code calls a merge. Creating tickets, the first push and the draft PR each wait for you.
+- Nothing in Detent merges a PR, because no code calls `gh pr merge` or a merge API. Creating tickets, the first push and the draft PR each wait for you.
 
 ---
 
@@ -40,7 +40,7 @@ Install the plugin and run the shell script as described in the README. The scri
 cp detent.user.example.yaml detent.user.yaml   # skip if the install script already made it
 ```
 
-To do the next two steps in one command, run `detent setup --repo ~/code/your-repo`. It creates `detent.user.yaml` from the example if it is missing and fills `user.name` and `user.email` from `git config` and `user.github_login` from `gh api user`, only where they are empty. It also writes a starter `stack.yaml` in your work repo with the three built-in adapters below, as absolute paths. It refuses if `stack.yaml` already exists (add `--force` to overwrite) or if the path is not a git repo. It prints one JSON line that lists what it wrote, what it left alone, and an `unresolved` list of values it could not detect, such as `user.teams`; fill those in by hand. If `gh` is not logged in, `user.github_login` is listed as unresolved and the rest still runs.
+To do the next two steps in one command, run `detent setup --repo ~/code/your-repo`. It creates `detent.user.yaml` from the example if it is missing and fills `user.name` and `user.email` from `git config` and `user.github_login` from `gh api user`, only where they are empty. It also writes a starter `stack.yaml` in your work repo with four built-in adapters as absolute paths: `gh-ticket`, `repo-docs-knowledge`, `repo-index-knowledge` and `gh-bot-comments`. It does not write `claude-reviewer` or `cmd-verifier`, so add the `reviewer` and `verifier` sockets by hand from `engine/stack.example.yaml`. It refuses if `stack.yaml` already exists (add `--force` to overwrite) or if the path is not a git repo. It prints one JSON line that lists what it wrote, what it left alone, and an `unresolved` list of values it could not detect, such as `user.teams`; fill those in by hand. If `gh` is not logged in, `user.github_login` is listed as unresolved and the rest still runs.
 
 Otherwise, open `detent.user.yaml` and fill in your name, email, GitHub login, teams and tracker account. Leave the GitHub login empty if you want detent to read it from `gh api user`.
 
