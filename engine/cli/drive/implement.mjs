@@ -28,6 +28,8 @@ const BASH_KEYS = new Set(["command", "description", "timeout"]);
 const LOG_TAIL = 8 * 1024;
 const RECHECK_TEXT_CAP = 64 * 1024;
 const OID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+const SENSITIVE_NO = "not acceptable - do not ship this change";
+const RECHECK_DRIFT = "drift - route back to plan or implement";
 
 // ---------------------------------------------------------------- flags and deps
 
@@ -270,13 +272,40 @@ function checkoutQuarantine({ quarantine, head, dest }) {
 
 function raise(E, runDir, spec) {
   const decisions = E.loadDecisions(runDir);
-  const open = decisions.find((d) => d.gate === spec.gate && d.status === "pending");
+  const open = decisions.find((d) => d.gate === spec.gate && d.status === "pending" && d.head === spec.head);
   if (open) return open;
   const rec = { id: E.nextDecisionId(decisions), raised_by: "implement", status: "pending", ...spec };
   decisions.push(rec);
   E.saveDecisions(runDir, decisions);
   E.appendEvent(runDir, { event: "gate_raised", stage: "implement", gate: spec.gate, decision_id: rec.id });
   return rec;
+}
+
+function withdraw(E, runDir, ids, reason) {
+  const decisions = E.loadDecisions(runDir);
+  const at = new Date().toISOString();
+  for (const d of decisions.filter((x) => ids.includes(x.id))) {
+    Object.assign(d, { status: "withdrawn", withdrawn_reason: reason, withdrawn_at: at });
+    E.appendEvent(runDir, { event: "gate_withdrawn", gate: d.gate, decision_id: d.id, reason });
+  }
+  E.saveDecisions(runDir, decisions);
+}
+
+// Gates raised for a head that detent/<run> no longer holds (a crash before the import, or a reset branch) can never be answered usefully.
+function withdrawStaleGates(E, runDir, repo, runId) {
+  const ref = `refs/heads/detent/${runId}`;
+  const refGone = !refOid(repo, ref);
+  const stale = E.loadDecisions(runDir).filter((d) => d.raised_by === "implement" && typeof d.head === "string" &&
+    (d.status === "pending" || E.isUnresolvedJudgment(d)) && (refGone || !isAncestor(repo, d.head, ref)));
+  for (const d of stale) withdraw(E, runDir, [d.id], `detent/${runId} no longer contains ${d.head.slice(0, 12)}`);
+}
+
+// Exit 1 is "not an ancestor" and 128 is an object the repo does not have; anything else is a git failure.
+function isAncestor(repo, commit, ref) {
+  const r = git(["merge-base", "--is-ancestor", commit, ref], { repo });
+  if (r.status === 0) return true;
+  if (r.status === 1 || r.status === 128) return false;
+  throw new Error(`git merge-base --is-ancestor ${commit} ${ref} exited ${r.status}: ${r.stderr.toString("utf8").trim()}`);
 }
 
 const tail = (s) => String(s ?? "").slice(-LOG_TAIL);
@@ -288,11 +317,24 @@ function parseJsonResult(stdout) {
   return v && typeof v === "object" ? v : null;
 }
 
-function recheckMarkdown({ runId, head, verify, verifyCmd, sensitive, commits, truncated, skipped, recheck }) {
-  const L = [`# Recheck of the implement step for ${runId}`, "", `Written by drive. The step was imported into detent/${runId} at ${head}.`, "", "## Verification", ""];
-  L.push(`- verify command: \`${verifyCmd.replaceAll("`", "'")}\``);
-  L.push(`- exit code: ${verify.exit_code}${verify.timed_out ? " (timed out)" : ""}`);
-  L.push(`- log sha256: ${verify.log_sha256}`, "", "```", tail(verify.stdout_tail + verify.stderr_tail).replaceAll("```", "'''"), "```", "");
+function verificationLines(verify, verifyCmd) {
+  return [
+    "## Verification", "",
+    `- verify command: \`${verifyCmd.replaceAll("`", "'")}\``,
+    `- exit code: ${verify.exit_code}${verify.timed_out ? " (timed out)" : ""}`,
+    `- log sha256: ${verify.log_sha256}`, "", "```", tail(verify.stdout_tail + verify.stderr_tail).replaceAll("```", "'''"), "```", "",
+  ];
+}
+
+function verifyFailedMarkdown({ runId, verify, verifyCmd, skipped }) {
+  const L = [`# Verify failed for the implement step of ${runId}`, "", `Written by drive: verify failed; nothing was imported into detent/${runId}.`, "", ...verificationLines(verify, verifyCmd)];
+  if (skipped.length) L.push(`Checkout skipped ${skipped.length} symlink or submodule entr${skipped.length === 1 ? "y" : "ies"} before verify ran.`, "");
+  return L.join("\n");
+}
+
+function recheckMarkdown({ runId, head, verify, verifyCmd, sensitive, commits, truncated, skipped, recheck, noRunBase }) {
+  const L = [`# Recheck of the implement step for ${runId}`, "", `Written by drive. The step was imported into detent/${runId} at ${head}.`, "", ...verificationLines(verify, verifyCmd)];
+  if (noRunBase) L.push("run.json has no base_sha; the diff covers this step only.", "");
   L.push("## Sensitive paths", "", sensitive.length ? sensitive.map((p) => `- \`${p.replaceAll("`", "'")}\``).join("\n") : "none", "");
   L.push("## Commits", "", commits.length ? commits.map((c) => `- ${c.sha.slice(0, 12)} ${c.subject}`).join("\n") : "none", "");
   if (truncated) L.push("The patch given to the recheck child was truncated at its cap.", "");
@@ -316,6 +358,7 @@ export async function runImplementStep(H) {
   if (!pre.ok) {
     return fail("implement_preflight_failed", `fix the refusals in drive-last.json, then re-run: ${rerun}`, pre.refusals.map((r) => `${r.code}: ${r.detail}`).join("; "), { preflight: pre.refusals });
   }
+  withdrawStaleGates(E, runDir, repo, runId);
   const run = E.readJson(join(runDir, "run.json"));
   if (!run.worktree) return fail("no_worktree_run", "this run was created with --no-worktree, so there is no sdlc branch for --implement to start from: create a run without --no-worktree");
   let envJson = {};
@@ -324,8 +367,13 @@ export async function runImplementStep(H) {
   }
   const cmds = envJson.commands && typeof envJson.commands === "object" ? envJson.commands : {};
   if (cmds.setup) return fail("setup_unsupported", "--implement does not run setup commands yet: remove commands.setup from env.json or run implement yourself", String(cmds.setup));
-  const ship = E.loadDecisions(runDir).filter((d) => d.status === "pending" && Array.isArray(d.blocks) && d.blocks.includes("ship"));
-  if (ship.length) return { kind: "human", blockers: ship };
+  const ship = E.pendingBlockers(E.loadDecisions(runDir), "ship");
+  if (ship.length) {
+    const held = ship.filter((d) => d.status === "answered");
+    if (!held.length) return { kind: "human", blockers: ship };
+    const next_step = `${held.map((d) => `${d.id} is answered "${d.answer}"`).join(", ")}, which holds ship: reset with git branch -D detent/${runId} (or git branch -f detent/${runId} <good commit>) and re-run ${rerun}, or change the answer with detent decide`;
+    return { kind: "human", blockers: ship, extra: { next_step } };
+  }
   const verifyCmd = cmds.verify;
   if (typeof verifyCmd !== "string" || !verifyCmd.trim()) {
     const d = raise(E, runDir, {
@@ -340,6 +388,13 @@ export async function runImplementStep(H) {
   const expectOld = refOid(repo, srcDetent);
   const sourceRef = expectOld ? srcDetent : `refs/heads/sdlc/${runId}`;
   if (!expectOld && !refOid(repo, sourceRef)) return fail("source_ref_missing", "the run's sdlc branch is gone: recreate it or start a new run", sourceRef);
+  if (run.base_sha !== undefined) {
+    const b = run.base_sha;
+    const invalid = (why) => fail("run_base_invalid", `run.json base_sha is not usable, so the recheck diff cannot be trusted: fix or remove base_sha in run.json, then re-run: ${rerun}`, `${JSON.stringify(b)}: ${why}`);
+    if (typeof b !== "string" || !OID.test(b)) return invalid("not a full commit id");
+    if (!refOid(repo, b)) return invalid("not a commit in this repo");
+    if (!isAncestor(repo, b, sourceRef)) return invalid(`not an ancestor of ${sourceRef}`);
+  }
   const idr = readHostIdentity(repo);
   if (idr.missing.length) {
     return fail("git_identity_missing", `set ${idr.missing.map((k) => `git config ${k} <value>`).join(" and ")} (in the repo or globally), then re-run: ${rerun}`, `no ${idr.missing.join(" or ")} in the repo's git config or the global one`);
@@ -366,6 +421,8 @@ export async function runImplementStep(H) {
 
   let claudeTmp = null;
   let shimUp = false;
+  let probe = null;
+  let probeFinished = false;
   try {
     claudeTmp = createClaudeTmp();
     ictx.claudeTmp = claudeTmp;
@@ -375,7 +432,7 @@ export async function runImplementStep(H) {
 
     const settings = buildImplementSettings(ictx);
     validateImplementSettings(settings, ictx);
-    const probe = await deps.makeProbe({ ctx: ictx, settings, runDir });
+    probe = await deps.makeProbe({ ctx: ictx, settings, runDir });
     const inst = installShim(ictx.shimDir, probe.exps);
     shimUp = true;
     if (inst.callLogPath !== ictx.callLog || inst.sentinelPath !== ictx.sentinel || inst.shellPath !== ictx.shell) {
@@ -415,6 +472,7 @@ export async function runImplementStep(H) {
     const transcriptDir = join(runDir, ".drive");
     mkdirSync(transcriptDir, { recursive: true });
     writeFileSync(join(transcriptDir, `implement-${H.stepN}.transcript.jsonl`), child.stdout.slice(-4 * 1024 * 1024));
+    probeFinished = true;
     const sandboxReport = await probe.finish();
 
     let verdict;
@@ -452,6 +510,9 @@ export async function runImplementStep(H) {
 
     return await bundleAndVerify({ H, ictx, boxParent, exportBox, base, bundleBranch, expectOld, verifyCmd, run, rerun, fail, identity });
   } finally {
+    if (probe && !probeFinished) {
+      try { await probe.finish(); } catch (e) { process.stderr.write(`drive: closing the sandbox probe failed: ${e.message}\n`); }
+    }
     if (shimUp) uninstallShim(ictx.shimDir);
     H.forceRemove(stepDir);
     if (claudeTmp) removeClaudeTmp(claudeTmp);
@@ -464,11 +525,19 @@ async function bundleAndVerify({ H, ictx, boxParent, exportBox, base, bundleBran
   const newBox = () => deps.createBox({ parent: boxParent });
   const boxOpts = { net: "none", platform: deps.platform };
 
+  const hostboxFail = (e) => {
+    if (e?.name !== "HostboxError") throw e;
+    return fail("hostbox_failed", "the host sandbox could not run a drive command, so nothing was imported: read drive-last.json, fix the sandbox, then re-run", `${e.code}: ${e.message}`, { code: e.code });
+  };
+
   const bundlePath = join(exportBox.dir, "out", "step.bundle");
-  const ex = await exportBox.run({
-    ...boxOpts, cmd: resolveGit(), args: bundleExportArgv({ work: ictx.clone, branch: bundleBranch, base, out: bundlePath }),
-    readOnly: [ictx.clone], writable: [join(exportBox.dir, "out")], timeoutMs: 120_000,
-  });
+  let ex;
+  try {
+    ex = await exportBox.run({
+      ...boxOpts, cmd: resolveGit(), args: bundleExportArgv({ work: ictx.clone, branch: bundleBranch, base, out: bundlePath }),
+      readOnly: [ictx.clone], writable: [join(exportBox.dir, "out")], timeoutMs: 120_000,
+    });
+  } catch (e) { return hostboxFail(e); }
   if (ex.timedOut || ex.code !== 0) {
     if (/empty bundle/i.test(ex.stderr)) return { kind: "ok", stopped: "no_changes", fields: { stage: "implement", next_step: "the implement child made no commits, so nothing changed: read drive-last.json and the plan, then re-run" } };
     return fail("bundle_export_failed", "the export of the child's commits failed; nothing was imported", `exit ${ex.code}${ex.timedOut ? " (timed out)" : ""}: ${tail(ex.stderr)}`);
@@ -483,19 +552,44 @@ async function bundleAndVerify({ H, ictx, boxParent, exportBox, base, bundleBran
   }
   if (!verified.ok) return fail("bundle_rejected", "the child's bundle failed verification and nothing was imported", `${verified.code}: ${JSON.stringify(verified.detail)}`, { code: verified.code });
 
-  const verifyBox = newBox();
+  let verifyBox;
+  try { verifyBox = newBox(); } catch (e) { return hostboxFail(e); }
   let checkout;
   try { checkout = checkoutQuarantine({ quarantine: verified.quarantine, head: verified.head, dest: join(verifyBox.dir, "work") }); } catch (e) {
     return fail("checkout_failed", "the verified tree could not be checked out for the verify run; nothing was imported", e.message);
   }
-  const vr = await verifyBox.run({ ...boxOpts, cmd: "/bin/sh", args: ["-c", verifyCmd], timeoutMs: Math.min(H.timeoutSec * 1000, 15 * 60_000) });
+  let vr;
+  try {
+    vr = await verifyBox.run({ ...boxOpts, cmd: "/bin/sh", args: ["-c", verifyCmd], timeoutMs: Math.min(H.timeoutSec * 1000, 15 * 60_000) });
+  } catch (e) { return hostboxFail(e); }
   const verify = {
     exit_code: vr.code, signal: vr.signal ?? null, timed_out: Boolean(vr.timedOut), log_sha256: sha256(`${vr.sha256.stdout}\n${vr.sha256.stderr}`),
     stdout_tail: tail(vr.stdout), stderr_tail: tail(vr.stderr),
   };
+  if (vr.timedOut || vr.code !== 0) {
+    H.setLast({ implement: { base, verify: { exit_code: verify.exit_code, timed_out: verify.timed_out, log_sha256: verify.log_sha256 }, checkout: { files: checkout.files, skipped: checkout.skipped } } });
+    writeFileSync(join(runDir, "recheck.md"), verifyFailedMarkdown({ runId, verify, verifyCmd, skipped: checkout.skipped }));
+    return fail("verify_failed", "fix the code or the env verify command, then re-run", `verify ${vr.timedOut ? "timed out" : `exited ${vr.code}`}; nothing was imported`);
+  }
+
+  const raised = [];
+  if (verified.sensitive.length) {
+    raised.push(raise(E, runDir, {
+      gate: "sensitive-paths", blocks: ["ship"], cause: "judgment", head: verified.head, blocking_answers: [SENSITIVE_NO],
+      question: `The implement step changed ${verified.sensitive.length} sensitive path(s) in detent/${runId}. Review them in the diff before anything ships.`,
+      context: verified.sensitiveDetail.map((d) => `${d.path} (${d.reasons.join(", ")})`).join("; "),
+      options: ["reviewed - acceptable", SENSITIVE_NO],
+    }));
+  }
+  raised.push(raise(E, runDir, {
+    gate: "recheck-review", blocks: ["ship"], cause: "judgment", head: verified.head, blocking_answers: [RECHECK_DRIFT],
+    question: `The implement step is importing ${verified.commits.length} commit(s) into detent/${runId} at ${verified.head.slice(0, 12)}; verify passed. Review recheck.md and the diff against the plan, then run ship yourself. If recheck.md is missing the recheck did not finish; review the diff yourself.`,
+    options: ["reviewed - matches the plan", RECHECK_DRIFT],
+  }));
 
   const imp = importBundle({ verified, repo, runId, expectOld });
   if (!imp.ok) {
+    withdraw(E, runDir, raised.map((d) => d.id), imp.code);
     return fail(imp.code === "import_conflict" ? "import_conflict" : "import_failed", `detent/${runId} was not changed by drive: check it, then re-run`, `${imp.code}: ${imp.detail}`, { code: imp.code });
   }
   E.appendEvent(runDir, { event: "implement_imported", step: H.stepN, head: imp.head, verify_exit_code: verify.exit_code, sensitive: verified.sensitive.length });
@@ -505,31 +599,18 @@ async function bundleAndVerify({ H, ictx, boxParent, exportBox, base, bundleBran
   };
   H.setLast({ implement: stepInfo });
 
-  const rbase = typeof run.base_sha === "string" && OID.test(run.base_sha) ? run.base_sha : base;
+  const noRunBase = run.base_sha === undefined;
+  const rbase = noRunBase ? base : run.base_sha;
   const diff = diffForRecheck({ repo, base: rbase, head: imp.head, cap: 256 * 1024 });
   const recheck = await runRecheck({ H, ictx, diff, verify, verifyCmd, head: imp.head, sensitive: verified.sensitive });
   stepInfo.recheck = { ran: recheck.ran, reason: recheck.reason ?? null };
   H.setLast({ implement: stepInfo });
-  const md = recheckMarkdown({ runId, head: imp.head, verify, verifyCmd, sensitive: verified.sensitive, commits: diff.log, truncated: diff.truncated, skipped: checkout.skipped, recheck });
+  const md = recheckMarkdown({ runId, head: imp.head, verify, verifyCmd, sensitive: verified.sensitive, commits: diff.log, truncated: diff.truncated, skipped: checkout.skipped, recheck, noRunBase });
   writeFileSync(join(runDir, "recheck.md"), md);
   E.appendEvent(runDir, { event: "implement_rechecked", step: H.stepN, ran: recheck.ran });
 
-  const blockers = [];
-  if (verified.sensitive.length) {
-    blockers.push(raise(E, runDir, {
-      gate: "sensitive-paths", blocks: ["ship"], cause: "judgment",
-      question: `The implement step changed ${verified.sensitive.length} sensitive path(s) in detent/${runId}. Review them in the diff before anything ships.`,
-      context: verified.sensitiveDetail.map((d) => `${d.path} (${d.reasons.join(", ")})`).join("; "),
-      options: ["reviewed - acceptable", "not acceptable - do not ship this change"],
-    }));
-  }
-  blockers.push(raise(E, runDir, {
-    gate: "recheck-review", blocks: ["ship"], cause: "judgment",
-    question: `The implement step imported ${diff.log.length} commit(s) into detent/${runId} at ${imp.head.slice(0, 12)}; verify exited ${verify.exit_code}. Review recheck.md and the diff against the plan, then run ship yourself.`,
-    options: ["reviewed - matches the plan", "drift - route back to plan or implement"],
-  }));
   return {
-    kind: "human", blockers,
+    kind: "human", blockers: raised,
     extra: { imported: imp.head, ref: imp.ref, verify_exit_code: verify.exit_code, recheck_ran: recheck.ran, next_step: `imported ${diff.log.length} commit(s) into ${imp.ref}: review recheck.md and the gate page, answer the decision(s), then run ship yourself (${rerun} runs the implement step again)` },
   };
 }
@@ -576,5 +657,6 @@ async function runRecheck({ H, ictx, diff, verify, verifyCmd, head, sensitive })
   if (child.timedOut) return { ran: false, reason: "the recheck child timed out" };
   if (child.code !== 0) return { ran: false, reason: `the recheck child exited ${child.code}` };
   if (!result || result.is_error === true || String(result.subtype || "").startsWith("error")) return { ran: false, reason: `the recheck child ended with ${result ? result.subtype : "no result"}` };
-  return { ran: true, text: String(result.result ?? "").slice(0, RECHECK_TEXT_CAP) };
+  if (typeof result.result !== "string" || !result.result.trim()) return { ran: false, reason: "the recheck child returned no text" };
+  return { ran: true, text: result.result.slice(0, RECHECK_TEXT_CAP) };
 }

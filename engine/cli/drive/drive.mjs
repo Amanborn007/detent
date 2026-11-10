@@ -18,6 +18,7 @@ import { optionKey } from "../../handoff/handoff.mjs";
 import {
   validateDriveProfile, buildChildSettings, buildChildArgs, buildChildEnv, versionAtLeast, MIN_CLAUDE_VERSION,
 } from "./profile.mjs";
+import { killAllBoxes } from "./hostbox.mjs";
 import { checkImplementFlags, loadImplementDeps, runImplementStep } from "./implement.mjs";
 
 const DRIVEN_STAGES = ["intake", "research", "plan"];
@@ -98,6 +99,7 @@ function pidAlive(pid) {
 
 function cleanupSync() {
   killGroup("SIGKILL");
+  killAllBoxes("SIGKILL");
   try { if (ST.lockFile && readFileSync(ST.lockFile, "utf8") === String(process.pid)) rmSync(ST.lockFile); } catch { /* lock already gone */ }
   try { if (ST.keyFile) rmSync(ST.keyFile, { force: true }); } catch { /* key file already gone */ }
   try { if (ST.sroot) forceRemove(ST.sroot); } catch { /* sandbox root already gone */ }
@@ -702,6 +704,7 @@ export async function cmdDrive(flags, E) {
     if (ST.stopping) { cleanupSync(); process.exit(code); }
     ST.stopping = true;
     killGroup("SIGKILL");
+    killAllBoxes("SIGKILL");
     await new Promise((r) => setTimeout(r, 200));
     let tampered = false;
     try { tampered = !(ST.tracker && ST.tracker.verify().ok); } catch { tampered = true; }
@@ -728,7 +731,7 @@ export async function cmdDrive(flags, E) {
 
   // Curator answers are collected only here, before any child exists.
   let collectError = false;
-  if (E.loadDecisions(runDir).some((d) => d.status === "pending")) {
+  if (E.loadDecisions(runDir).some((d) => d.status === "pending" || E.isUnresolvedJudgment(d))) {
     try {
       const d = E.drainCuratorFor(runId, runDir);
       if (d.items.length) E.collectResult(runId, runDir, d.items);

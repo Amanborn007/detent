@@ -175,6 +175,13 @@ function capture() {
   };
 }
 
+// Kill functions of the boxed processes running now, so a signal to drive reaches their process groups.
+const liveBoxes = new Set();
+
+export function killAllBoxes(sig) {
+  for (const killBox of liveBoxes) killBox(sig);
+}
+
 export async function runInHostbox({
   platform = process.platform, box, cmd, args = [], cwd, env: extra = {}, path, readOnly = [], writable = [box],
   net = "none", timeoutMs, home = homedir(), toolchainRoots, developerDir, parentEnv = process.env,
@@ -244,6 +251,7 @@ export async function runInHostbox({
         if (e.code !== "ESRCH") killError = e;
       }
     };
+    liveBoxes.add(killBox);
     const timer = setTimeout(() => {
       timedOut = true;
       if (platform === "linux") killBox("SIGKILL");
@@ -253,6 +261,7 @@ export async function runInHostbox({
       }
     }, timeoutMs);
     const finish = (code, signal) => {
+      liveBoxes.delete(killBox);
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -276,6 +285,7 @@ export async function runInHostbox({
     child.stdout.on("data", (d) => out.push(d));
     child.stderr.on("data", (d) => err.push(d));
     child.on("error", (e) => {
+      liveBoxes.delete(killBox);
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -289,6 +299,7 @@ export async function runInHostbox({
       clearTimeout(timer);
       clearTimeout(termTimer);
       if (platform === "darwin") killBox("SIGKILL");
+      liveBoxes.delete(killBox);
       exitTimer = setTimeout(() => finish(code, signal), 1000);
       exitTimer.unref();
     });
