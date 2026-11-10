@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { engine, mkCuratorClone, mkRun, writeArtifact, readJson, writeJson, eventsOf } from "./helpers.mjs";
 import { setup, drive } from "./drive-kit.mjs";
+import { validateDecisions } from "../drive/outbox.mjs";
 import { renderText } from "../render.mjs";
 import { loadRunState, checkSufficiency, buildNote } from "../../handoff/handoff.mjs";
 
@@ -71,11 +72,10 @@ test("drive copies option_details, recommended, why_now and context_excerpt onto
   assert.equal(d.context_excerpt, decision.context_excerpt);
 });
 
-test("a decision with string options and no details files exactly as before", () => {
-  const t = setup();
-  const r = drive(t, { manifestPatch: { status: "needs_human", decisions: [{ key: "u1", question: "Capped or infinite?", cause: "judgment", blocks: ["plan"], options: ["capped", "infinite"] }] } });
-  assert.equal(r.code, 0, r.stdout + r.stderr);
-  const d = readJson(join(t.runDir, "decisions.json")).find((x) => x.question === "Capped or infinite?");
+test("a decision with string options and no details normalizes exactly as before", () => {
+  const r = validateDecisions([{ key: "u1", question: "Capped or infinite?", cause: "judgment", blocks: ["plan"], options: ["capped", "infinite"] }], { stage: "intake" });
+  assert.ok(r.ok, JSON.stringify(r));
+  const d = r.decisions[0];
   assert.deepEqual(d.options, ["capped", "infinite"]);
   for (const k of ["option_details", "recommended", "no_recommendation", "why_now", "context_excerpt"]) assert.ok(!(k in d), k);
 });

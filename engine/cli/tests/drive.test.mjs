@@ -90,9 +90,9 @@ if (out !== "none") {
     schema: "detent-drive-outbox-v1", run_id: step.run_id, stage: step.stage, nonce: out === "badnonce" ? "x" : step.nonce,
     status: out === "needshuman" ? "needs_human" : "complete", summary: "stub done", artifacts, decisions: cfg.decisions || [],
   };
-  if (out === "needshuman") manifest.decisions = [{ key: "u1", question: "Capped or infinite?", options: ["capped", "infinite"], blocks: ["plan"], cause: "judgment", context: "c" }];
+  if (out === "needshuman") manifest.decisions = [{ key: "u1", question: "Capped or infinite?", options: [{ key: "capped", label: "Cap retries", consequence: "Keeps retries bounded for every caller" }, { key: "infinite", label: "Never cap", consequence: "Lets retries run until the partner answers" }], recommended: { key: "capped", reason: "Bounded retries protect the partner from load" }, blocks: ["plan"], cause: "judgment", context: "c" }];
   if (out === "answer") manifest.decisions = [{ key: "u1", question: "Q?", options: ["a", "b"], blocks: ["plan"], cause: "judgment", answer: "a" }];
-  if (out === "review") manifest.decisions = [{ key: "u1", question: "Q?", options: ["a", "b"], blocks: ["review"], cause: "judgment" }];
+  if (out === "review") manifest.decisions = [{ key: "u1", question: "Q?", options: [{ key: "a", label: "Option A", consequence: "Keeps the current behaviour for callers" }, { key: "b", label: "Option B", consequence: "Changes the behaviour for every caller" }], recommended: { key: "a", reason: "Option A keeps current callers working" }, blocks: ["review"], cause: "judgment" }];
   if (out === "unknownkey") manifest.extra = 1;
   if (out === "needsdata") manifest.status = "needs_data";
   if (out === "symlink") { writeFileSync(join(outbox, "outside.txt"), "x"); }

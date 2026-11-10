@@ -66,7 +66,7 @@ test("drive files the access-degraded decision with option_details and no_recomm
 test("a drive-stopped page lists answered decisions so their ids raise no C8 warning", () => {
   const t = setup();
   writeJson(join(t.runDir, "decisions.json"), [{ id: "D-001", raised_by: "intake", blocks: ["plan"], question: "Capped or infinite?", options: ["capped", "infinite"], cause: "judgment", status: "answered", answer: "capped", answered_by: "human", answered_at: "2026-01-01T00:00:00Z" }]);
-  const decision = { key: "u1", question: "Does the brief still hold now that D-001 is answered?", cause: "judgment", blocks: ["plan"], options: ["yes", "no"] };
+  const decision = { key: "u1", question: "Does the brief still hold now that D-001 is answered?", cause: "judgment", blocks: ["plan"], options: [{ key: "yes", label: "Keep the brief", consequence: "Plan continues from the current brief" }, { key: "no", label: "Redo the brief", consequence: "Intake reruns before planning starts" }], recommended: { key: "yes", reason: "The answered decision does not change the brief" } };
   const r = drive(t, { manifestPatch: { status: "needs_human", decisions: [decision] } });
   assert.equal(r.code, 0, r.stdout + r.stderr);
   assert.equal(r.json.stopped, "needs_human");

@@ -21,9 +21,10 @@ function raise(d) {
 function assertRejected({ t, r, decisions }, check) {
   assert.equal(r.code, 1, r.stdout + r.stderr);
   assert.equal(r.json.reason, "outbox_rejected");
-  assert.equal(r.json.code, "decision_contract", r.stdout);
-  assert.match(String(r.json.detail), check);
-  assert.match(String(r.json.detail), /u1/, "names the decision key");
+  const last = readJson(join(t.runDir, "drive-last.json"));
+  assert.equal(last.code, "decision_contract", r.stdout);
+  assert.match(String(last.detail), check);
+  assert.match(String(last.detail), /u1/, "names the decision key");
   assert.equal(decisions.length, 0, "nothing was applied");
   assert.ok(readdirSync(join(t.runDir, ".drive", "quarantine")).length > 0, "outbox quarantined");
 }
