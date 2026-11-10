@@ -1,5 +1,5 @@
 # Render from the repo root:  vhs docs/demo/terminal.tape   (the same commands run in CI: bash docs/demo/terminal-smoke.sh)
-# Offline: stub claude, gh, curator and ticket socket. The detent engine is real.
+# Stub claude, gh and ticket socket. The detent engine is real. See docs/demo/README.md for the decide step.
 Output docs/demo/terminal.gif
 
 Set Shell "bash"

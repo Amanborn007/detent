@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Replays the terminal demo's commands (docs/demo/terminal.tape) without vhs and fails if a key output line is missing.
-# Offline: stub claude, gh, curator and ticket socket. DETENT_FORCE_TTY stands in for the terminal the tape has.
+# Stub claude, gh and ticket socket. The decide step starts the real bundled curator and waits in poll (docs/demo/README.md).
+# DETENT_FORCE_TTY stands in for the terminal the tape has.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 export DEMO_TMP="$(mktemp -d "${TMPDIR:-/tmp}/detent-term.XXXXXX")"

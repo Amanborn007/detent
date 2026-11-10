@@ -20,13 +20,15 @@ Detent is a Claude Code plugin (14 skill directories under `skills/`, hooks in `
 | Sockets | `engine/sockets/*.md` | Nine contracts: `ticket`, `knowledge`, `skill-discovery`, `reviewer`, `verifier`, `bot-comments`, `skills-pack`, `incident`, `deploy-harness`. | your commands in `stack.yaml` |
 | Adapters | `engine/adapters/` | Six built-in socket implementations: `gh-ticket`, `repo-docs-knowledge`, `repo-index-knowledge`, `gh-bot-comments`, `claude-reviewer`, `cmd-verifier`. | `gh`, `claude`, your test commands |
 | Curator | `engine/curator/` | Local review page on `127.0.0.1`, random port, secret-based auth. Gate answers come back as JSON. | the browser, the engine |
-| Sentinel | `engine/sentinel/` | Reads PR bot comments and classifies them with `config/sentinel/default.json`. | `gh` |
+| Sentinel | `engine/sentinel/` | Reads PR bot comments and classifies them with the config it is given. The respond stage passes `config/sentinel/default.json`. | `gh` |
 | Owl | `engine/owl/owl.sh` (bash) | Unattended loop under caps. Commits locally, never pushes. | `claude`, git |
 | Drive | `engine/cli/drive/` | Contained headless `claude -p --restricted` children for intake, research and plan. `--implement` is experimental, macOS only, and runs a Bash-only child under Claude Code's sandbox. | `claude`, curator, the run directory |
 | Runtime port | `engine/runtime/` | One normalised model call for the reviewer and the eval judge, with `claude-code` and `openai-compatible` adapters. | the `claude` CLI, or an OpenAI-compatible endpoint |
-| Repo index | `engine/index/` | Writes a profile, map, symbols and history to `.detent/index/`. | `git ls-files` |
+| Repo index | `engine/index/` | Writes a profile, map, symbols, history and `manifest.json` to `.detent/index/`. | `git ls-files` |
 | Eval and bench | `engine/eval/`, `evals/`, `engine/bench/`, `benchmarks/` | A deterministic eval gate scored against `evals/baseline.json`, and a run timing ledger. | CI |
 | Leak gate | `engine/scripts/company-strings-check.sh`, `.github/workflows/leak-gate.yml` | Greps every PR for strings on a private denylist. The workflow fails when the denylist secret is missing. | CI |
+
+`engine/` also holds `herald`, `courier`, `scout`, `examiner`, `self-feedback`, `handoff`, `statusline`, `spend`, `routing`, `pack`, `sources` and `lexicon`. They are optional crew that the 7-stage run does not need. The ones that ship as skills or `detent` verbs are in [docs/REFERENCE.md](REFERENCE.md).
 
 ## One run
 
@@ -45,8 +47,8 @@ The file layout and decision schema are in [engine/stages/CONTRACT.md](../engine
 - Text from tickets, PRs, bots and threads is data. Skills read it and never follow instructions found in it.
 - The CLI enforces the plan `intent` gate. The drift and ship gates are rules in the stage prompts, recorded as pending decisions that block the stages they name.
 - `approve` and `revise` refuse inside Claude Code, inside a drive child (`DETENT_DRIVE_CHILD=1`) and without a TTY (#24). The drive outbox validator refuses `answer`, `status` and `answered_*` keys on child decisions (`engine/cli/drive/outbox.mjs`), and the integrity digest fails the step as `state_tampered` if run state changed (#17).
-- A drive child for intake, research and plan gets file tools only, a read-only empty working directory, a `git archive` export with no `.git`, and a write-only outbox that drive validates and secret-scans (#17). The `--implement` child is Bash-only under Claude Code's sandbox, with a shim and post-run checks (#41).
-- Curator keeps a mode 0600 secret, proves itself to the CLI with an HMAC, and checks `Host` and `Origin` on every request (#21).
+- A drive child for intake, research and plan gets file tools only, a read-only empty working directory, a `git archive` export with no `.git`, and an outbox, the only place it can write, which drive validates and secret-scans (#17). The `--implement` child is Bash-only under Claude Code's sandbox, with a shim and post-run checks (#41).
+- Curator keeps a mode 0600 secret, proves itself to the CLI with an HMAC, checks `Host` on every request, and checks `Origin` when one is sent (#21).
 - The leak gate fails a PR that contains a string from a private denylist.
 
 [SECURITY.md](../SECURITY.md) lists what each of these does not cover.

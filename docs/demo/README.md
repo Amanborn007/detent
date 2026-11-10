@@ -26,15 +26,17 @@ Without vhs, `render-fallback.mjs` replays the `Type` lines from `demo.tape` usi
 node docs/demo/render-fallback.mjs
 ```
 
-Check the flow without rendering: `bash docs/demo/smoke.sh`.
+Check the flow without rendering: `bash docs/demo/smoke.sh`. Its last step calls `terminal-smoke.sh`, which waits at `decide` as described under the terminal track.
 
 A recording of the real thing inside Claude Code is scripted in [RECORDING.md](RECORDING.md).
 
 ## Terminal track
 
-`terminal.tape` drives the friendly verbs end to end on a throwaway clone of `acme/widgets`: `detent doctor`, `detent start acme/widgets#1` (which also builds the repo index and prints one line with its counts), `status`, three `continue` steps, `decide` and `approve`. Stand-ins, all offline: `fixtures/stub-claude.mjs` writes each stage's file from `fixtures/term/`, `fixtures/stub-gh-term` answers `gh`, `fixtures/bin/curator` answers the `curator` command, and `fixtures/stub-ticket` answers the ticket socket. The engine is real. `terminal-env.sh` builds the repo and defines `detent`.
+`terminal.tape` drives the friendly verbs end to end on a throwaway clone of `acme/widgets`: `detent doctor`, `detent start acme/widgets#1` (which also builds the repo index and prints one line with its counts), `status`, three `continue` steps, `decide` and `approve`. Stand-ins, all offline: `fixtures/stub-claude.mjs` writes each stage's file from `fixtures/term/`, `fixtures/stub-gh-term` answers `gh`, and `fixtures/stub-ticket` answers the ticket socket. The engine is real. `terminal-env.sh` builds the repo and defines `detent`.
 
-`terminal-smoke.sh` runs the same commands without vhs and asserts the key output lines; `smoke.sh` calls it. To render the GIF, run `vhs docs/demo/terminal.tape` from the repo root. The rendered GIF is committed as `terminal.gif`; re-render it after changing the tape or the verbs' output.
+`fixtures/bin/curator` answers only a `curator` command found on `PATH`. Since 948e9e5 (#21), `detent decide` and `gate open` run the bundled `engine/curator/cli.mjs`, so the stub never answers a gate. The `decide` step in `terminal.tape` and `terminal-smoke.sh` therefore starts a real curator on `127.0.0.1`, and it waits in `curator poll` until someone answers the page. Neither the terminal track nor `smoke.sh`, which calls `terminal-smoke.sh`, finishes offline until that step is fixed. #30 added `terminal.gif` from a branch that did not have 948e9e5.
+
+`terminal-smoke.sh` runs the same commands without vhs and asserts the key output lines. To render the GIF, run `vhs docs/demo/terminal.tape` from the repo root. The rendered GIF is committed as `terminal.gif`; re-render it after changing the tape or the verbs' output.
 
 ## Claude Code track
 

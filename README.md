@@ -10,12 +10,12 @@
 
 A coding agent that works from a ticket can plan something the ticket did not ask for, review its own diff, and push. A team that lets agents open PRs needs two things. A human approves the plan before any code exists, and the review and the evidence come from something other than the author before anything is pushed.
 
-Branch protection and required review already stop an agent PR from merging. They act after the code exists, so a wrong plan costs a full implement and review cycle, and the reviewer reads evidence the author gathered. Detent adds one human check before implement, and takes review and evidence from separate sockets.
+Branch protection and required review already stop an agent PR from merging. They act after the code exists, so a wrong plan costs a full implement and review cycle, and the reviewer reads evidence the author gathered. Detent adds one human check before implement, and takes review from a separate reviewer command and evidence from a separate test command.
 
 One committed run shows both, on [detent-demo#1](https://github.com/Amanborn007/detent-demo/issues/1) ("Add a maxLength option to slugify"). It ended in [PR #2](https://github.com/Amanborn007/detent-demo/pull/2), merged 2026-10-21. The change is a toy one in a demo repo, so this shows the mechanism and nothing about how often it matters. The decisions are in [decisions.json](docs/examples/2026-10-20-amanborn007-detent-demo-1/decisions.json).
 
 - **D-002.** The plan added a documentation step the ticket never asked for. The run asked instead of silently doing it. The answer was "keep step 4".
-- **D-004 and D-005.** At ship there was no reviewer socket and no verifier socket. The only review was the agent's own pass, which "found no blocking issue", and the evidence was gathered by hand. The human refused both. The reasons for rejecting them are "wanted a reviewer independent of the author" and "evidence from the author is not independent". The maintainer wrote these reasons after the run, in [PR #16](https://github.com/Amanborn007/detent/pull/16). Curator did not ask for a reason at the time ([PR #13](https://github.com/Amanborn007/detent/pull/13)). Both sockets were wired.
+- **D-004 and D-005.** At ship there was no reviewer socket and no verifier socket. The only review was the agent's own pass, which "found no blocking issue", and the evidence was gathered by hand. The human refused both ("wanted a reviewer independent of the author", "evidence from the author is not independent"), and both sockets were then wired. The reasons were written after the run, see [docs/examples/README.md](docs/examples/README.md).
 - **D-007.** The wired `claude-reviewer`, a separate headless Claude call, found that an empty or alphanumeric separator lets the `maxLength` cut split words. The PR fixed it by rejecting a word-character separator when `maxLength` is set, with the failing test committed first.
 
 ## See it run
@@ -42,27 +42,27 @@ bash docs/demo/try.sh
 
 A stub stands in for your tracker and canned files stand in for Claude's stage output. Every stage transition and gate comes from the engine. The script prints the gate page path and the scratch directory to delete.
 
-In a real run the plan gate opens as a local curator page, and you click **Approve the plan** or **Send it back**. In this offline demo the page is a static preview, and its buttons do nothing. To answer a gate offline, run `bash docs/demo/terminal-smoke.sh`. It goes on through `detent approve` with stubs. Recordings of the same flow are listed in [docs/demo/README.md](docs/demo/README.md).
+In a real run the plan gate opens as a local curator page, and you click **Approve the plan** or **Send it back**. In this offline demo the page is a static preview, and its buttons do nothing. Recordings of the same flow are listed in [docs/demo/README.md](docs/demo/README.md).
 
 <p align="center"><picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/demo-gate-dark.png">
   <img alt="The plan gate page for the demo run: the question, approve and revise buttons, and the plan text under review." src="docs/assets/demo-gate.png" width="560">
 </picture></p>
 
-**A real run.** The committed run went through all 7 stages. Reviewer round 1 asked about the separator, round 2 flagged a JSDoc that over-promised, and round 3 had no findings. The verifier passed with `npm test` at 13 passed and 0 failed. Read the [run folder](docs/examples/2026-10-20-amanborn007-detent-demo-1/), what it does and does not prove in [docs/examples/README.md](docs/examples/README.md), or [PR #2](https://github.com/Amanborn007/detent-demo/pull/2).
+**A real run.** The committed run went through all 7 stages. Reviewer round 1 raised the separator split and a `RangeError` on `Infinity`, round 2 flagged a JSDoc that over-promised, and round 3 had no findings. The verifier passed with `npm test`. Read the [run folder](docs/examples/2026-10-20-amanborn007-detent-demo-1/), what it does and does not prove in [docs/examples/README.md](docs/examples/README.md), or [PR #2](https://github.com/Amanborn007/detent-demo/pull/2).
 
 ## Use it on your repo
 
-You need Claude Code with plugins, Node 20, `git`, `bash`, `jq`, `python3` and a signed-in `gh`. In Claude Code:
+You need Claude Code with plugins, Node 20, `git`, `bash`, `jq`, `python3` and a signed-in `gh`. Curator opens its gate pages on `127.0.0.1`, so a sandbox that blocks local ports blocks the gates. In Claude Code:
 
 ```
 /plugin marketplace add Amanborn007/detent
 /plugin install detent@detent
 ```
 
-Then, from a clone of this repo, run `scripts/detent-install.sh`. It npm-links the CLI and appends `DETENT_ROOT` to your shell profile. It needs a writable npm global prefix, and the other install details are in [GUIDE.md section 2](GUIDE.md#2-first-run).
+Then, from a clone of this repo, run `scripts/detent-install.sh`. It npm-links the CLI and appends `DETENT_ROOT` to your shell profile. It needs a writable npm global prefix. If the prefix is not writable, the script prints `WARN` for each `npm link` and still ends with `done`, so set `npm_config_prefix` to a directory you own and run it again. The other install details are in [GUIDE.md section 2](GUIDE.md#2-first-run).
 
-Then, in a new shell:
+Then open a new shell, so that `DETENT_ROOT` is set and `detent` is on your `PATH`:
 
 ```sh
 cd ~/code/your-repo
@@ -100,9 +100,9 @@ In Claude Code the same verbs are `/detent:start`, `/detent:continue` and `/dete
 
 The CLI enforces the plan intent gate in code, where you click **Approve the plan** or **Send it back** ([GUIDE.md](GUIDE.md#3-the-stages-and-gates)). The drift and ship gates are rules in the stage prompts, recorded as pending decisions that block the stages they name. Nothing in the code calls `gh pr merge`.
 
-Your tracker, docs search, reviewer and test runner plug in as sockets. A socket is a command. The engine writes one JSON request to its stdin and reads one JSON response from its stdout. Exit 0 is ok, exit 1 is retried once and then shown to you, and exit 2 halts the stage and asks. Six adapters ship in `engine/adapters/`. See [GUIDE.md section 5](GUIDE.md#5-sockets-and-providers) and [section 6](GUIDE.md#6-writing-a-provider-and-a-pack).
+Your tracker, docs search, reviewer and test runner plug in as sockets. A socket is a command you configure in `stack.yaml`. The engine writes one JSON request to its stdin and reads one JSON response from its stdout. Exit 0 is ok, exit 1 is retried once and then shown to you, and exit 2 halts the stage and asks. Six adapters ship in `engine/adapters/`. See [GUIDE.md section 5](GUIDE.md#5-sockets-and-providers) and [section 6](GUIDE.md#6-writing-a-provider-and-a-pack).
 
-The plugin has 14 skills, typed as `/detent:<skill>`. `start`, `continue`, `status` and `drive` run the stages. The other ten are helpers the stages do not need, listed in [docs/REFERENCE.md](docs/REFERENCE.md#skills). Try `/detent:deslop` first. It needs no config, reads your own diff, and changes nothing until you say yes.
+The plugin has 14 skills, typed as `/detent:<skill>`. `start`, `continue`, `status` and `drive` run the stages. The other ten are helpers the stages do not need, listed in [docs/REFERENCE.md](docs/REFERENCE.md#skills).
 
 ## Testing
 
@@ -112,7 +112,9 @@ bash engine/owl/test/run-tests.sh
 for f in hooks/tests/*.sh scripts/tests/*.sh engine/scripts/tests/*.sh; do bash "$f"; done
 ```
 
-The suite needs to bind `127.0.0.1` and write to `/tmp`. Failures that read `listen EPERM` or `Operation not permitted` mean the sandbox blocked one of those. A cold run inside such a sandbox on 2026-11-10 had 177 failing tests, almost all of that kind, and 7 failing owl checks. I could not rerun it outside the sandbox, so a green run for you rests on the CI run below. [CI run 42786785915](https://github.com/Amanborn007/detent/actions/runs/42786785915) on main at 0731283, 2026-11-10, passed on ubuntu and macOS with 2089 tests, 2065 pass, 0 fail, 24 skipped, and owl 88 pass, 0 fail. The 24 skips are live tests that need `DETENT_LIVE_CLAUDE=1` or `DETENT_LIVE_HOSTBOX=1`, which spend credit or need the real sandbox. The node suite took 122 s on ubuntu and 203 s on macOS.
+The suite needs to bind `127.0.0.1` and write to `/tmp`. Failures that read `listen EPERM` or `Operation not permitted` mean the sandbox blocked one of those.
+
+[CI run 42786785915](https://github.com/Amanborn007/detent/actions/runs/42786785915) on main at 0731283, 2026-11-10, passed on ubuntu and macOS with 2089 tests, 2065 pass, 0 fail, 24 skipped, and owl 88 pass, 0 fail. Of the 24 skips, 21 need `DETENT_LIVE_CLAUDE=1` or `DETENT_LIVE_HOSTBOX=1`, 2 need a live OpenAI-compatible endpoint (`DETENT_LIVE_OLLAMA` or `DETENT_LIVE_OPENAI`), and 1 is a sandbox probe that only runs when nested.
 
 Some of the edge cases it covers:
 
@@ -127,14 +129,13 @@ Failing tests are committed before the fix. When a committed test has to change,
 ## Known limitations
 
 - Only the plan gate is enforced in code. The drift and ship gates are prompt rules plus blocking decisions.
-- After a PR is marked ready, `respond` and the `sentinel-inbox-check` Stop hook push fixes without per-item approval, for up to 10 rounds. [What runs without asking you](docs/REFERENCE.md#what-runs-without-asking-you) lists every such part and its kill switch.
+- After a PR is marked ready, `respond` and the `sentinel-inbox-check` Stop hook push fixes without per-item approval, for up to the round cap (10 by default). [What runs without asking you](docs/REFERENCE.md#what-runs-without-asking-you) lists every such part and its kill switch.
 - Drive is experimental and spends credit. `--restricted` is not an OS sandbox, and `--budget` can overshoot by one turn.
 - `drive --implement` ([PR #41](https://github.com/Amanborn007/detent/pull/41)) is macOS only, and its live end-to-end run is unverified.
 - Curator auth does not protect against another process running as you. See [SECURITY.md](SECURITY.md).
-- In the example, `respond` converged only because the demo repo has no review bots.
+- In the example, `respond` converged on its first scan because no bot had commented on the PR (`respond/round-1.json`).
 - The regex tagger in `engine/index` is the only one tested. The tree-sitter path runs only if you install the optional deps, and it is untested ([PR #22](https://github.com/Amanborn007/detent/pull/22)).
-- On a fresh clone `curator open` fails with ENOENT on `<clone>/.local` until that directory exists. Run `mkdir .local` in the clone. The fix is [PR #51](https://github.com/Amanborn007/detent/pull/51).
-
+- With `DETENT_ROOT` unset, on a fresh clone, `curator open` fails with ENOENT on `<clone>/.local`. Run `mkdir .local` in the clone (checked 2026-11-10). The fix is [PR #51](https://github.com/Amanborn007/detent/pull/51).
 ## Read more
 
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/DECISIONS.md](docs/DECISIONS.md), [CHANGELOG.md](CHANGELOG.md), [GUIDE.md](GUIDE.md), [docs/REFERENCE.md](docs/REFERENCE.md), [SECURITY.md](SECURITY.md) and [CONTRIBUTING.md](CONTRIBUTING.md).

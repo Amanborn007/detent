@@ -12,14 +12,14 @@ Each entry links the PR where the decision landed. Where no alternative was writ
 ## 2. Tools are JSON-over-stdio commands called sockets
 
 - **Decision.** The engine runs a command, writes one JSON request to its stdin and reads one JSON response from its stdout. Exit 0 is success. Exit 1 is a provider failure, retried once and then shown to you. Exit 2 halts the stage and asks.
-- **Why.** `engine/README.md` puts all company-specific behaviour behind sockets, so the engine stays generic, and any language can fill one. #10 changed one case: an exit 1 that carries a JSON body is kept as the response and not retried, because a verifier's `verdict: fail` needs it.
+- **Why.** `engine/README.md` puts all company-specific behaviour behind sockets, so the engine stays generic. #10 changed one case: an exit 1 that carries a JSON body is kept as the response and not retried, because a verifier's `verdict: fail` needs it.
 - **Cost accepted.** The CLI does not enforce the `version` field of a provider yet (`engine/README.md`).
 - **Evidence.** `engine/README.md`, `engine/sockets/*.md`, the comment above the retry in `engine/cli/engine.mjs`.
 
 ## 3. Gates are decisions answered by a human, and only the plan gate is enforced in code
 
 - **Decision.** A gate is a question in `decisions.json`, rendered in curator. The engine never answers one. `detent stage end` refuses to finish the plan stage while the `intent` gate is pending. The drift and ship gates are rules in the stage prompts, recorded as pending decisions that block the stages they name.
-- **Why.** `stage end` refuses while any decision that blocks that stage is pending (`engine/cli/tests/gates.test.mjs`, "stage end refuses while a decision blocking that stage is pending"). The engine raises the plan gate itself, and D-003 in the example run is `raised_by: engine`. The agent files the ship and drift decisions from the stage prompt. The push happens inside the ship stage, before `stage end`, so only the prompt keeps it behind the ship decision. I found no recorded reason for leaving the push in the prompt, and moving it into the CLI is on the list below.
+- **Why.** `stage end` refuses while any decision that blocks that stage is pending (`engine/cli/tests/gates.test.mjs`, "stage end refuses while a decision blocking that stage is pending"). The engine raises the plan gate itself, and D-003 in the example run is `raised_by: engine`. The agent files the ship and drift decisions from the stage prompt. The push happens inside the ship stage, before `stage end`, so only the prompt keeps it behind the ship decision. Moving the push into the CLI is on the list below.
 - **Guards on the answer side.** A drive child cannot answer a gate. The outbox validator refuses `answer`, `status` and `answered_*` keys on child decisions, and the integrity digest fails the step as `state_tampered` (#17). #24 makes `approve` and `revise` refuse inside Claude Code, inside a drive child and without a TTY. #8 first snapshotted `decisions.json` around each child, and #17 replaced that.
 - **Cost accepted.** For the ship and drift gates the code relies on the stage prompt to file the decision, and nothing in the CLI stops a push that skipped it. In the example run, `decisions.json` shows D-004 and D-005 raised by `ship`, and D-003 raised by `engine`.
 - **Evidence.** [GUIDE.md](../GUIDE.md#3-the-stages-and-gates), `engine/cli/tests/verbs-approve.test.mjs`, `engine/cli/tests/drive.test.mjs`.
@@ -27,7 +27,7 @@ Each entry links the PR where the decision landed. Where no alternative was writ
 ## 4. A plugin first, plus a shell-level install
 
 - **Decision.** The plugin carries skills and hooks. `scripts/detent-install.sh` does the rest.
-- **Why.** `docs/plugin-first-notes.md` says "A plugin manifest cannot put a binary on your PATH or export a shell variable". Seven references in `skills/` use the form `${CLAUDE_PLUGIN_ROOT:-${DETENT_ROOT:-.}}/...`, and 14 use bare `${CLAUDE_PLUGIN_ROOT}`. The fallback form exists because the notes say it is unconfirmed whether `CLAUDE_PLUGIN_ROOT` reaches the bash a skill runs.
+- **Why.** `docs/plugin-first-notes.md` says "A plugin manifest cannot put a binary on your PATH or export a shell variable". Skills fall back to `DETENT_ROOT` because the notes say it is unconfirmed whether `CLAUDE_PLUGIN_ROOT` reaches the bash a skill runs.
 - **Cost accepted.** A two-step install, and the second step appends a block to your shell profile.
 - **Evidence.** `docs/plugin-first-notes.md`, `scripts/detent-install.sh`.
 
@@ -36,7 +36,7 @@ Each entry links the PR where the decision landed. Where no alternative was writ
 - **Decision.** Each intake, research and plan step is one `claude -p --restricted` child with `Read`, `Glob`, `Grep`, `Write`, `Edit` and `TodoWrite`. No Bash. It starts in a read-only empty directory, reads a `git archive` export, and writes only an outbox that drive validates and secret-scans. A digest of run state is checked after every child (#17). The `--implement` child is the exception: `claude -p --restricted --tools Bash` under Claude Code's sandbox, with a shim shell and post-run transcript checks (#41, SECURITY.md).
 - **Rejected.** #8 gave children a settings profile, a Bash allowlist and a push-URL rewrite. Its own "Not covered" line said a child's test command could still run arbitrary repo code and reach the network. #17 replaced it 26 minutes later, on 2026-10-21.
 - **Why.** #8's residual risk was a child that could run a command. #17 gives an intake, research or plan child no Bash, MCP, web, hooks or subagents to run one with.
-- **Related rule.** `detent index` only ever writes `suggested.verify`, never `commands.verify` (#22). `commands.verify` is the command `drive --implement` runs on the host in a no-network box, so only a human sets it, with `engine env --verify`. #22's PR body gives a Bash-permission reason, which belongs to the #8 model that #17 had already replaced.
+- **Related rule.** `detent index` only ever writes `suggested.verify`, never `commands.verify`, and only a human sets `commands.verify`, with `engine env --verify` (#22). `drive --implement` runs `commands.verify` on the host in a no-network box (#41).
 - **Cost accepted.** `--restricted` is not an operating-system sandbox, `--budget` can overshoot by one turn, and a prompt-injected child can still shape gate text. SECURITY.md lists the rest.
 - **Evidence.** `engine/cli/tests/drive-surface.test.mjs` asserts the old permission model's markers are gone from `engine.mjs`.
 
@@ -68,9 +68,10 @@ Each entry links the PR where the decision landed. Where no alternative was writ
 ## What I would change next
 
 - Fix the lost wake-up behind #43.
-- Merge PR #51, which makes curator's ancestor check (`checkAncestors` in `engine/curator/auth.mjs`) skip parents that do not exist yet. Until it merges, `curator open` fails with ENOENT on `<clone>/.local` on a fresh clone. Creating that directory first should avoid it, which I inferred from the cause in #51 and did not run.
+- Merge PR #51, which makes curator's ancestor check (`checkAncestors` in `engine/curator/auth.mjs`) skip parents that do not exist yet. Until it merges, `curator open` fails with ENOENT on `<clone>/.local` on a fresh clone when `DETENT_ROOT` is unset. Creating `<clone>/.local` first avoids it (checked on a fresh export, 2026-11-10).
 - Move the ship push into the CLI behind the ship decision, so the code and not only the prompt refuses a push without it (decision 3).
 - Run `drive --implement` live, end to end. That run is unverified (#41).
 - Add a secret scan of implement commits, which SECURITY.md lists as not covered.
 - Run the `docs/demo` tests and `smoke.sh` in CI.
-- Split `engine/cli/engine.mjs`, 3337 lines at 464e527. This one is my own judgement, not something a PR or test recorded.
+- Split `engine/cli/engine.mjs`, 3337 lines at 464e527, into modules along its existing section comments: run and stage, gates, sockets, and the friendly verbs.
+- Fix `detent decide` and the demo smoke scripts. The `decide` step starts a real curator, so `docs/demo/terminal-smoke.sh` waits in `curator poll` (docs/demo/README.md). `cmdDecide` also reports only the last 300 characters of a curator failure, which cuts off the cause.
