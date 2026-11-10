@@ -84,10 +84,10 @@ function checkPasses(file) {
   assert.equal(chk.status, 0, chk.stdout + chk.stderr);
 }
 
-test("intent gate page opens with a verdict sentence that explains Approve and Revise", () => {
+test("intent gate page opens with the question as its h1 and explains Approve and Revise", () => {
   const { text } = exampleIntentGate();
   const lines = text.split("\n");
-  assert.match(lines[0], /^You are deciding whether the plan for Amanborn007\/detent-demo#1 is ready to implement\.?$/);
+  assert.match(lines[0], /^Is this plan ready to implement\?$/);
   assert.ok(text.includes("Approve unlocks implementation"), text.slice(0, 600));
   assert.ok(text.includes("Send it back returns the plan to planning with your note"));
 });
@@ -122,13 +122,13 @@ test("plan steps are numbered with their files and verify command", () => {
   assert.ok(text.includes("A multi-character separator could leave half a separator"), "risks listed");
 });
 
-test("the access panel is background after the decision on a plan gate, as a table", () => {
+test("the access panel is folded background before the decision on a plan gate, as a status grid", () => {
   const { html, text } = exampleIntentGate();
   const access = html.indexOf('id="access"');
   const decision = html.indexOf("data-plan-question=");
   const raw = html.indexOf('<section id="raw">');
-  assert.ok(decision > 0 && access > decision && access < raw, "access panel follows the decision and precedes the raw artifacts");
-  assert.ok(/<table[\s\S]*?target repo[\s\S]*?<\/table>/i.test(html.slice(access, raw)));
+  assert.ok(access > 0 && decision > access && decision < raw, "access panel precedes the decision, which precedes the raw artifacts");
+  assert.ok(/<div class="grid">[\s\S]*?data-verdict="reached"[\s\S]*?target repo/i.test(html.slice(access, decision)));
   assert.ok(text.includes("reachable"));
   assert.ok(!html.includes('{"source"'), "the raw access-report.json is not dumped");
 });
@@ -220,9 +220,9 @@ test("the page passes the curator artifact check, in the example and the demo fi
     gate: "intent",
   });
   checkPasses(demo.file);
-  assert.match(demo.text.split("\n")[0], /^You are deciding whether the plan for acme\/widgets#1 is ready to implement/);
+  assert.match(demo.text.split("\n")[0], /^Is this plan ready to implement\?$/);
   assert.ok(demo.html.indexOf("Redelivery honours") < firstRawDetails(demo.html));
-  assert.ok(demo.html.indexOf('id="access"') > demo.html.indexOf("data-plan-question="), "access is background, after the decision");
+  assert.ok(demo.html.indexOf('id="access"') < demo.html.indexOf("data-plan-question="), "access is folded background, before the decision");
   assert.ok(!/^(#|\||\[ \]|\{")/m.test(demo.text));
 });
 
@@ -233,7 +233,7 @@ test("a ship-stage decision explains the push and draft PR, and may show the rec
     decisions: [{ id: "D-009", raised_by: "ship", blocks: ["ship"], question: "No reviewer socket is declared. How to proceed?", options: ["accept the agent's own review", "wire a reviewer socket first"], status: "pending" }],
     gate: "D-009",
   });
-  assert.match(text.split("\n")[0], /^You are deciding whether/);
+  assert.equal(text.split("\n")[0], "No reviewer socket is declared. How to proceed?");
   assert.ok(/push the branch and open a draft pull request/i.test(text));
   assert.ok(text.includes("Step verdicts"), "recheck.md is at or before the ship stage");
 });
