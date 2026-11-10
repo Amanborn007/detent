@@ -4,7 +4,15 @@ This folder holds one real run of Detent. It went through all seven stages on [A
 
 The run folder `2026-10-20-amanborn007-detent-demo-1/` has the brief, the research, the plan, the decisions that were answered through curator, the recheck, and the ship evidence. The curator pages are in its `plans/` folder.
 
-The git worktree is left out, because the code lives in the demo PR. Local paths, the username and the hostname are replaced, so you will see `$DETENT_ROOT`, `~`, `<user>` and `<host>` in the files. Nothing else was edited.
+The git worktree is left out, because the code lives in the demo PR. Local paths, the username and the hostname are replaced, so you will see `$DETENT_ROOT`, `~`, `<user>` and `<host>` in the files. Nothing else was edited in the export. `decision-rationale.jsonl` and the handoffs were added and regenerated after the run, in [PR #16](https://github.com/Amanborn007/detent/pull/16), so the recorded reasons for D-004 and D-005 date from 2026-10-21 07:58, after respond ended at 07:28.
+
+What the run does and does not show:
+
+- `benchmark.json` is a partial checkpoint taken when the plan gate opened. It covers 3m34s of agent time through intake, research and the plan draft. It does not cover implement, recheck, ship or respond. `events.jsonl` has those stage times, for example ship from 2026-10-21 06:42 to 07:25 across three reviewer rounds and the verifier.
+- The plan stage began 2026-10-20 15:12 and ended 2026-10-21 06:33, which is the wait for the answers to D-001, D-002 and D-003.
+- `recheck.md` says "clean". It also says commit order is not proof the tests were seen failing.
+- `verify/commits.txt` lists 9 commits at first ship evidence. The merged PR has 13 commits.
+- The verifier passed with `npm test` at 13 passed and 0 failed.
 
 To see where the run stopped and asked, read `decisions.json` from D-004 to D-007 first, then `plans/*-ship.html`.
 

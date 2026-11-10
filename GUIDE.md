@@ -34,7 +34,7 @@ Three rules hold everywhere:
 
 ## 2. First run
 
-Install the plugin and run the shell script as described in the README. Then:
+Install the plugin and run the shell script as described in the README. The script runs `npm link` for `engine/curator` and `engine/cli`, which needs a writable npm global prefix. nvm works. With a system Node, set `NPM_CONFIG_PREFIX` to a directory you own first. It appends a `DETENT_ROOT` block and a `detent-upgrade` alias to `~/.zshrc`, `~/.bashrc` or `~/.profile` (chosen by `$SHELL`), or to the file named by `DETENT_PROFILE`. It copies `detent.user.example.yaml` to `detent.user.yaml` if that file is missing. Then:
 
 ```sh
 cp detent.user.example.yaml detent.user.yaml   # skip if the install script already made it
@@ -81,7 +81,7 @@ The CLI enforces one gate itself, the plan `intent` gate (approve or revise). Th
 | plan | brief and research | `plan/plan.md`, a curator page under `.plans/` | plan gate (hard) |
 | implement | the approved plan | commits on branch `sdlc/<run-id>` in a git worktree | none |
 | recheck | the diff and the approved plan | `recheck.md` | drift gate, only if the diff diverges from the plan |
-| ship | `reviewer` and `verifier` sockets | evidence manifest, pushed branch, draft PR | ship gate (hard) |
+| ship | `reviewer` and `verifier` sockets | evidence manifest, pushed branch, draft PR | ship gate (prompt rule, filed as a blocking decision) |
 | respond | PR comments through sentinel | fixes, replies, an escalation list | you mark the PR ready to arm it |
 
 What each stage does, in more detail:

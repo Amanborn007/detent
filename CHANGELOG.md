@@ -10,7 +10,7 @@ Detent has no release tags, and `.claude-plugin/plugin.json` has said 0.11.0 sin
 
 ## 2026-11-05
 
-- Tests no longer open a browser or leave a curator daemon behind (#35). Drive host box for the commands drive runs itself (#36). Curator decision pages lead with a brief (#37, #38, landed by #40).
+- Tests no longer open a browser or leave a curator daemon behind (#35). Drive host box for the commands drive runs itself (#36). Curator decision pages lead with a brief (#37, landed by #40). Curator answers are kept across reloads and show what was delivered (#38, landed by #40).
 
 ## 2026-10-22
 
@@ -20,7 +20,7 @@ Detent has no release tags, and `.claude-plugin/plugin.json` has said 0.11.0 sin
 
 - Workflow and CLI: gate collect, generated gate pages and curator drain (#5), `detent setup` (#7), fixes from the first end-to-end run (#10), built-in reviewer and verifier adapters with the worked example (#11, #13, landed by #14), friendly verbs `start`, `status`, `continue`, `decide`, `approve`, `revise` and `doctor` (#24).
 - Drive: first version with permission scoping (#8), replaced by the contained version (#17). Sandbox probes, bundle import, egress proxy, implement profile and a model-free self-probe gate (#20, #23, #25, #26, #29).
-- Curator, index, runtime and demos: curator authentication (#21), markdown on gate pages (#28), `detent index` (#22), runtime port (#27), slash commands with terminal and Claude Code demos (#30), `doctor` shows the index tagger (#31), a real drive run in the README (#18). Smaller fixes: #6, #9, #12, #15, #16, #19.
+- Curator, index, runtime and demos: curator authentication (#21), markdown on gate pages (#28), `detent index` (#22), runtime port (#27), slash commands with terminal and Claude Code demos (#30), `doctor` shows the index tagger (#31), a real drive run in the README (#18), a new README tagline (#9), a new demo GIF (#12), and decision answers matched to options without case, with the worked example refreshed (#16). Other changes: #6, #15, #19.
 
 ## 2026-10-20
 

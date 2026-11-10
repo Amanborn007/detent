@@ -76,8 +76,6 @@ fi
 echo
 
 # --- verify + health table ------------------------------------------------------
-# curator stats <clone>/.local before it creates its state dir, and a fresh clone has none.
-mkdir -p "$DETENT_ROOT/.local"
 echo "verify"
 declare -a ROWS=()
 fails=0
