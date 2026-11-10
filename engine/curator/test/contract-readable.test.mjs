@@ -74,3 +74,36 @@ test('the new checks are warnings even at error level', () => {
   const r = run(page({ after: `<p>${words(70)}</p><details><p>x</p></details>` }));
   assert.ok(!ids(r.errors).some((i) => ['C11', 'C12', 'C13'].includes(i)));
 });
+
+const long = (attrs = '') => `<p${attrs ? ' ' + attrs : ''}>${words(70)}</p>`;
+const warnIds = (html) => ids(run(html).warnings);
+
+test('C11 exempts a paragraph that carries data-plan-raw itself', () => {
+  assert.ok(!warnIds(page({ after: long('data-plan-raw') })).includes('C11'));
+});
+
+test('C11 still flags a long unmarked paragraph', () => {
+  assert.ok(warnIds(page({ after: long() })).includes('C11'));
+});
+
+test('an unclosed <p> before <details> does not swallow the details', () => {
+  const html = page({ after: `<p>intro text<details><summary>Raw</summary><span>${words(70)}</span></details>` });
+  assert.ok(!warnIds(html).includes('C11'));
+});
+
+test('an unclosed <p> before <figure> or <aside> ends at that element', () => {
+  for (const tag of ['figure', 'aside', 'nav', 'dl', 'form', 'article']) {
+    const html = page({ after: `<p>intro<${tag}><span>${words(70)}</span></${tag}>` });
+    assert.ok(!warnIds(html).includes('C11'), tag);
+  }
+});
+
+test('C13 requires the summary to be the first element child of <details>', () => {
+  const html = page({ after: '<details><p>body first</p><summary>Late label</summary></details>' });
+  assert.ok(warnIds(html).includes('C13'));
+});
+
+test('C13 accepts a summary that follows only whitespace', () => {
+  const html = page({ after: '<details>\n  <summary>Raw timings</summary><p>x</p></details>' });
+  assert.ok(!warnIds(html).includes('C13'));
+});
