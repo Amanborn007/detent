@@ -81,6 +81,12 @@
   .caption { font-family:var(--mono); font-size:10px; color:var(--muted);
              letter-spacing:.04em; margin:0 0 8px; }
 
+  /* Shown until the curator server serves the page; the SDK sets data-curator=connected. */
+  .curator-offline { margin:0 0 20px; padding:8px 12px; border:1px dashed var(--muted);
+                     border-radius:6px; font-size:14px; color:var(--soft); }
+  html[data-curator=connected] .curator-offline { display:none; }
+  html[data-curator=connected] .option, html[data-curator=connected] [data-plan-option] { cursor:pointer; }
+
   footer { margin-top:72px; padding-top:16px; border-top:1px solid var(--rule);
            font-family:var(--mono); font-size:9px; letter-spacing:.1em; color:var(--muted); }
 </style>
@@ -101,6 +107,7 @@
   <p data-brief="ask"><b>What i need from you:</b> Name the decision on this page and how many there are.</p>
   <p data-brief="next"><b>What happens after you answer:</b> Say what you will do once the answer arrives.</p>
 </section>
+<p class="curator-offline">Not connected: open this page with <code>curator open &lt;file&gt;</code> to send a decision.</p>
 
 <div data-plan-question="which-option" data-plan-recommended="obvious" data-plan-required data-plan-shape="pick-one">
   <h3>Should we do the obvious thing or the clever thing?</h3>

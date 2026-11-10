@@ -169,3 +169,13 @@ Rungs 1 to 4 may be stated as verified. Rung 5 never sits with them. An inferred
 under "Not yet proven", with the check, the command or the person that would move it onto a
 higher rung. This is a hard rule: a page that presents inference alongside observation is
 telling the reader something it does not know.
+
+## Readable decision pages
+
+Any recipe above lands as a page someone must decide from. The full rules are in `blocks.md`, "Readable decision pages". In short:
+
+1. First screen: the `<h1>` question, then the four-row brief. Add the offline banner right after the brief.
+2. Each section opens with a bold takeaway of 20 words or fewer. Sentences 25 words or fewer, paragraphs 60 or fewer.
+3. Background goes in `<details>` with an informative summary, one nesting level at most. A closed one costs nothing against the 250-word limit before the first decision.
+4. With long background, the decision may come last. Put a "Jump to the decision" link under the brief.
+5. Match the form to the content: coverage as a bar plus a ✓ / ◐ / ✕ checklist, steps as a numbered stepper, status as a glyph-and-word grid with `class="mark" data-verdict="…"`, counts as a CSS bar, flows through `diagram-design`. Colour is never the only signal.

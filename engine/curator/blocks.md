@@ -2,7 +2,7 @@
 
 A curator screen is an ordered selection of the blocks below, and it may carry as many jobs as the work actually has. A runbook that also settles four decisions and maps two flows is one screen carrying a verdict, a brief, four decision blocks and two mechanism blocks. A block with nothing in it is left out rather than filled with a placeholder.
 
-One order is fixed. The `<h1>` states the finding in one line, the brief comes right after it, every decision comes after the brief, and everything else (evidence, access panel, diagrams) comes after the last decision under a `Background` heading. A reader who stops after the decisions has still been asked everything.
+One order is fixed. The `<h1>` states the finding in one line (on a decision page it may instead be the question being asked), the brief comes right after it, every decision comes after the brief, and everything else (evidence, access panel, diagrams) comes after the last decision under a `Background` heading. A reader who stops after the decisions has still been asked everything. The allowed alternative is the decision at the end: the brief still says what is being asked, a "Jump to the decision" link sits under it, and the background is folded (see "Readable decision pages").
 
 Recipes name a default starting set of blocks for a kind of work. They are starting sets, not walls. Add a block a recipe does not list the moment the work has that content.
 
@@ -66,7 +66,7 @@ The option key (`data-plan-option="phased"`) is the answer string sent back to y
 
 Gives the reader the answer in the first line so they can stop reading and act.
 
-Must contain one sentence stating the answer, the recommendation, or the state of the work. It is the page's `<h1>`. Where the answer is conditional, the condition sits in the same sentence.
+Must contain one sentence stating the answer, the recommendation, or the state of the work. It is the page's `<h1>`; on a decision page the `<h1>` may instead be the question being asked, with the answer in the brief. Where the answer is conditional, the condition sits in the same sentence.
 
 Must not contain a preamble, a scope statement, a list of what the screen covers, or a restatement of the question. It is not a summary of the screen; it is the conclusion of the screen.
 
@@ -273,3 +273,37 @@ Every diagram goes through the diagram-design skill. Hand-rolled markup and Merm
 **What `artifact-check.py` can and cannot see.** It catches a flow heading, a ranking heading, three or more percentage cells, and a comparison of three or more real options. A before-and-after heading is a **warning** there, not a failure, because the Delta map's drawing is recommended above and may be skipped when the delta is a single named piece — the check cannot tell a one-piece delta from a broad one, so it says so and leaves the call to you. It misses branching steps, figures quoted in prose rather than a table, and two distinct flows sharing one heading — it reads headings, tables and option counts, not meaning. Those four rows above the check cannot see are still owed; passing the check is not the same as having drawn what the content owes.
 
 On paint it reads the SVG's own attributes and the stylesheet rules that target it or the class and id hooks it carries. It does not resolve the CSS cascade, so a `color` set on an ancestor and inherited through `currentColor` gets past it.
+
+## Readable decision pages
+
+The first screen is the `<h1>` question and the four-row brief, nothing else. Each section opens with one bold takeaway of at most 20 words, then the support. Sentences run 25 words or fewer and paragraphs 60 or fewer (`C11` warns past that), and an option consequence stays within 20 (`C12`).
+
+**Pick the visual form by content.**
+
+| Content | Form |
+|---|---|
+| Coverage | A bar plus a ✓ / ◐ / ✕ checklist, each row with a word |
+| Linear steps | A numbered stepper |
+| Status sets | A grid with glyph and word, each cell `class="mark" data-verdict="…"`; never the banned status classes `ok`, `no`, `pill`, `badge`, `chip`, `severity` |
+| Counts | A CSS bar; never a pie |
+| Flows, dependencies | The `diagram-design` skill |
+
+Colour is never the only signal (WCAG 1.4.1): every colour pairs with a glyph or a word.
+
+**Background folds.** Put background in `<details>` with a summary that says what is inside ("Raw timings, 14 runs"), one nesting level at most (`C13` warns on an empty summary). `C2` counts only visible words before the first decision, so a closed `<details>` is free and `<details open>` is not. Mark raw evidence `data-plan-raw` to exempt it from the paragraph cap.
+
+**The decision may come last.** After a brief and folded background, put the decision at the end and a "Jump to the decision" link under the brief.
+
+**Motion only for state change**: 100 to 300 ms, ease-out, inside `@media (prefers-reduced-motion: no-preference)`.
+
+**Offline banner.** `sdk.js` is injected only when the server serves the page, so a page opened as a plain file cannot send anything. Put this directly after the brief, never between the `<h1>` and the brief (`C1`):
+
+```html
+<p class="curator-offline">Not connected: open this page with <code>curator open &lt;file&gt;</code> to send a decision.</p>
+<style>
+  html[data-curator=connected] .curator-offline { display:none; }
+  html[data-curator=connected] .option, html[data-curator=connected] [data-plan-option] { cursor:pointer; }
+</style>
+```
+
+`sdk.js` sets `data-curator="connected"` on `<html>` at load and injects the hide rule itself, so the banner goes away even on a page that forgot the CSS. `theme.html` carries both.
