@@ -122,3 +122,12 @@ test("docs list the verify and host box stops and say a negative gate answer kee
   for (const code of ["verify_failed", "hostbox_failed", "run_base_invalid"]) assert.ok(ref.includes(code), `REFERENCE.md lacks ${code}`);
   assert.match(sec, /negative answer[^]{0,200}(keeps|still)[^]{0,100}block/i, "SECURITY.md: a negative gate answer keeps blocking");
 });
+
+test("README and GUIDE describe drive --implement instead of claiming drive never implements", () => {
+  for (const rel of ["engine/cli/README.md", "GUIDE.md"]) {
+    const t = read(rel);
+    assert.ok(!/never implements|never driven|always stops/i.test(t), `${rel}: stale claim`);
+    assert.match(t, /--implement[^]{0,400}macOS only|macOS only[^]{0,400}--implement/, `${rel}: --implement near "macOS only"`);
+    assert.ok(t.includes("SECURITY.md"), `${rel}: points at SECURITY.md`);
+  }
+});
