@@ -28,6 +28,7 @@ const scratch = () => realpathSync(mkdtempSync(join(tmpdir(), "conformance-")));
 const baseRequest = (cwd, over = {}) => ({ prompt: "say hi", cwd, output: "json", tools: "none", mcp: "none", settings: { sources: "none" }, ...over });
 
 export function conformanceSuite(fixture) {
+  if (!Array.isArray(fixture.undeclared)) throw new Error(`conformanceSuite(${fixture.name}): fixture.undeclared must be an array of the capabilities and enum values this runtime refuses`);
   const { name, makeFake } = fixture;
   const rtFor = (dir, mode) => getRuntime({ name, bins: { [name]: makeFake(dir, mode).bin } });
   const label = (s) => `conformance[${name}]: ${s}`;
@@ -71,10 +72,10 @@ export function conformanceSuite(fixture) {
     const dir = scratch();
     const rt = rtFor(dir, "ok");
     const c = rt.capabilities();
-    let probed = 0;
+    const probed = [];
     for (const { capability, over } of PROBES) {
       if (c[capability] !== false) continue;
-      probed++;
+      probed.push(capability);
       assert.throws(() => rt.run(baseRequest(dir, over)), (e) => {
         assert.ok(e instanceof CapabilityError, capability);
         assert.equal(e.capability, capability);
@@ -84,14 +85,12 @@ export function conformanceSuite(fixture) {
     }
     for (const [k, all] of Object.entries(ENUMS)) {
       for (const v of all.filter((x) => !c[k].includes(x))) {
-        probed++;
+        probed.push(`${k}=${v}`);
         const over = k === "settings_sources" ? { settings: { sources: v } } : { [k]: v };
         assert.throws(() => rt.run(baseRequest(dir, over)), CapabilityError, `${k}=${v}`);
       }
     }
-    const undeclaredProbes = PROBES.filter(({ capability }) => c[capability] === false).length;
-    const undeclaredValues = Object.entries(ENUMS).reduce((n, [k, all]) => n + all.filter((x) => !c[k].includes(x)).length, 0);
-    assert.equal(probed, undeclaredProbes + undeclaredValues, "every undeclared probe and enum value was exercised");
+    assert.deepEqual([...probed].sort(), [...fixture.undeclared].sort(), "the undeclared probes and values match this runtime's expected list");
     assert.deepEqual(RESERVED_BOOLS.filter((k) => !PROBES.some(({ capability }) => capability === k)), [], "PROBES covers every reserved capability");
     assert.equal(existsSync(join(dir, "spawned")), false);
   });

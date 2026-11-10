@@ -9,4 +9,4 @@ Object.assign(process.env, {
 });
 delete process.env.DETENT_RUNTIME;
 
-conformanceSuite({ name: "openai-compatible", makeFake: makeOpenAIFake });
+conformanceSuite({ name: "openai-compatible", makeFake: makeOpenAIFake, undeclared: ["add_dirs", "budget", "containment", "deny_tools", "env", "tools_allow", "approvals=deny", "mcp=inherit", "settings_sources=inherit", "settings_sources=project", "tools=inherit"] });
