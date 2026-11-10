@@ -87,7 +87,7 @@ function checkPasses(file) {
 test("intent gate page opens with the question as its h1 and explains Approve and Revise", () => {
   const { text } = exampleIntentGate();
   const lines = text.split("\n");
-  assert.match(lines[0], /^Is the “Callers can cap how long a slug gets” plan ready to implement\?$/);
+  assert.match(lines[0], /^Is this plan ready to implement\?$/);
   assert.ok(text.includes("Approve unlocks implementation"), text.slice(0, 600));
   assert.ok(text.includes("Send it back returns the plan to planning with your note"));
 });
@@ -220,7 +220,7 @@ test("the page passes the curator artifact check, in the example and the demo fi
     gate: "intent",
   });
   checkPasses(demo.file);
-  assert.match(demo.text.split("\n")[0], /^Is the “.+” plan ready to implement\?$/);
+  assert.match(demo.text.split("\n")[0], /^Is this plan ready to implement\?$/);
   assert.ok(demo.html.indexOf("Redelivery honours") < firstRawDetails(demo.html));
   assert.ok(demo.html.indexOf('id="access"') < demo.html.indexOf("data-plan-question="), "access is folded background, before the decision");
   assert.ok(!/^(#|\||\[ \]|\{")/m.test(demo.text));

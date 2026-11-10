@@ -266,13 +266,6 @@ function clause(text, max) {
   return first.length <= max ? first : `${first.slice(0, max).replace(/\s+\S*$/, "")}…`;
 }
 const stepTitle = (text) => clause(text.replace(/^CONDITIONAL on D-\d{3,}[.,]?\s*/, ""), 60);
-// A subject for the h1: whole words only, no trailing joiner, no ellipsis.
-function shortGoal(text) {
-  const first = String(text).replace(/[`*_]/g, "").trim().split(/[.;:]\s|,\s|\s—\s|\.$/)[0].trim();
-  let s = first;
-  if (s.length > 70) s = s.slice(0, 71).replace(/\s+\S*$/, "");
-  return s.replace(/(?:\s+(?:a|an|the|of|to|from|in|on|for|and|or|with|by|at))+$/i, "");
-}
 
 function meter(parts, label) {
   const total = parts.reduce((s, [, k]) => s + k, 0);
@@ -610,7 +603,7 @@ ${cards}
   const doneHtml = esc(done).replace(/\bD-\d+\b/g, (id) => `<abbr title="decision ${id}">${id}</abbr>`);
 
   let h1;
-  if (isIntent) h1 = `Is the “${esc(shortGoal(title || (hasGoal ? goalText : ref)))}” plan ready to implement?`;
+  if (isIntent) h1 = title ? `Is the “${esc(title)}” plan ready to implement?` : "Is this plan ready to implement?";
   else if (n === 1) {
     const q = String(gate.decisions[0].question || "").trim();
     h1 = inl(/\?$/.test(q) ? q : `${q.replace(/[.!:\s]+$/, "")}?`);
