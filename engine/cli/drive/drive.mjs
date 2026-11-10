@@ -19,6 +19,8 @@ import { ACCESS_DEGRADED_OPTIONS, ACCESS_DEGRADED_DETAILS, ACCESS_DEGRADED_NO_RE
 import {
   validateDriveProfile, buildChildSettings, buildChildArgs, buildChildEnv, versionAtLeast, MIN_CLAUDE_VERSION,
 } from "./profile.mjs";
+import { killAllBoxes } from "./hostbox.mjs";
+import { checkImplementFlags, loadImplementDeps, runImplementStep } from "./implement.mjs";
 
 const DRIVEN_STAGES = ["intake", "research", "plan"];
 const STAGE_OUTPUTS = {
@@ -33,6 +35,7 @@ const REQUIRED_HEADINGS = {
 export const DEFAULT_MODEL = "claude-sonnet-5-5";
 export const DEFAULT_BUDGET_USD = 5;
 const BUDGET_FLOOR_USD = 0.1;
+const IMPLEMENT_BUDGET_FLOOR_USD = 0.5;
 const MAX_REPO_ARCHIVE_BYTES = 200 * 1024 * 1024;
 const MANIFEST_CAP = 256 * 1024;
 const ARTIFACT_CAP = 1024 * 1024;
@@ -97,6 +100,7 @@ function pidAlive(pid) {
 
 function cleanupSync() {
   killGroup("SIGKILL");
+  killAllBoxes("SIGKILL");
   try { if (ST.lockFile && readFileSync(ST.lockFile, "utf8") === String(process.pid)) rmSync(ST.lockFile); } catch { /* lock already gone */ }
   try { if (ST.keyFile) rmSync(ST.keyFile, { force: true }); } catch { /* key file already gone */ }
   try { if (ST.sroot) forceRemove(ST.sroot); } catch { /* sandbox root already gone */ }
@@ -496,7 +500,7 @@ function curatorStateDirFor(E) {
   return join(realpathSync(existing), ...tail);
 }
 
-function stopForHuman(E, ctx, stage, blockers) {
+function stopForHuman(E, ctx, stage, blockers, extra = {}) {
   const { runId, runDir } = ctx;
   const noteHtml = `<p class="sub">${E.escapeHtml(INTENT_NOTE)}</p>\n${envPanel(E, runDir)}`;
   const html = E.renderGateArtifact({ runId, runDir }, {
@@ -519,6 +523,7 @@ function stopForHuman(E, ctx, stage, blockers) {
     next_step: process.env.DETENT_VERB
       ? "answer the gate with detent decide (or detent approve / detent revise at your own terminal), then detent continue"
       : `answer in curator${url ? ` (${url})` : ` (open ${html})`}, then run: detent drive --run ${runId}`,
+    ...extra,
   });
 }
 
@@ -657,6 +662,15 @@ export async function cmdDrive(flags, E) {
   if (flags["allow-ship"] !== undefined) {
     E.refuse("--allow-ship is not supported: drive never runs the ship stage", "run implement and ship yourself, interactively, after reviewing the run");
   }
+  const badImplement = Object.keys(flags).some((k) => k.startsWith("implement=")) || (flags.implement !== undefined && flags.implement !== true);
+  if (badImplement) E.out({ ok: false, reason: "implement_flag_invalid", next_step: "--implement takes no value: detent drive --run <id> --implement" }, 2);
+  let implement = null;
+  if (flags.implement === true) {
+    const deps = await loadImplementDeps();
+    const refusal = checkImplementFlags({ platform: deps.platform, env: process.env });
+    if (refusal) E.out({ ok: false, ...refusal }, 2);
+    implement = { deps };
+  }
   const repoArg = E.repoOf(flags);
   const { runId, runDir } = E.findRun(repoArg, flags);
   const run = E.readJson(join(runDir, "run.json"));
@@ -698,6 +712,7 @@ export async function cmdDrive(flags, E) {
     if (ST.stopping) { cleanupSync(); process.exit(code); }
     ST.stopping = true;
     killGroup("SIGKILL");
+    killAllBoxes("SIGKILL");
     await new Promise((r) => setTimeout(r, 200));
     let tampered = false;
     try { tampered = !(ST.tracker && ST.tracker.verify().ok); } catch { tampered = true; }
@@ -723,7 +738,7 @@ export async function cmdDrive(flags, E) {
   }
 
   // Curator answers are collected only here, before any child exists.
-  if (E.loadDecisions(runDir).some((d) => d.status === "pending")) {
+  if (E.loadDecisions(runDir).some((d) => d.status === "pending" || E.isUnresolvedJudgment(d))) {
     let d;
     try {
       d = E.drainCuratorFor(runId, runDir);
@@ -755,6 +770,28 @@ export async function cmdDrive(flags, E) {
     const next = nextAction(E, status, decisions, runDir);
     if (next.action === "done") return stopOk(E, ctx, "done", { stage: null, next_step: "all stages are done" });
     if (next.action === "needs_human") return stopForHuman(E, ctx, next.stage, next.blockers);
+    if (next.action === "before_implement" && implement) {
+      if (budget - ctx.spent < IMPLEMENT_BUDGET_FLOOR_USD) {
+        return stopOk(E, ctx, "budget", {
+          stage: next.stage, next_step: `spent ${round(ctx.spent)} of ${budget} USD, and --implement needs at least ${IMPLEMENT_BUDGET_FLOOR_USD}: raise it with --budget <usd>`,
+        });
+      }
+      ctx.steps++;
+      ST.step = ctx.steps;
+      ST.last = { stage: "implement" };
+      const o = await runImplementStep({
+        E, ctx, deps: implement.deps, stepN: ctx.steps, sroot: ST.sroot, sandboxTop, claudeBin, model, timeoutSec, maxTurns, base,
+        curatorStateDir: curatorStateDirFor(E), engineFile: E.engineFile, forceRemove, lockedDown,
+        runChild: async (...a) => { try { return await runChild(...a); } finally { ST.activeChild = null; } },
+        makeTracker: () => { ST.tracker = makeTracker(E, ctx); return ST.tracker; },
+        addSpend: (cost, turns) => { ctx.spent += cost; ctx.turns += turns; },
+        setLast: (patch) => { ST.last = { ...ST.last, ...patch }; },
+      });
+      if (ST.stopping) await new Promise(() => {});
+      if (o.kind === "fail") return stopFail(E, ctx, o.reason, o.next_step, { stage: "implement", detail: o.detail, extra: o.extra });
+      if (o.kind === "ok") return stopOk(E, ctx, o.stopped, o.fields);
+      return stopForHuman(E, ctx, "implement", o.blockers, o.extra);
+    }
     if (next.action === "before_implement") {
       return stopOk(E, ctx, "before_implement", {
         stage: next.stage,

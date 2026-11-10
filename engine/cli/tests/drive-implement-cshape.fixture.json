@@ -1,0 +1,25 @@
+{
+ "note": "Measured from real claude 2.1.x with sandbox enabled; home path sanitised. Each wrapped string is the second argv of the shell.",
+ "samples": [
+  {
+   "command": "echo \"it's a 'test'\" | tr a-z A-Z",
+   "wrapped": "source /Users/u/.claude/shell-snapshots/snapshot-bash-1793873572323-sm1qls.sh 2>/dev/null || true && export TMPDIR=/tmp/claude-502 && export GIT_CONFIG_PARAMETERS=\"${GIT_CONFIG_PARAMETERS:+${GIT_CONFIG_PARAMETERS} }'credential.http://127.0.0.1:56106.helper='\" && shopt -u extglob 2>/dev/null || true && { \\builtin unalias -- 'which'; \\builtin unset -f -- 'which'; } >/dev/null 2>&1 || true && { \\builtin unalias -- 'unsetenv'; \\builtin unset -f -- 'unsetenv'; } >/dev/null 2>&1 || true && eval 'echo \"it'\"'\"'s a '\"'\"'test'\"'\"'\" | tr a-z A-Z' < /dev/null && pwd -P >| /tmp/claude-502/cwd-21a5"
+  },
+  {
+   "command": "printf '%s\\n' $HOME && ls -d /tmp",
+   "wrapped": "source /Users/u/.claude/shell-snapshots/snapshot-bash-1793873572323-sm1qls.sh 2>/dev/null || true && export TMPDIR=/tmp/claude-502 && export GIT_CONFIG_PARAMETERS=\"${GIT_CONFIG_PARAMETERS:+${GIT_CONFIG_PARAMETERS} }'credential.http://127.0.0.1:56106.helper='\" && shopt -u extglob 2>/dev/null || true && { \\builtin unalias -- 'which'; \\builtin unset -f -- 'which'; } >/dev/null 2>&1 || true && { \\builtin unalias -- 'unsetenv'; \\builtin unset -f -- 'unsetenv'; } >/dev/null 2>&1 || true && eval 'printf '\"'\"'%s\\n'\"'\"' $HOME && ls -d /tmp' < /dev/null && pwd -P >| /tmp/claude-502/cwd-03f9"
+  },
+  {
+   "command": "cat <<'EOF'\nline one $X\nEOF",
+   "wrapped": "source /Users/u/.claude/shell-snapshots/snapshot-bash-1793873572323-sm1qls.sh 2>/dev/null || true && export TMPDIR=/tmp/claude-502 && export GIT_CONFIG_PARAMETERS=\"${GIT_CONFIG_PARAMETERS:+${GIT_CONFIG_PARAMETERS} }'credential.http://127.0.0.1:56106.helper='\" && shopt -u extglob 2>/dev/null || true && { \\builtin unalias -- 'which'; \\builtin unset -f -- 'which'; } >/dev/null 2>&1 || true && { \\builtin unalias -- 'unsetenv'; \\builtin unset -f -- 'unsetenv'; } >/dev/null 2>&1 || true && eval 'cat <<'\"'\"'EOF'\"'\"'\nline one $X\nEOF' && pwd -P >| /tmp/claude-502/cwd-ac45"
+  }
+ ],
+ "setup": {
+  "env": [
+   "-c",
+   "env"
+  ],
+  "snapshotHead": "SNAPSHOT_FILE=/Users/u/.claude/shell-snapshots/snapshot-bash-1793873572323-sm1qls.sh\n      source \"/Users/u/.bashrc\" < /dev/null\n      \n\n      # First, create/clear the snapshot file\n      echo \"# Snapshot file\" >| \"$SNAPSHOT_FILE\"\n\n      # When this file is sourced, we first unalias to avoid conflicts",
+  "snapshotTail": "# Exit silently on success, only report errors\n      if [ ! -f \"$SNAPSHOT_FILE\" ]; then\n        echo \"Error: Snapshot file was not created at $SNAPSHOT_FILE\" >&2\n        exit 1\n      fi\n    "
+ }
+}

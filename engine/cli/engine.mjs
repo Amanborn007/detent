@@ -458,6 +458,7 @@ function nextDecisionId(decisions) {
 // resolved: that answer is legal only for an external/infra/capability/data
 // unblock, never a bypass of the owner's own call.
 function isUnresolvedJudgment(d) {
+  if (d.status === "answered" && Array.isArray(d.blocking_answers) && d.blocking_answers.includes(d.answer)) return true;
   return d.cause === "judgment" && typeof d.answer === "string" &&
     d.answer.trim().toLowerCase() === PROCEED_DEGRADED_ANSWER;
 }
@@ -1441,7 +1442,7 @@ const ENGINE_ROOT = resolve(dirname(ENGINE_FILE), "..");
 function driveInjection() {
   return {
     STAGES, STAGE_ARTIFACTS, STAGE_END_GATES, out, refuse, fail, nowIso, readJson, appendEvent, detentRoot, repoOf, findRun,
-    loadStatus, loadDecisions, saveDecisions, nextDecisionId, pendingBlockers, syncGateAnsweredEvents, beginStage, endStage,
+    loadStatus, loadDecisions, saveDecisions, nextDecisionId, pendingBlockers, isUnresolvedJudgment, syncGateAnsweredEvents, beginStage, endStage,
     raiseEndGate, renderGateArtifact, drainCuratorFor, collectResult, siblingCurator, escapeHtml, parseYamlSubset, runExec,
     isUnresolvedJudgment, engineFile: ENGINE_FILE,
   };
@@ -2505,7 +2506,7 @@ function waitingDecision(runDir) {
   const stage = STAGES.find((s) => !["done", "skipped"].includes(status.stages[s].status));
   const blockers = stage ? pendingBlockers(decisions, stage) : [];
   const blocked = stage ? decisions.filter((d) => (status.stages[stage].blocked_on || []).includes(d.id) && d.status === "pending") : [];
-  return blockers[0] || blocked[0] || decisions.find((d) => d.status === "pending") || null;
+  return blockers[0] || blocked[0] || decisions.find((d) => d.status === "pending" || isUnresolvedJudgment(d)) || null;
 }
 
 const hasApproveRevise = (d) => Array.isArray(d.options) && d.options.includes("approve") && d.options.includes("revise");
@@ -2536,7 +2537,7 @@ function cmdDecide(flags) {
   writeFileSync(feedback, p.stdout.trim().split("\n").pop());
   const collected = selfJson(["gate", "collect", "--run", runId, "--repo", repo, "--file", feedback]);
   if (!collected.json.ok) relay(collected);
-  const stillPending = loadDecisions(runDir).filter((d) => d.status === "pending").map((d) => d.id);
+  const stillPending = loadDecisions(runDir).filter((d) => d.status === "pending" || isUnresolvedJudgment(d)).map((d) => d.id);
   out({
     ok: true, ...info, answered: collected.json.answered, unresolved: collected.json.unresolved, pending: stillPending,
     next_step: stillPending.length
@@ -3255,7 +3256,7 @@ function cmdHelp() {
       "stage end": "engine stage end <stage> [--run <id>] [--repo <path>] — finish a stage (checks artifact + gates). implement: [--tdd-test <name> --tdd-red <sha> --tdd-green <sha> | --tdd-exempt <reason>] records the tdd block (implement records, never judges). recheck: asserts red_sha is an ancestor of green_sha via git cat-file/merge-base, proving ORDER only, never that the test was observed failing.",
       "gate open": "engine gate open <gate-name-or-decision-id> [--run <id>] [--repo <path>] — render a pending human gate; with the bundled curator CLI present it writes <DETENT_ROOT>/.plans/<run>-<gate>.html (one data-plan-question block per pending decision, stage artifacts embedded) and prints `curator open` then `engine gate collect`",
       "gate collect": "engine gate collect --run <id> [--file <feedback.json>] — non-blocking: map curator answers into decisions.json (only an exact decision option resolves one; null/other answers stay pending and are listed under `unresolved`); selection/prompt feedback is appended to <run>/review-feedback.jsonl. Without --file it runs `curator drain` for the run's gate pages only.",
-      "drive": "engine drive --run <id> [--stack <path>] [--budget 5] [--model claude-sonnet-5-5] [--max-steps 12] [--child-timeout-sec 3600] [--profile <file>] [--claude-bin <b>] — experimental (macOS/Linux, spends Claude credit): runs intake, research and plan with one contained `claude -p --restricted` child per stage (file tools only, no Bash, allowlisted env, read-only repo export, outbox validated by drive), then always stops: at the plan gate or a decision (stopped:needs_human), at before_implement, at --max-steps, at --budget, or on a failure (state_tampered, outbox_rejected, secret_detected, child_*). Child text goes to <run>/drive-last.json, never stdout. --allow-ship is refused; implement and ship stay interactive.",
+      "drive": "engine drive --run <id> [--stack <path>] [--budget 5] [--model claude-sonnet-5-5] [--max-steps 12] [--child-timeout-sec 3600] [--profile <file>] [--claude-bin <b>] [--implement] — experimental (macOS/Linux, spends Claude credit): runs intake, research and plan with one contained `claude -p --restricted` child per stage (file tools only, no Bash, allowlisted env, read-only repo export, outbox validated by drive), then always stops: at the plan gate or a decision (stopped:needs_human), at before_implement, at --max-steps, at --budget, or on a failure (state_tampered, outbox_rejected, secret_detected, child_*). Child text goes to <run>/drive-last.json, never stdout. --allow-ship is refused; ship stays interactive. --implement (macOS only, experimental, per invocation, OAuth login only, refuses ANTHROPIC_API_KEY) also runs a sandboxed Bash implement child after the plan is approved: orchestration is tested, the live sandbox is not. It needs a verify command recorded with engine env --verify, exports the child's commits as a bundle, verifies them in a no-network box, imports them into detent/<run>, writes recheck.md and stops for your review.",
       "runtime run": "engine runtime run [--runtime <name>] [--bin <path>] — run one prompt through a model runtime (default claude-code; also openai-compatible; --runtime beats DETENT_RUNTIME). Request JSON on stdin (prompt, cwd, output, tools, mcp, settings are required; schema in engine/runtime/CONTRACT.md). Prints one JSON line {ok:true, ...response} and exits 0 for stop ok|budget|turns, exits 1 {ok:false, reason, next_step, response} for stop error|timeout, and exits 2 for bad JSON, an unknown field, an unknown runtime, a field the runtime does not declare, or missing runtime config",
       "runtime capabilities": "engine runtime capabilities [--runtime <name>] — print what the runtime declares it can do; a request field outside that is refused, never dropped",
       "socket call": "engine socket call <name> [--payload-file <json>] [--stack <path>] — dispatch a socket per stack.yaml",
