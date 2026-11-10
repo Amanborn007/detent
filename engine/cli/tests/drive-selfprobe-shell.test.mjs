@@ -8,6 +8,9 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+
+const { REFUSE_EXIT } = createRequire(import.meta.url)("../drive/sandbox-shim/shim.cjs");
 
 const load = () => import("../drive/selfprobe.mjs");
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -45,12 +48,12 @@ test("the shell shim never reads configuration from the environment", async () =
   assert.ok(!/process\.env/.test(src));
 });
 
-test("a shell that can write the sentinel is not sandboxed: it passes through and is not counted", async () => {
+test("a shell that can write the sentinel is not sandboxed: it refuses, runs nothing and is not counted", async () => {
   const m = await load();
   const ctx = setup(m, { sandboxed: false });
   const r = run(ctx, "echo plain; exit 2");
-  assert.equal(r.status, 2);
-  assert.equal(r.stdout.trim(), "plain");
+  assert.equal(r.status, REFUSE_EXIT);
+  assert.equal(r.stdout, "");
   assert.equal(m.readShimReport(ctx.dir, { mode: "shell" }).calls, 0);
   m.uninstallShim(ctx.dir);
 });

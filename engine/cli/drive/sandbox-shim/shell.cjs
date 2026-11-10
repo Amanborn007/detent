@@ -69,7 +69,7 @@ function logSetup(kind) {
 function main() {
   const kind = setupKind();
   if (kind) { logSetup(kind); return runReal(); }
-  if (!sandboxed()) return runReal();
+  if (!sandboxed()) return refuse("this call ran outside the sandbox, so it was not run");
   const ci = argv.indexOf("-c");
   if (ci < 0 || typeof argv[ci + 1] !== "string") return refuse("the shim shell only runs `-c <command>`");
   const cmd = argv[ci + 1];
