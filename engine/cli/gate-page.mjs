@@ -145,6 +145,18 @@ function matchCriteria(criteria, rows) {
 // A decision can block a name that is not a stage ("pr"); it belongs to the stage that pushes.
 const STAGE_FOR_BLOCK = { pr: "ship" };
 
+const stageNames = (list) => (list.length > 1 ? `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}` : list[0]);
+const stageNoun = (list) => `${stageNames(list)} stage${list.length > 1 ? "s" : ""}`;
+
+// Distinct stages a set of blocks names, in pipeline order; unknown names go last in first-seen order.
+function orderedStages(blocks, stages) {
+  const names = [...new Set(blocks.map((b) => STAGE_FOR_BLOCK[b] || b))];
+  const rank = (n) => (stages.includes(n) ? stages.indexOf(n) : stages.length);
+  return names.map((n, i) => ({ n, i })).sort((a, b) => rank(a.n) - rank(b.n) || a.i - b.i).map((x) => x.n);
+}
+
+const blockedStages = (decisions, stages) => orderedStages(decisions.flatMap((d) => d.blocks || []), stages);
+
 function resolveStage(gate, stages) {
   const candidates = [gate.stage, ...gate.decisions.flatMap((d) => [...(d.blocks || []), d.raised_by])];
   for (const c of candidates) {
@@ -265,9 +277,11 @@ export function buildGatePage(run, gate, model) {
     ask = "Answer every question below; your answers decide whether the engine will push the branch and open a draft pull request.";
     next = "Nothing is pushed until every question here is answered, then the engine pushes the branch and opens a draft pull request.";
   } else {
-    verdict = `You are answering ${n} open question${n === 1 ? "" : "s"} that block the ${esc(stage)} stage for ${ticketLabel}.`;
-    ask = `Answer the ${n === 1 ? "question" : `${n} questions`} below so the ${stage} stage can start.`;
-    next = `The ${stage} stage does not start until every question on this page is answered, then the run continues.`;
+    const blocked = blockedStages(gate.decisions, stages);
+    const blockedList = blocked.length ? blocked : [stage];
+    verdict = `You are answering ${n} open question${n === 1 ? "" : "s"} that block the ${esc(stageNoun(blockedList))} for ${ticketLabel}.`;
+    ask = `Answer the ${n === 1 ? "question" : `${n} questions`} below so the ${esc(blockedList[0])} stage can start.`;
+    next = `The ${esc(blockedList[0])} stage does not start until every question on this page is answered, then the run continues.`;
   }
 
   let access = "";
@@ -400,10 +414,10 @@ export function buildGatePage(run, gate, model) {
     if (recObj && !(d.options || []).includes(recObj.key)) throw new Error(`${d.id}: recommended.key ${JSON.stringify(recObj.key)} is not one of the options`);
     const rec = recObj ? recObj.key : null;
     const details = d.option_details || {};
-    const blocks = [...new Set((d.blocks || []).map((b) => STAGE_FOR_BLOCK[b] || b))];
+    const blocks = orderedStages(d.blocks || [], stages);
     const whyNow = intentOpts ? "Implementation cannot start until the plan is approved or sent back."
       : d.why_now ? d.why_now
-      : blocks.length ? `The ${blocks.join(" and ")} stage cannot start until this is answered.` : "The run is waiting on this answer.";
+      : blocks.length ? `The ${stageNoun(blocks)} cannot start until this is answered.` : "The run is waiting on this answer.";
     const attrs = rec ? `data-plan-recommended="${esc(rec)}"`
       : `data-plan-no-recommendation="${esc(intentOpts ? INTENT_NO_RECOMMENDATION : d.no_recommendation || "the engine has no recommendation for this question")}"`;
     const cards = (d.options || []).map((o) => {

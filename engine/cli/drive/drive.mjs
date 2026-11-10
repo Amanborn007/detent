@@ -14,6 +14,7 @@ import { join, dirname, resolve } from "node:path";
 import { readOutbox, validateDecisions, secretScan } from "./outbox.mjs";
 import { createStateTracker } from "./integrity.mjs";
 import { resolveStateDir } from "../../curator/auth.mjs";
+import { checkDecisionRecord } from "../../curator/contract.mjs";
 import { optionKey } from "../../handoff/handoff.mjs";
 import { ACCESS_DEGRADED_OPTIONS, ACCESS_DEGRADED_DETAILS, ACCESS_DEGRADED_NO_RECOMMENDATION } from "./access-degraded.mjs";
 import {
@@ -599,17 +600,22 @@ function validAccessReport(buf) {
   return null;
 }
 
+const PROSE_ARTIFACTS = new Set(["brief.md", "research.md", "plan/plan.md"]);
+const escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// A child cites decisions as D-<manifest key>; only drive knows the ids it assigns.
+function rewriteDecisionRefs(buf, idByKey) {
+  if (idByKey.size === 0) return buf;
+  const keys = [...idByKey.keys()].sort((a, b) => b.length - a.length).map(escapeRe);
+  const re = new RegExp(`(?<![\\w-])D-(${keys.join("|")})(?![\\w-])`, "g");
+  return Buffer.from(buf.toString("utf8").replace(re, (_m, key) => idByKey.get(key)));
+}
+
 function applyOutbox(E, ctx, stage, ro, normalized) {
   const { runDir } = ctx;
-  for (const [rel, buf] of ro.files) {
-    let data = buf;
-    if (rel === "plan/plan.md") {
-      data = Buffer.concat([buf, Buffer.from(`\n\n## Intent check\n\n${INTENT_NOTE}. A human reviews the plan against the brief at the gate.\n`)]);
-    }
-    writeAtomic(join(runDir, rel), data);
-  }
   const decisions = E.loadDecisions(runDir);
   const raised = [];
+  const idByKey = new Map();
   for (const d of normalized) {
     const rec = {
       id: E.nextDecisionId(decisions), raised_by: stage, blocks: d.blocks, question: d.question, options: d.options,
@@ -620,6 +626,14 @@ function applyOutbox(E, ctx, stage, ro, normalized) {
     };
     decisions.push(rec);
     raised.push(rec.id);
+    idByKey.set(d.key, rec.id);
+  }
+  for (const [rel, buf] of ro.files) {
+    let data = PROSE_ARTIFACTS.has(rel) ? rewriteDecisionRefs(buf, idByKey) : buf;
+    if (rel === "plan/plan.md") {
+      data = Buffer.concat([data, Buffer.from(`\n\n## Intent check\n\n${INTENT_NOTE}. A human reviews the plan against the brief at the gate.\n`)]);
+    }
+    writeAtomic(join(runDir, rel), data);
   }
   if (stage === "plan" && ro.files.has("plan/plan.md") && existsSync(join(runDir, "access-report.json"))) {
     const rows = JSON.parse(readFileSync(join(runDir, "access-report.json"), "utf8"));
@@ -895,6 +909,14 @@ export async function cmdDrive(flags, E) {
     }
     const nd = validateDecisions(ro.manifest.decisions, { stage, stages: E.STAGES });
     if (!nd.ok) return quarantineAndFail("outbox_rejected", "decisions failed validation; quarantined", `${nd.reason}: ${nd.detail}`, { code: nd.reason });
+
+    for (const d of nd.decisions) {
+      const { errors } = checkDecisionRecord(d, { level: "error" });
+      if (errors.length) {
+        return quarantineAndFail("outbox_rejected", "a decision fails the curator decision contract; quarantined. See engine/stages/DRIVEN.md for the rules",
+          `decision ${JSON.stringify(d.key)}: ${errors.map((e) => `${e.id} ${e.msg}`).join("; ")}`, { code: "decision_contract" });
+      }
+    }
 
     applyOutbox(E, ctx, stage, ro, nd.decisions);
     forceRemove(io.stepDir);

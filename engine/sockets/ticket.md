@@ -32,6 +32,8 @@ then surfaced) · `2` contract violation (engine halts and asks the user).
   "title": "string",
   "status": "string — open | in_progress | closed | merged (provider maps its states)",
   "body_excerpt": "string — first ~400 chars, whitespace-normalized",
+  "body": "optional string — the full ticket text, whitespace preserved, capped by the adapter (gh-ticket caps at 20000 chars)",
+  "body_truncated": "optional true — present only when the adapter cut body at its cap",
   "url": "string — human-clickable link",
   "next_step": "string — hint for the calling agent"
 }
@@ -49,8 +51,9 @@ Response (exit 0):
   "title": "Retry delay drifts when endpoint returns Retry-After of 0",
   "status": "open",
   "body_excerpt": "Subscribers see redelivery delay off by up to 1 second. Repro: register an endpoint that returns Retry-After: 0...",
+  "body": "Subscribers see redelivery delay off by up to 1 second.\n\nRepro: register an endpoint that returns Retry-After: 0 ...",
   "url": "https://github.com/acmeco/deliveries/issues/482",
-  "next_step": "feed this ticket JSON to the research stage; fetch the full body from url if the excerpt is truncated"
+  "next_step": "feed this ticket JSON to the research stage; body holds the full ticket text"
 }
 ```
 
