@@ -115,3 +115,10 @@ test("docs state the user's git identity, the eval-quoted match and the missing 
   }
   for (const code of ["git_identity_missing", "git_identity_invalid"]) assert.ok(ref.includes(code), `REFERENCE.md lacks ${code}`);
 });
+
+test("docs list the verify and host box stops and say a negative gate answer keeps blocking", () => {
+  const sec = read("SECURITY.md");
+  const ref = read("docs/REFERENCE.md");
+  for (const code of ["verify_failed", "hostbox_failed", "run_base_invalid"]) assert.ok(ref.includes(code), `REFERENCE.md lacks ${code}`);
+  assert.match(sec, /negative answer[^]{0,200}(keeps|still)[^]{0,100}block/i, "SECURITY.md: a negative gate answer keeps blocking");
+});
