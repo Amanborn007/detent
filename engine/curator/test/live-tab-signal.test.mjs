@@ -74,7 +74,8 @@ test('last_seen_at is not restored after a daemon restart and is not written to 
   writeFileSync(file, '<!DOCTYPE html><html><body>x</body></html>');
   const a = new SessionStore({ stateFile });
   const s = a.open(file);
-  a.markSeen(s.key, Date.now(), { flush: true });
+  a.markSeen(s.key, Date.now());
+  a.flush();
   assert.ok(!('lastSeenAt' in Object.values(JSON.parse(readFileSync(stateFile, 'utf8')).sessions)[0]));
   const b = new SessionStore({ stateFile });
   b.loadState();

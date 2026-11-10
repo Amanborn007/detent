@@ -39,7 +39,7 @@ function boot({ hash = '#c=C1&r=R1' } = {}) {
   return { calls, fire, document };
 }
 
-test('becoming visible or hidden sends a tick straight away', () => {
+test('becoming visible sends a tick straight away, hidden does not', () => {
   const p = boot();
   p.calls.length = 0;
   p.document.visibilityState = 'hidden';
@@ -47,7 +47,7 @@ test('becoming visible or hidden sends a tick straight away', () => {
   p.document.visibilityState = 'visible';
   p.fire('visibilitychange');
   const ticks = p.calls.filter((c) => c.url.startsWith('/api/updates?s=abc'));
-  assert.equal(ticks.length, 2);
+  assert.equal(ticks.length, 1);
 });
 
 test('pagehide posts a keepalive gone signal carrying the cap', () => {
@@ -56,7 +56,7 @@ test('pagehide posts a keepalive gone signal carrying the cap', () => {
   p.fire('pagehide');
   assert.equal(p.calls.length, 1);
   const c = p.calls[0];
-  assert.equal(c.url, '/api/gone?s=abc');
+  assert.match(c.url, /^\/api\/gone\?s=abc&p=[A-Za-z0-9_-]+$/);
   assert.equal(c.method, 'POST');
   assert.equal(c.keepalive, true);
   assert.equal(c.headers['X-Curator-Cap'], 'C1');

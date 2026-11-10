@@ -141,7 +141,7 @@ test('lastSeenAt does not survive a daemon restart', () => {
   const store = new SessionStore({ stateFile });
   const file = artifact();
   store.open(file);
-  store.markSeen(file, 1234567890000, { flush: true });
+  store.markSeen(file, 1234567890000);
   const again = new SessionStore({ stateFile });
   again.loadState();
   assert.equal(again.get(file).lastSeenAt, null);
