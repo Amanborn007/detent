@@ -21,7 +21,10 @@ export const ENDED_NEXT_STEP =
 export const IDLE_SHUTDOWN_MS = 60 * 60 * 1000; // 60 min with no poll waiter and no request
 export const HEARTBEAT_MS = 15 * 1000;
 const DELIVERED_CAP = 500;
-const SEEN_FLUSH_MS = 5000;
+const LEGACY_PAGE = '_legacy';
+const PAGE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const PAGE_TTL_MS = 5 * 60 * 1000;
+const GONE_CAP = 50;
 
 export function idleMsFromEnv(env = process.env) {
   if (env.CURATOR_IDLE_MS === undefined || env.CURATOR_IDLE_MS === '') return IDLE_SHUTDOWN_MS;
@@ -81,6 +84,8 @@ export class SessionStore {
       waiters: [],
       delivered: existing ? existing.delivered : [],
       lastSeenAt: null,
+      pages: new Map(),
+      gonePages: new Set(),
     };
     this.sessions.set(key, session);
     this.flush();
@@ -105,7 +110,7 @@ export class SessionStore {
       if (s.pending.length === 0) continue;
       const target = data.sessions[key] ||= {
         id: s.id, file: s.file, createdAt: s.createdAt, pending: [], ended: s.ended, endedBy: s.endedBy,
-        chat: s.chat, delivered: s.delivered, lastSeenAt: s.lastSeenAt,
+        chat: s.chat, delivered: s.delivered,
       };
       for (const item of s.pending) {
         if (!target.pending.some((p) => JSON.stringify(p) === JSON.stringify(item))) target.pending.push(item);
@@ -143,12 +148,29 @@ export class SessionStore {
     this.flush();
   }
 
-  markSeen(key, now = Date.now(), { flush = false } = {}) {
+  // In memory only: a tab's cap is bound to this boot, so a restored value would outlive its tab.
+  // lastSeenAt is the newest tick over live pages; pageId null means an older shell that sends none.
+  markSeen(key, now = Date.now(), pageId = null) {
     const session = this.get(key);
     if (!session) return;
-    const due = flush || session.lastSeenAt === null || now - session.lastSeenAt >= SEEN_FLUSH_MS;
-    session.lastSeenAt = now;
-    if (due) this.flush();
+    const id = pageId === null ? LEGACY_PAGE : pageId;
+    if (!PAGE_ID_RE.test(id) || session.gonePages.has(id)) return;
+    for (const [p, t] of session.pages) if (now - t > PAGE_TTL_MS) session.pages.delete(p);
+    session.pages.set(id, now);
+    session.lastSeenAt = Math.max(...session.pages.values());
+  }
+
+  markGone(key, pageId = null) {
+    const session = this.get(key);
+    if (!session) return;
+    const id = pageId === null ? LEGACY_PAGE : pageId;
+    if (!PAGE_ID_RE.test(id)) return;
+    session.pages.delete(id);
+    if (id !== LEGACY_PAGE) {
+      session.gonePages.add(id);
+      if (session.gonePages.size > GONE_CAP) session.gonePages.delete(session.gonePages.values().next().value);
+    }
+    session.lastSeenAt = session.pages.size ? Math.max(...session.pages.values()) : null;
   }
 
   getById(id) {
@@ -324,7 +346,6 @@ export class SessionStore {
         endedBy: s.endedBy,
         chat: s.chat,
         delivered: s.delivered,
-        lastSeenAt: s.lastSeenAt,
       };
     }
     const data = { ...this.meta, updatedAt: new Date().toISOString(), sessions };
@@ -352,7 +373,9 @@ export class SessionStore {
         version: 0,
         waiters: [],
         delivered: s.delivered || [],
-        lastSeenAt: typeof s.lastSeenAt === 'number' ? s.lastSeenAt : null,
+        lastSeenAt: null,
+        pages: new Map(),
+        gonePages: new Set(),
       });
     }
   }
@@ -586,6 +609,7 @@ export function chromePage(session) {
 (function () {
   'use strict';
   var SID = ${JSON.stringify(sid)};
+  var PID = Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
   var KEYS_KEY = 'curator:keys:' + SID;
   var DRAFT_KEY = 'curator:draft:' + SID;
   var NL = String.fromCharCode(10);
@@ -892,6 +916,20 @@ export function chromePage(session) {
   }
   frame.addEventListener('load', repostMarks);
 
+  // Registered before 'message' because the shell-behavior stub keeps only the last window listener.
+  // A hidden tick could land after pagehide's gone and re-mark a closing page live.
+  window.addEventListener('visibilitychange', function () { if (!noKey && document.visibilityState !== 'hidden') tick(); });
+  // pagehide already sent gone for the old id, and the server ignores ticks from gone ids.
+  window.addEventListener('pageshow', function (e) {
+    if (noKey || !e.persisted) return;
+    PID = Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
+    tick();
+  });
+  window.addEventListener('pagehide', function () {
+    if (noKey) return;
+    fetch('/api/gone?s=' + SID + '&p=' + PID, { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json', 'X-Curator-Cap': CAP }, body: '{}' });
+  });
+
   window.addEventListener('message', function (ev) {
     if (ev.source !== frame.contentWindow) return;
     var d = ev.data;
@@ -1072,7 +1110,7 @@ export function chromePage(session) {
   }
 
   function tick() {
-    api('GET', '/api/updates?s=' + SID + '&since=' + chatVersion).then(function (resp) {
+    api('GET', '/api/updates?s=' + SID + '&p=' + PID + '&since=' + chatVersion).then(function (resp) {
       setOffline(false);
       if (resp.error) { if (!noKey) showError('Curator server said: ' + resp.error); return; }
       chatVersion = resp.version;
@@ -1133,6 +1171,7 @@ export function createServer(store, { secret } = {}) {
     return Boolean(m) && safeEqual(m[1], secret);
   };
   const capOf = (req) => String(req.headers['x-curator-cap'] || '');
+  const pageIdOf = (url) => url.searchParams.get('p');
   const sessionFor = (url) => store.getById(url.searchParams.get('s') || '');
   // An unknown session still compares against a throwaway key so the 401 does not reveal whether it exists.
   const capOk = (session, given) => safeEqual(given, sessionKey(secret, bootId, session ? session.id : '-')) && Boolean(session);
@@ -1203,7 +1242,7 @@ export function createServer(store, { secret } = {}) {
       if (req.method === 'GET' && p === '/api/updates') {
         const session = sessionFor(url);
         if (!capOk(session, capOf(req))) throw unauthorized();
-        store.markSeen(session.key);
+        store.markSeen(session.key, Date.now(), pageIdOf(url));
         let mtime = null;
         try { mtime = fs.statSync(session.file).mtimeMs; } catch (e) { if (e.code !== 'ENOENT') throw e; }
         return sendJson(res, 200, {
@@ -1252,11 +1291,11 @@ export function createServer(store, { secret } = {}) {
       if (req.method === 'POST') {
         const hasBearer = req.headers.authorization !== undefined;
         const hasCap = req.headers['x-curator-cap'] !== undefined;
-        if (!['/api/open', '/api/send', '/api/end', '/api/reply'].includes(p)) {
+        if (!['/api/open', '/api/send', '/api/end', '/api/reply', '/api/gone'].includes(p)) {
           return sendJson(res, 404, { error: `no route: ${req.method} ${p}`, next_step: 'See engine/curator/README.md for the API.' });
         }
         // /api/end serves both callers; the credential presented says which one this is.
-        const browserRoute = p === '/api/send' || (p === '/api/end' && !hasBearer);
+        const browserRoute = p === '/api/send' || p === '/api/gone' || (p === '/api/end' && !hasBearer);
         let session = null;
         if (browserRoute) {
           if (hasBearer) throw unauthorized();
@@ -1284,6 +1323,11 @@ export function createServer(store, { secret } = {}) {
           }
           const opened = store.open(body.file);
           return sendJson(res, 200, { ok: true, sessionId: opened.id, key: opened.key });
+        }
+
+        if (p === '/api/gone') {
+          store.markGone(session.key, pageIdOf(url));
+          return sendJson(res, 200, { ok: true });
         }
 
         if (p === '/api/send') {
