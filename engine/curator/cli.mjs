@@ -412,6 +412,31 @@ async function cmdCheck(args) {
 }
 
 // --- commands ---------------------------------------------------------------
+const TAB_LIVE_MS = 10000;
+
+// A tab ticks /api/updates while open. Any broken /api/status contract opens a duplicate tab with a warning rather than guessing "live".
+async function tabIsLive({ port, secret, file }) {
+  const warn = (why) => {
+    process.stderr.write(`curator: WARNING cannot tell whether a tab is already open for ${file}: ${why}. Opening a new tab.\n`);
+    return false;
+  };
+  let res;
+  try {
+    res = await httpJson({ method: 'GET', port, path: '/api/status', timeoutMs: 5000, secret });
+  } catch (e) {
+    return warn(`GET /api/status failed: ${e.message}`);
+  }
+  if (res.code !== 200) return warn(`GET /api/status returned ${res.code}`);
+  if (!res.json || !Array.isArray(res.json.sessions)) return warn('/api/status has no sessions array');
+  const session = res.json.sessions.find((s) => s.key === file);
+  if (!session) return warn('/api/status has no session for this artifact');
+  if (!('last_seen_at' in session)) return warn('the /api/status session has no last_seen_at field');
+  if (session.last_seen_at === null) return false;
+  const seen = Date.parse(session.last_seen_at);
+  if (Number.isNaN(seen)) return warn(`last_seen_at "${session.last_seen_at}" is not a timestamp`);
+  return Date.now() - seen < TAB_LIVE_MS;
+}
+
 async function cmdOpen(args) {
   const { positionals } = parseArgs(args, {});
   const file = canonicalFile(positionals[0], { mustExist: true });
@@ -435,7 +460,9 @@ async function cmdOpen(args) {
     await stopUntrustedServer(resolved);
     resolved = { status: 'down' };
   }
-  if (resolved.status !== 'running') {
+  // A restarted daemon restores last_seen_at from state.json, so a restored value says nothing about a live tab.
+  const spawned = resolved.status !== 'running';
+  if (spawned) {
     await spawnServer();
     resolved = await resolveServer();
     if (resolved.status !== 'running') {
@@ -444,10 +471,12 @@ async function cmdOpen(args) {
   }
   const { port, secret } = resolved;
   const { code, json } = await httpJson({ method: 'POST', port, path: '/api/open', body: { file }, timeoutMs: 5000, secret });
-  if (code !== 200) fail(json.error || `server error ${code}`, json.next_step);
+  if (code !== 200) fail(json?.error || `server error ${code}`, json?.next_step);
+  if (!json || typeof json.sessionId !== 'string') fail('POST /api/open returned no sessionId', 'Run: curator status');
   const url = browserUrl(port, json.sessionId, secret, resolved.boot);
-  launchBrowser(url);
-  out({ url, key: file, session: json.sessionId, ...checked, ...(warnings.length ? { warnings } : {}), next_step: POLL_HINT(file) });
+  const tab_live = spawned ? false : await tabIsLive({ port, secret, file });
+  if (!tab_live) launchBrowser(url);
+  out({ url, key: file, session: json.sessionId, tab_live, ...checked, ...(warnings.length ? { warnings } : {}), next_step: POLL_HINT(file) });
 }
 
 // `drainTimeoutMs` bounds the running-server long-poll. Left undefined for the
