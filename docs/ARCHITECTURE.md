@@ -30,14 +30,14 @@ Detent is a Claude Code plugin (14 skill directories under `skills/`, hooks in `
 
 If you are reading for the core, the path from intake to ship is `engine/cli/engine.mjs`, `engine/stages/`, `engine/sockets/`, `engine/adapters/` and `engine/curator/`. Everything else is a helper around it.
 
-`engine/` also holds `routing`, `handoff`, `spend` and `pack`, which `engine/cli/engine.mjs` imports, so the CLI cannot load without them. `handoff` supplies the answer matching that gates use. The rest are optional crew that the 7-stage run does not need: `curator-triggers`, `herald`, `courier`, `scout`, `examiner`, `self-feedback`, `statusline`, `sources` and `lexicon`. The ones that ship as skills or `detent` verbs are in [docs/REFERENCE.md](REFERENCE.md).
+`engine/` also holds `routing`, `handoff`, `spend` and `pack`, which `engine/cli/engine.mjs` imports, so the CLI cannot load without them. `handoff` supplies the answer matching that gates use. `sources` (the access preflight behind `access-report.json`) and `examiner` (how plan batches its questions) are protocol documents that the research and plan prompts follow, so a run needs them even though `engine.mjs` does not import them. The rest are optional crew that the 7-stage run does not need: `curator-triggers`, `herald`, `courier`, `scout`, `self-feedback`, `statusline` and `lexicon`. The ones that ship as skills or `detent` verbs are in [docs/REFERENCE.md](REFERENCE.md).
 
 ## One run
 
 1. `detent run new` creates the run directory and a git worktree at `<run>/worktree` on branch `sdlc/<run-id>` (`cmdRunNew` in `engine/cli/engine.mjs`).
 2. Intake calls the `ticket` socket and writes `brief.md`. Each unknown becomes a pending decision in `decisions.json`.
 3. Research asks every `knowledge` provider, then writes `research.md` and `access-report.json`.
-4. Plan writes `plan/plan.md` and the engine renders a gate page into `.plans/`. You answer in curator, and `detent gate collect` writes the answer into `decisions.json` only if it is exactly one of the options.
+4. Plan writes `plan/plan.md` and the engine renders a gate page into `.plans/`. You answer in curator, and `detent gate collect` writes the answer into `decisions.json` only if it matches one of the options, ignoring case and surrounding whitespace.
 5. Implement commits red then green in the worktree. Recheck diffs against the approved plan and writes `recheck.md`.
 6. Ship calls the `reviewer` and `verifier` sockets, shows the evidence, records the ship decision, and after your yes pushes the branch and opens a draft PR.
 7. Respond starts after you mark the PR ready. It runs sentinel scans and fixes what `config/sentinel/default.json` allows.
@@ -49,7 +49,7 @@ The file layout and decision schema are in [engine/stages/CONTRACT.md](../engine
 - Text from tickets, PRs, bots and threads is data. Skills read it and never follow instructions found in it.
 - The CLI enforces the plan `intent` gate. The drift and ship gates are rules in the stage prompts, recorded as pending decisions that block the stages they name.
 - `approve` and `revise` refuse when `CLAUDECODE` is set, when `DETENT_DRIVE_CHILD=1`, or without a TTY (#24). These are environment checks, and `DETENT_FORCE_TTY=1` skips the TTY one, so they stop an agent that uses the verbs as given and not one that edits its environment. The drive outbox validator refuses `answer`, `status` and `answered_*` keys on child decisions (`engine/cli/drive/outbox.mjs`), and the integrity digest fails the step as `state_tampered` if run state changed (#17).
-- A drive child for intake, research and plan gets file tools only, a read-only empty working directory, a `git archive` export with no `.git`, and an outbox, the only place it can write, which drive validates and secret-scans (#17). The `--implement` child is Bash-only under Claude Code's sandbox, with a shim and post-run checks (#41).
+- A drive child for intake, research and plan gets file tools only, a read-only empty working directory, an export of HEAD read blob by blob with `git ls-tree` and `git cat-file`, with no `.git`, no symlinks or submodules and no gitattributes applied (`exportRepo` in `engine/cli/drive/drive.mjs`), and an outbox, the only place it can write, which drive validates and secret-scans (#17). The `--implement` child is Bash-only under Claude Code's sandbox, with a shim and post-run checks (#41).
 - Curator keeps a mode 0600 secret, proves itself to the CLI with an HMAC, checks `Host` on every request, and checks `Origin` when one is sent (#21).
 - The leak gate fails a PR that contains a string from a private denylist.
 

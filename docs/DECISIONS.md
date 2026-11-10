@@ -1,6 +1,6 @@
 # Decisions
 
-Entries cite the PR or file that records the reason. An "Alternative" line says what the other design would cost in this code. That cost is read from the code, and the repo holds no recorded discussion of it.
+Entries cite the PR or file that records the reason. An "Alternative" line says what the other design would cost in this code. I read that cost from the code. It is not taken from a discussion held at the time.
 
 ## 1. Run state is plain files under `.sdlc/`
 
@@ -13,8 +13,8 @@ Entries cite the PR or file that records the reason. An "Alternative" line says 
 ## 2. Tools are JSON-over-stdio commands called sockets
 
 - **Decision.** The engine runs a command, writes one JSON request to its stdin and reads one JSON response from its stdout. Exit 0 is success. Exit 1 is a provider failure, retried once and then shown to you. Exit 2 halts the stage and asks.
-- **Why.** `exec` is the only socket kind the CLI can run itself. The `skill` and `mcp_tool` kinds only print an instruction block for the invoking agent (D8 in `engine/cli/README.md`). A provider is any executable, so the six built-in adapters are zero-dependency scripts and a test can stub a socket with a few lines of shell. #10 changed one case: an exit 1 that carries a JSON body is kept as the response and not retried, because a verifier's `verdict: fail` needs it.
-- **Alternative.** MCP tools, or in-process modules. An MCP tool needs the agent to make the call, so the engine could not run it in a test or in `drive`. An in-process module would tie every provider to Node and to this repo.
+- **Why.** `exec` is the only socket kind the CLI can run itself. The `skill` and `mcp_tool` kinds only print an instruction block for the invoking agent (D8 in `engine/cli/README.md`). #10 changed one case: an exit 1 that carries a JSON body is kept as the response and not retried, because a verifier's `verdict: fail` needs it.
+- **Alternative.** MCP tools, or in-process modules. In this code, a provider that is any executable means the six built-in adapters are zero-dependency scripts and a test can stub a socket with a few lines of shell. An MCP tool needs the agent to make the call, so the engine could not run it in a test or in `drive`. An in-process module would tie every provider to Node and to this repo.
 - **Cost accepted.** The CLI does not enforce the `version` field of a provider yet (`engine/README.md`). A provider written against an older contract version runs without a warning until it returns a shape the engine rejects.
 - **Evidence.** `engine/README.md`, `engine/sockets/*.md`, the comment above the retry in `engine/cli/engine.mjs`.
 
@@ -37,7 +37,7 @@ Entries cite the PR or file that records the reason. An "Alternative" line says 
 
 ## 5. Drive children get a fixed tool list, not a permission profile
 
-- **Decision.** Each intake, research and plan step is one `claude -p --restricted` child with `Read`, `Glob`, `Grep`, `Write`, `Edit` and `TodoWrite`. No Bash. It starts in a read-only empty directory, reads a `git archive` export, and writes only an outbox that drive validates and secret-scans. A digest of run state is checked after every child (#17). The `--implement` child is the exception: `claude -p --restricted --tools Bash` under Claude Code's sandbox, with a shim shell and post-run transcript checks (#41, SECURITY.md).
+- **Decision.** Each intake, research and plan step is one `claude -p --restricted` child with `Read`, `Glob`, `Grep`, `Write`, `Edit` and `TodoWrite`. No Bash. It starts in a read-only empty directory, reads an export of HEAD read blob by blob with `git ls-tree` and `git cat-file`, with no `.git`, no symlinks or submodules and no gitattributes applied (`exportRepo` in `engine/cli/drive/drive.mjs`), and writes only an outbox that drive validates and secret-scans. A digest of run state is checked after every child (#17). The `--implement` child is the exception: `claude -p --restricted --tools Bash` under Claude Code's sandbox, with a shim shell and post-run transcript checks (#41, SECURITY.md).
 - **Rejected.** #8 gave children a settings profile, a Bash allowlist and a push-URL rewrite. Its own "Not covered" line said a child's test command could still run arbitrary repo code and reach the network. #17 replaced it.
 - **Why.** #8's residual risk was a child that could run a command. #17 gives an intake, research or plan child no Bash, MCP, web, hooks or subagents to run one with.
 - **Related rule.** `run new` copies the index's suggested command into `env.json` as `suggested.verify` and never writes `commands.verify` (#22). A drive child cannot set `commands.verify`, because its proposal in `env.proposed.json` is never used. In an interactive run the implement stage records it with `detent env --verify`. `drive --implement` runs it on the host in a no-network box (#41).

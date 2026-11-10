@@ -8,7 +8,7 @@ A coding agent that works from a ticket can plan something the ticket did not as
 
 Branch protection and required review already stop an agent PR from merging. They act after the code exists, so a wrong plan costs a full implement and review cycle, and the reviewer reads evidence the author gathered. Detent adds one human check before implement, and takes review from a separate reviewer command and evidence from a separate test command.
 
-A plan approved in a chat session, or a review bot that runs after the push, can cover part of this. Detent differs in two ways. When you answer in curator, `detent gate collect` records the plan answer in `decisions.json` only if it is exactly one of the offered options. The reviewer and verifier are commands you configure, so the author does not grade its own work. I have not compared it with those tools on the same task.
+A plan approved in a chat session, or a review bot that runs after the push, can cover part of this. Detent differs in two ways. When you answer in curator, `detent gate collect` records the plan answer in `decisions.json` only if it matches one of the offered options, ignoring case and surrounding whitespace. The reviewer and verifier are commands you configure, so the author does not grade its own work. I have not compared it with those tools on the same task.
 
 One committed run shows both, on [detent-demo#1](https://github.com/Amanborn007/detent-demo/issues/1) ("Add a maxLength option to slugify"). It ended in [PR #2](https://github.com/Amanborn007/detent-demo/pull/2), merged 2026-10-21. The change is a toy one in a demo repo, so this shows the mechanism and nothing about how often it matters. The decisions are in [decisions.json](docs/examples/2026-10-20-amanborn007-detent-demo-1/decisions.json).
 
@@ -58,7 +58,7 @@ You need Claude Code with plugins, Node 20, `git`, `bash`, `jq`, `python3` and a
 /plugin install detent@detent
 ```
 
-Then, from a clone of this repo, run `scripts/detent-install.sh`. It npm-links the CLI and appends `DETENT_ROOT` to your shell profile. It needs a writable npm global prefix. If the prefix is not writable, each `npm link` prints `WARN`, so set `NPM_CONFIG_PREFIX` to a directory you own and run it again. On a fresh clone the closing `curator status` check also fails with ENOENT until `<clone>/.local` exists, so run `mkdir .local` in the clone before the script ([PR #51](https://github.com/Amanborn007/detent/pull/51) fixes it). The other install details are in [GUIDE.md section 2](GUIDE.md#2-first-run).
+Then, from a clone of this repo, run `scripts/detent-install.sh`. It npm-links the CLI and appends `DETENT_ROOT` to your shell profile. It needs a writable npm global prefix. If the prefix is not writable, each `npm link` prints `WARN`, so set `NPM_CONFIG_PREFIX` to a directory you own and run it again. On a fresh clone the closing `curator status` row of the script shows FAIL, because curator stops with ENOENT until `<clone>/.local` exists. Run `mkdir .local` in the clone before the script ([PR #51](https://github.com/Amanborn007/detent/pull/51) fixes it). The other install details are in [GUIDE.md section 2](GUIDE.md#2-first-run).
 
 Then open a new shell, so that `DETENT_ROOT` is set and `detent` is on your `PATH`:
 
@@ -109,7 +109,7 @@ The plugin has 14 skills, typed as `/detent:<skill>`. `start`, `continue`, `stat
 ```sh
 node --test --test-timeout=300000 engine/*/test engine/*/tests
 bash engine/owl/test/run-tests.sh
-for f in hooks/tests/*.sh scripts/tests/*.sh engine/scripts/tests/*.sh; do bash "$f" || exit 1; done
+(for f in hooks/tests/*.sh scripts/tests/*.sh engine/scripts/tests/*.sh; do bash "$f" || exit 1; done)
 ```
 
 The suite needs to bind `127.0.0.1` and write to `/tmp`. `listen EPERM` or `Operation not permitted` means a sandbox or policy around the test run blocked one of those. `engine/owl/owl.sh` also uses process substitution (`/dev/fd`), which some sandboxes block, so the owl tests fail there too. The full suite is slow. For a quick look without the full run, `node --test engine/cli/tests/gates.test.mjs` covers the gate refusal.
