@@ -6,4 +6,6 @@ The run folder `2026-10-20-amanborn007-detent-demo-1/` has the brief, the resear
 
 The git worktree is left out, because the code lives in the demo PR. Local paths, the username and the hostname are replaced, so you will see `$DETENT_ROOT`, `~`, `<user>` and `<host>` in the files. Nothing else was edited.
 
+To see where the run stopped and asked, read `decisions.json` from D-004 to D-007 first, then `plans/*-ship.html`.
+
 `scripts/export-example.sh` makes a folder like this from any run directory.

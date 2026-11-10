@@ -1,6 +1,6 @@
 # Detent user guide
 
-The [README](README.md) says what detent is and how to install it. This guide says what to type, what each stage does, how to wire in your own tools, and how the checks work. Every command runs from the root of your detent clone unless a step says otherwise.
+The [README](README.md) says what detent is and how to install it. This guide says what to type, what each stage does, how to wire in your own tools, and how the checks work. Every command runs from the root of your detent clone unless a step says otherwise. How the parts fit is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and why they are built this way is in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 Contents:
 

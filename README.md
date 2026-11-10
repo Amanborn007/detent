@@ -7,229 +7,133 @@
 
 **Ticket in. Draft PR out. Nothing ships without your yes.**
 
-From `detent setup` to the plan gate in 20 seconds, on the real engine. A stub stands in for your tracker so it runs offline, and canned files stand in for Claude's stage output.
+## The problem
 
-<p align="center">
-  <img alt="A terminal runs detent setup, then detent run new for a ticket, then the stages one line each, and stops at the plan gate with 'waiting on you: plan approval' and the path of the gate page." src="docs/demo/demo.gif" width="720">
-</p>
+A coding agent that works from a ticket can plan something the ticket did not ask for, review its own diff, and push. A team that lets agents open PRs needs two things. A human approves the plan before any code exists, and the review and the evidence come from something other than the author before anything is pushed.
 
-This is a real run of `detent drive` with Claude Haiku 5.5 on a toy repo, with a $1 budget cap. Drive ran intake and research, then stopped because a human has to answer a question before it plans. The JSON is reformatted for reading and paths are shortened.
+One committed run shows both, on [detent-demo#1](https://github.com/Amanborn007/detent-demo/issues/1) ("Add a maxLength option to slugify"). It ended in [PR #2](https://github.com/Amanborn007/detent-demo/pull/2), merged 2026-10-21. The change is a toy one in a demo repo, so this shows the mechanism and nothing about how often it matters. The decisions are in [decisions.json](docs/examples/2026-10-20-amanborn007-detent-demo-1/decisions.json).
+
+- **D-002.** The plan added a documentation step the ticket never asked for. The run asked instead of silently doing it. The answer was "keep step 4".
+- **D-004 and D-005.** At ship there was no reviewer socket and no verifier socket. The only review was the agent's own pass, which "found no blocking issue", and the evidence was gathered by hand. The human refused both. The recorded reasons for rejecting them are "wanted a reviewer independent of the author" and "evidence from the author is not independent". Both sockets were wired.
+- **D-007.** The wired `claude-reviewer`, a separate headless Claude call, found that an empty or alphanumeric separator lets the `maxLength` cut split words. The PR fixed it by rejecting a word-character separator when `maxLength` is set, with the failing test committed first.
+
+## See it run
+
+You need Node 20 and `git`. This runs the real engine from `detent setup` to the plan gate in a few seconds. It needs no install, no network and no LLM.
+
+```sh
+git clone https://github.com/Amanborn007/detent && cd detent
+bash docs/demo/try.sh
+```
 
 ```
-$ detent drive --run 2026-10-21-acme-widgets-1 --repo ~/demo-repo --budget 1 --model claude-haiku-5-5
-{
-  "ok": true,
-  "run_id": "2026-10-21-acme-widgets-1",
-  "stopped": "needs_human",
-  "steps": 2,
-  "total_cost_usd": 0.019042,
-  "total_turns": 28,
-  "budget_usd": 1,
-  "stage": "plan",
-  "decisions": ["D-004"],
-  "html": "~/detent-home/.plans/2026-10-21-acme-widgets-1-D-004.html",
-  "next_step": "answer in curator (open ~/detent-home/.plans/2026-10-21-acme-widgets-1-D-004.html), then run: detent drive --run 2026-10-21-acme-widgets-1"
-}
+✓ setup    wrote detent.user.yaml, stack.yaml
+  still yours to fill: user.teams, user.jira_account
+✓ run      2026-11-10-acme-widgets-1 created
+  next stage: intake
+✓ ticket   acme/widgets#1  "Retry delay drifts when Retry-After is 0"
+✓ intake   done  (brief.md on disk)
+✓ research done  (research.md, access-report.json on disk)
+■ plan     written, held at the intent gate (D-001 pending)
+■ gate     waiting on you: intent gate D-001 (approve or revise)
+  page: $DETENT_ROOT/.plans/2026-11-10-acme-widgets-1-intent.html
 ```
+
+A stub stands in for your tracker and canned files stand in for Claude's stage output. Every stage transition and gate comes from the engine. The script prints the gate page path and the scratch directory to delete.
+
+<p align="center"><img alt="A terminal runs detent setup, then detent run new for a ticket, then the stages one line each, and stops at the plan gate with 'waiting on you: intent gate D-001 (approve or revise)' and the path of the gate page." src="docs/demo/demo.gif" width="720"></p>
 
 The plan gate opens as a local page. You click **Approve the plan** or **Send it back**.
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/demo-gate-dark.png">
-    <img alt="The plan gate page for the demo run: the question, approve and revise buttons, and the plan text under review." src="docs/assets/demo-gate.png" width="560">
-  </picture>
-</p>
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/demo-gate-dark.png">
+  <img alt="The plan gate page for the demo run: the question, approve and revise buttons, and the plan text under review." src="docs/assets/demo-gate.png" width="560">
+</picture></p>
 
-Left alone, an agent can spend an hour building the wrong thing and then push it. Detent stops it twice. It researches the ticket and writes a plan, then waits for you. It builds in a worktree, checks the diff against the plan you approved, then waits again before it pushes. It never merges.
+**A real run.** The committed run went through all 7 stages. Reviewer round 1 asked about the separator, round 2 flagged a JSDoc that over-promised, which the last PR commit fixed, and round 3 had no findings. The verifier passed, with `npm test` at 13 passed and 0 failed. `recheck.md` says "clean", and says itself that commit order is not proof the tests were seen failing. The commits go red then green: 9 at first ship evidence and 13 in the merged PR. `benchmark.json` is partial. It covers 3m34s of agent time up to the plan gate, and the rest of the run was human wait. Read the [run folder](docs/examples/2026-10-20-amanborn007-detent-demo-1/), the gate pages in its `plans/` folder (`*-plan.html`, `*-ship.html`), or [PR #2](https://github.com/Amanborn007/detent-demo/pull/2). Recorded terminal and Claude Code walkthroughs are listed in [docs/demo/README.md](docs/demo/README.md).
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/detent-architecture-dark.png">
-    <img alt="Detent architecture: you work in a Claude Code session whose skills and hooks drive the Detent engine; the engine keeps run state in plain files, renders gates to a local curator page for your approval, and reaches GitHub and your tracker through configured providers, while sentinel watches PR bot comments." src="docs/assets/detent-architecture.png" width="880">
-  </picture>
-</p>
+## Use it on your repo
 
-## What you get
-
-- **Two gates, no surprise pushes.** You approve the plan and you approve the push. Nothing in the repo calls `gh pr merge`.
-- **Plans you click, not scroll.** A plan opens as a local web page. You click **Approve the plan** or **Send it back** and leave notes on lines, and your answer goes back into the run.
-- **Bot comments handled.** Once a PR is ready, sentinel reads what the review bots left and fixes the ones your policy allows, for up to 10 rounds.
-- **Your stack, plugged in.** Your tracker, docs, reviewer and test runner are commands in a YAML file, JSON in and JSON out. GitHub adapters ship in the box.
-- **Work while you sleep.** `/detent:owl` loops toward an objective overnight, under caps you confirm first.
-
-## Try it in two minutes
-
-You need Node 20, `git`, `jq`, `python3` and a signed-in `gh`. In Claude Code:
+You need Claude Code with plugins, Node 20, `git`, `bash`, `jq`, `python3` and a signed-in `gh`. In Claude Code:
 
 ```
 /plugin marketplace add Amanborn007/detent
 /plugin install detent@detent
 ```
 
-Then put the CLI on your `PATH`:
+Then, from a clone of this repo, run `scripts/detent-install.sh`. It runs `npm link` for `engine/curator` and `engine/cli`, which needs a writable npm global prefix. nvm works. With a system Node, set `NPM_CONFIG_PREFIX` to a directory you own first. It appends a `DETENT_ROOT` block and a `detent-upgrade` alias to `~/.zshrc`, `~/.bashrc` or `~/.profile` (chosen by `$SHELL`), or to the file named by `DETENT_PROFILE`. It copies `detent.user.example.yaml` to `detent.user.yaml` if that file is missing, and creates `.local/` in the clone.
 
-```sh
-git clone https://github.com/Amanborn007/detent && cd detent
-scripts/detent-install.sh
-```
-
-Open a new shell, go to any branch with changes, and run this in Claude Code. It needs no config:
-
-```
-/detent:deslop
-```
-
-It reads your own diff and lists the comments, defensive try/catch blocks and `any` casts it would remove. It changes nothing until you say yes.
-
-Two recorded walkthroughs show a ticket moving through detent, both offline or replayable:
-
-- **Terminal:** `detent doctor`, `start`, `status`, `continue`, `decide` and `approve` against a throwaway repo. The script is [docs/demo/terminal.tape](docs/demo/terminal.tape); see it as [docs/demo/terminal.gif](docs/demo/terminal.gif), re-render it with `vhs docs/demo/terminal.tape`, or run the same commands without vhs with `bash docs/demo/terminal-smoke.sh`.
-- **Claude Code:** a real `/detent:status` and `/detent:continue` session, captured with `claude -p --output-format stream-json`. Open [docs/demo/claude-code.html](docs/demo/claude-code.html) in a browser, or read the raw captures in [docs/demo/transcripts/](docs/demo/transcripts/).
-
-## Drive a ticket
-
-Check your setup first, then start from a clone of the ticket's repo. Pick the track that matches where you work.
-
-**Terminal**
+Then, in a new shell:
 
 ```sh
 detent doctor
 cd ~/code/your-repo
 detent start your-org/your-repo#123
-detent continue
-detent status
+detent continue     # one step
+detent status       # stages, the gate waiting on you, the next step
+detent decide       # open the waiting gate in curator
+detent approve      # or answer the plan gate in this terminal
 ```
 
-**Claude Code**
+In Claude Code the same verbs are `/detent:start`, `/detent:continue` and `/detent:status`, and `continue` runs the stage in your session. `approve` and `revise` refuse inside Claude Code, inside a drive child and without a TTY (#24), so an agent cannot answer its own gate.
 
-```
-/detent:start your-org/your-repo#123
-/detent:continue
-/detent:status
-```
+**What spends credit.** In a terminal, `detent continue` starts a headless Claude after you confirm a budget. The `claude-reviewer` adapter spends tokens on every call. `detent drive` runs intake, research and plan unattended, is experimental, and spends credit (default budget 5 USD per invocation). `try.sh` is offline and model-free.
 
-`start` refuses if the clone's `origin` is a different repo, runs `detent setup` when `stack.yaml` is missing, and creates the run. `continue` runs one step. In a terminal it starts a headless Claude after you confirm the budget. In Claude Code it runs the stage in your session instead. `status` shows the stages, any gate waiting on you, and the next step in words. You never type a run id, because detent picks the newest unfinished run for the repo you are in.
+## How it works
 
-When a gate waits for you, answer it yourself:
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/detent-pipeline-dark.png">
+  <img alt="Detent stage pipeline: intake, research, plan, implement, recheck, ship and respond, with your approval required at the plan gate and the ship gate, and the respond loop driven by sentinel scans." src="docs/assets/detent-pipeline.png" width="880">
+</picture></p>
 
-```sh
-detent decide      # opens the gate in curator and waits for your answer
-detent approve     # or answer the plan gate right here in your terminal
-```
-
-An agent cannot run `approve` or `revise`. They refuse inside Claude Code, inside a drive child, and without a terminal. In Claude Code, `/detent:continue` opens the gate with `detent decide` and waits for you.
-
-## It works the way you already do
-
-A good engineer does not treat every task the same. A clear ticket goes straight to a plan. A vague ask gets questions, research and a chosen approach before anyone writes a ticket, let alone code. Detent copies both habits, and the steps stay the same whether the task is a bug fix, a migration or a new endpoint. Only the tools you plug in change.
-
-**You have a clear ticket.** The acceptance criteria are written and you know which repo it touches. Start a run and Detent goes through seven stages, the same ones you would.
-
-```sh
-detent run new --ticket your-org/your-repo#123 --repo ~/code/your-repo
-detent next --repo ~/code/your-repo
-```
-
-**You have a vague ask.** Say it is "make retries smarter" in a Slack thread. Run `/detent:clerk` with the text or a link. Clerk first tells you which sources it can and cannot reach. Then it looks for prior work in your PRs and tracker and lists every approach it found, with the precedent for each, or says plainly that none exists. You pick one. Clerk drafts the tickets, and you approve the set before anything is created. Each new ticket then starts a run like the one above. If a ticket already covers part of the work, clerk drafts only what is missing.
-
-**You are stuck on a decision.** `/detent:examiner` asks every open question about a plan in one round, each with a recommended answer and what breaks if that answer is wrong.
-
-## How a run works
-
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/detent-pipeline-dark.png">
-    <img alt="Detent stage pipeline: intake, research, plan, implement, recheck, ship and respond, with your approval required at the plan gate and the ship gate, and the respond loop driven by sentinel scans." src="docs/assets/detent-pipeline.png" width="880">
-  </picture>
-</p>
-
-Each stage is a step you would take anyway.
-
-| What you would do | Stage | What Detent does |
-|---|---|---|
-| Read the ticket and note the unknowns | intake | Writes `brief.md`. Each unknown becomes a decision you answer. |
-| Read the docs, ask around, check git history | research | Asks every knowledge source you plugged in, and names any it could not reach. |
-| Write a plan and get a nod | plan | Writes the plan with a verify command per step, then waits at the **plan gate**. |
-| Build it test-first on a branch | implement | Commits red then green in a separate worktree. Never touches your checkout. |
-| Re-read your diff before pushing | recheck | Compares the diff with the approved plan. Drift goes back to you. |
-| Run the tests and show proof | ship | Runs your reviewer and verifier, shows the evidence, then waits at the **ship gate** before the draft PR. |
-| Work through review comments | respond | After you mark the PR ready, fixes bot comments your policy allows and passes the rest to you. |
-
-A run lives in plain files under `.sdlc/<run-id>/`, so you can read what the agent decided and why. The engine refuses to start a stage before the earlier ones are done, and refuses to finish one whose required file is missing.
-
-## The layers
-
-Detent is a stack of small parts. The top two are the same for everyone. Each layer below them is one file you own.
-
-| Layer | What it is | Where you change it |
-|---|---|---|
-| Skills | Ten prompts Claude loads when you type `/detent:<skill>` or your intent matches. | Nothing to change. They read the layers below. |
-| Engine | The `detent` CLI. It holds the stage order, the gates and the run files, so these work the same way every time. | Nothing to change. |
-| Curator and sentinel | Curator is the local page where you answer gates. Sentinel reads PR bot comments. | `config/sentinel/default.json` sets which bots get fixed, ignored or sent to you. |
-| Hooks | Scripts that run on events such as `git push`. | Each has a kill switch, listed in [the reference](docs/REFERENCE.md#hooks). |
-| Sockets | Nine slots for your tools: `ticket`, `knowledge`, `skill-discovery`, `reviewer`, `verifier`, `bot-comments`, `skills-pack`, `incident`, `deploy-harness`. | `stack.yaml` in your work repo. |
-| Provider pack | Which knowledge sources and review lenses the skills use. | `packs/example/stack.yaml`, checked by `detent pack validate`. |
-| You | Your name, email, GitHub login, teams and writing voice. | `detent.user.yaml` in the clone. |
-
-## Plug in your own tools
-
-A socket is a command. The engine sends it one JSON request on stdin and reads one JSON response from stdout. Exit 0 means success, 1 is retried once and then shown to you, and 2 stops the stage and asks you. Any language works, including a ten-line shell script.
-
-```yaml
-# stack.yaml in your work repo
-sockets:
-  ticket:
-    command: "/opt/acme/jira-export"            # your tracker
-    version: "1.0.0"
-  knowledge:
-    providers:                                  # every provider is asked, results merged
-      - name: runbooks
-        command: "/opt/acme/runbook-search"
-        version: "1.0.0"
-      - name: repo-docs
-        command: "/path/to/detent/engine/adapters/repo-docs-knowledge"
-        version: "builtin"
-```
-
-Six adapters ship with Detent: `gh-ticket`, `repo-docs-knowledge`, `repo-index-knowledge`, `gh-bot-comments`, `claude-reviewer` and `cmd-verifier`. `repo-index-knowledge` answers from `detent index`, which maps your repo's definitions and co-change history into `.detent/index/` (see [the reference](docs/REFERENCE.md#repo-index)). With the first three you can take a GitHub issue through a run. Add `claude-reviewer` (needs a signed-in `claude` CLI and spends tokens) and `cmd-verifier` (runs your own test and evidence commands) to give the ship stage real checks. A socket you leave out is off, and the stage that needs it says so instead of guessing. The contracts are in `engine/sockets/`, and [GUIDE.md](GUIDE.md#6-writing-a-provider-and-a-pack) walks through writing a provider.
-
-## What it needs
-
-- **Required.** Claude Code with plugin support, Node 20, `git`, `bash`, `jq`, `python3`, and `gh` signed in with `gh auth login`. The install script needs `npm` once.
-- **Optional connectors in your Claude Code session.** Clerk creates Jira tickets through the Atlassian connector. Herald and scribe read Slack, Gmail and Jira when they are connected. A skill without its connector skips that source and tells you.
-- **Your own tools, when you have them.** A tracker, docs search, a code reviewer and a test runner, plugged into the sockets above.
-- **What it does not need.** No server, no account and no telemetry. Detent stores no tokens. Curator binds `127.0.0.1` only.
-
-Detent does not know your language or build system. The plan names a verify command for each step, and your `verifier` socket runs your tests.
-
-## The skills
-
-| Skill | What it does |
+| Stage | What Detent does |
 |---|---|
-| `referee` | Reviews a PR. On yours it plans fixes, on someone else's it drafts comments. Posts nothing until you approve. |
-| `deslop` | Finds AI slop in your own diff. |
-| `clerk` | Turns a loose requirement into approved tickets. |
-| `scout` | Researches a question across your docs and repos and returns one ranked brief. |
-| `examiner` | Interviews you about a plan until no open question is left. |
-| `curator` | Shows any plan or comparison as a clickable page. |
-| `owl` | Runs the loop unattended overnight. |
-| `herald` | Your morning brief: PRs, runs and overnight results on one page. |
-| `scribe` | Drafts a short reply to a Slack, email, Jira or GitHub thread. It never sends. |
-| `courier` | Fetches connector data for steps that cannot reach it. |
+| intake | Writes `brief.md`. Each unknown becomes a decision you answer. |
+| research | Asks every knowledge source you plugged in, and names any it could not reach. |
+| plan | Writes the plan with a verify command per step, then waits at the plan gate. |
+| implement | Commits red then green in a separate worktree. Never touches your checkout. |
+| recheck | Compares the diff with the approved plan. Drift goes back to you. |
+| ship | Runs your reviewer and verifier, shows the evidence, waits for your yes, then opens a draft PR. |
+| respond | After you mark the PR ready, fixes the bot comments your policy allows and passes the rest to you. |
 
-Type them as `/detent:<skill>`.
+The CLI enforces the plan intent gate in code, where you click **Approve the plan** or **Send it back** ([GUIDE.md](GUIDE.md#3-the-stages-and-gates)). The drift and ship gates are rules in the stage prompts, recorded as pending decisions that block the stages they name. Nothing in the code calls `gh pr merge`.
 
-## Status
+Your tracker, docs search, reviewer and test runner plug in as sockets. A socket is a command: the engine writes one JSON request to its stdin and reads one JSON response from its stdout. Exit 0 is ok, exit 1 is retried once and then shown to you, and exit 2 halts the stage and asks. Six adapters ship in `engine/adapters/`. See [GUIDE.md section 5](GUIDE.md#5-sockets-and-providers) and [section 6](GUIDE.md#6-writing-a-provider-and-a-pack).
 
-Early, v0.11.0. Most of it waits for you, but a few hooks run on their own, for example a review prompt after `git push`. [What runs without asking](docs/REFERENCE.md#what-runs-without-asking-you) lists every one and its kill switch. One run of all seven stages is committed as a [worked example](docs/examples/2026-10-20-amanborn007-detent-demo-1/), and it produced [this demo PR](https://github.com/Amanborn007/detent-demo/pull/2).
+The plugin has 14 skills, typed as `/detent:<skill>`. `start`, `continue`, `status` and `drive` run the stages. The other ten are `referee`, `deslop`, `clerk`, `scout`, `examiner`, `curator`, `owl`, `herald`, `scribe` and `courier`, and the [reference](docs/REFERENCE.md#skills) lists what each reads and writes. Try `/detent:deslop` first. It needs no config, reads your own diff, and changes nothing until you say yes.
+
+## Testing
+
+```sh
+node --test --test-timeout=300000 engine/*/test engine/*/tests
+bash engine/owl/test/run-tests.sh
+for f in hooks/tests/*.sh scripts/tests/*.sh engine/scripts/tests/*.sh; do bash "$f"; done
+```
+
+The suite binds `127.0.0.1` and writes to `/tmp`, so it fails inside a locked-down sandbox. [CI run 42786785915](https://github.com/Amanborn007/detent/actions/runs/42786785915) on main at 0731283, 2026-11-10, passed on ubuntu and macOS with 2089 tests, 2065 pass, 0 fail, 24 skipped, and owl 88 pass, 0 fail. The node suite took 122 s on ubuntu and 203 s on macOS.
+
+Some of the edge cases it covers:
+
+- `engine/cli/tests/drive-claude-tmp.test.mjs`: the 44-byte bound on the claude tmp path is exact, so 44 passes and 45 fails with a clear error.
+- `engine/cli/tests/drive-egress.test.mjs`: a DNS answer in a loopback, RFC1918, link-local, metadata or v4-mapped range is refused, and the proxy dials nothing.
+- `engine/cli/tests/drive-preflight.test.mjs`: a secret-looking env name such as `ADMIN_PASSWORD` refuses, and the value never appears in the output.
+- `engine/curator/test/auth.test.mjs`: a foreign `Host` is refused, an unauthenticated request with a bad JSON body gets 401, and `OPTIONS` gets 405.
+- `engine/owl/test/run-tests.sh`: reset on failure, a no-op counts as failure, the three-failure kill switch, and the iteration cap.
+
+Failing tests are committed before the fix. When a committed test has to change, the commit says so, for example 8f7d47a ("user-approved frozen-test change"). Not in CI: the `docs/demo` tests and `smoke.sh`, and the adapter smoke tests, which call the live GitHub API. Owl is tested only against a stub `claude`.
+
+## Known limitations
+
+- Only the plan gate is enforced in code. The drift and ship gates are prompt rules plus blocking decisions.
+- After a PR is marked ready, `respond` and the `sentinel-inbox-check` Stop hook push fixes without per-item approval, for up to 10 rounds. [What runs without asking you](docs/REFERENCE.md#what-runs-without-asking-you) lists every such part and its kill switch.
+- Drive is experimental and spends credit. `--restricted` is not an OS sandbox, and `--budget` can overshoot by one turn.
+- `drive --implement` is on main via #41, macOS only, and its live end-to-end run is unverified.
+- Curator auth does not protect against another process running as you. See [SECURITY.md](SECURITY.md).
+- In the example, `respond` converged only because the demo repo has no review bots.
+- The tree-sitter tagger in `engine/index` is untested. The regex tagger is what runs (#22).
 
 ## Read more
 
-- [docs/REFERENCE.md](docs/REFERENCE.md) has configuration, hooks, security, evals and troubleshooting.
-- [GUIDE.md](GUIDE.md) walks through daily flows and writing your own provider.
-- [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/DECISIONS.md](docs/DECISIONS.md), [CHANGELOG.md](CHANGELOG.md), [GUIDE.md](GUIDE.md), [docs/REFERENCE.md](docs/REFERENCE.md), [SECURITY.md](SECURITY.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Inspired by Kun Chen's MIT-licensed no-mistakes, lavish-axi and gnhf. No code was copied, see [NOTICE](engine/NOTICE.md). Licensed under [Apache 2.0](LICENSE).
-
-If Detent saves you a bad push, a star helps other people find it.

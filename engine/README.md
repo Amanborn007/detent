@@ -1,6 +1,6 @@
 # SDLC Engine — generic layer
 
-A company-agnostic engine that drives a change from ticket to merged PR. All
+A company-agnostic engine that drives a change from ticket to a reviewed draft PR. All
 company-specific behavior lives behind **sockets**: small command-line
 contracts declared in `stack.yaml`. The engine itself contains no company
 names, no internal hostnames, no proprietary process — it is designed to be
