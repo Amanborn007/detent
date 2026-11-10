@@ -8,6 +8,9 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
+
+const { REFUSE_EXIT } = createRequire(import.meta.url)("../drive/sandbox-shim/shim.cjs");
 
 const prof = () => import("../drive/implement-profile.mjs");
 const probe = () => import("../drive/selfprobe.mjs");
@@ -117,11 +120,11 @@ function shimShell({ sandboxed }) {
   });
 }
 
-test("a shim shell that can write its sentinel is unsandboxed: it leaves one byte there and logs nothing", async () => {
+test("a shim shell that can write its sentinel is unsandboxed: it leaves one byte there, refuses, runs nothing and logs nothing", async () => {
   const { m, inst, run } = await shimShell({ sandboxed: false });
   const r = run("echo plain");
-  assert.equal(r.status, 0);
-  assert.equal(r.stdout.trim(), "plain");
+  assert.equal(r.status, REFUSE_EXIT);
+  assert.equal(r.stdout, "");
   assert.equal(statSync(inst.sentinelPath).size, 1);
   assert.equal(readFileSync(inst.callLogPath, "utf8"), "");
   assert.equal(m.readShimReport(inst.dir, { mode: "shell" }).calls, 0);

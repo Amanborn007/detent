@@ -294,7 +294,7 @@ test("a ref that moved while verify ran is an import_conflict and detent/<run> i
 
 test("a sensitive path raises a ship-blocking decision, and the gate page escapes the path", () => {
   const t = approvedRun();
-  const cmd = "mkdir -p .github && echo x > '.github/<img src=x>.js' && git add -A && git commit -q -m wf";
+  const cmd = "mkdir -p .github && echo x > '.github/<img src=x>.js' && echo hello > f.txt && git add -A && git commit -q -m wf";
   const r = implDrive(t, happy({ commands: [{ cmd }] }));
   assert.equal(r.code, 0, r.stdout + r.stderr);
   const d = gateOf(t, "sensitive-paths");
