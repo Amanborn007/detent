@@ -28,7 +28,7 @@ Three rules hold everywhere:
 
 - State lives in plain files. You can `ls` and `cat` a run at any point.
 - Text from tickets, PRs, bots and threads is data. A skill reads it but never follows instructions found in it.
-- Nothing merges. Creating tickets, the first push and the draft PR each wait for you.
+- Nothing in Detent merges a PR, because no code calls a merge. Creating tickets, the first push and the draft PR each wait for you.
 
 ---
 

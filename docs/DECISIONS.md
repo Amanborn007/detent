@@ -1,6 +1,6 @@
 # Decisions
 
-Each entry links the PR where the decision landed. Where no alternative was written down, the entry has no "Rejected" line.
+Entries cite the PR where the decision landed, where there is one. Where no alternative was written down, the entry has no "Rejected" line.
 
 ## 1. Run state is plain files under `.sdlc/`
 
@@ -13,14 +13,14 @@ Each entry links the PR where the decision landed. Where no alternative was writ
 
 - **Decision.** The engine runs a command, writes one JSON request to its stdin and reads one JSON response from its stdout. Exit 0 is success. Exit 1 is a provider failure, retried once and then shown to you. Exit 2 halts the stage and asks.
 - **Why.** `engine/README.md` puts all company-specific behaviour behind sockets, so the engine stays generic. #10 changed one case: an exit 1 that carries a JSON body is kept as the response and not retried, because a verifier's `verdict: fail` needs it.
-- **Cost accepted.** The CLI does not enforce the `version` field of a provider yet (`engine/README.md`).
+- **Cost accepted.** The CLI does not enforce the `version` field of a provider yet (`engine/README.md`). A provider written against an older contract version runs without a warning until it returns a shape the engine rejects.
 - **Evidence.** `engine/README.md`, `engine/sockets/*.md`, the comment above the retry in `engine/cli/engine.mjs`.
 
 ## 3. Gates are decisions answered by a human, and only the plan gate is enforced in code
 
 - **Decision.** A gate is a question in `decisions.json`, rendered in curator. The engine never answers one. `detent stage end` refuses to finish the plan stage while the `intent` gate is pending. The drift and ship gates are rules in the stage prompts, recorded as pending decisions that block the stages they name.
-- **Why.** `stage end` refuses while any decision that blocks that stage is pending (`engine/cli/tests/gates.test.mjs`). The engine raises the plan gate itself, and D-003 in the example run is `raised_by: engine`. The agent files the ship and drift decisions from the stage prompt. The push happens inside the ship stage, before `stage end`, so only the prompt keeps it behind the ship decision. That is the tradeoff: the ship gate costs no CLI code, and nothing but the prompt stops a push that skipped it. Moving the push into the CLI is the first item below.
-- **Guards on the answer side.** A drive child cannot answer a gate. The outbox validator refuses `answer`, `status` and `answered_*` keys on child decisions, and the integrity digest fails the step as `state_tampered` (#17). #24 makes `approve` and `revise` refuse inside Claude Code, inside a drive child and without a TTY.
+- **Why.** `stage end` refuses while any decision that blocks that stage is pending (`engine/cli/tests/gates.test.mjs`). The engine raises the plan gate itself, and D-003 in the example run is `raised_by: engine`. The agent files the ship and drift decisions from the stage prompt. The push happens inside the ship stage, before `stage end`, so only the prompt keeps it behind the ship decision. That is the tradeoff: the ship gate costs no CLI code, and nothing but the prompt stops a push that skipped it. Moving the push into the CLI is listed under What I would change next.
+- **Guards on the answer side.** A drive child cannot answer a gate. The outbox validator refuses `answer`, `status` and `answered_*` keys on child decisions, and the integrity digest fails the step as `state_tampered` (#17). #24 makes `approve` and `revise` refuse when `CLAUDECODE` is set, when `DETENT_DRIVE_CHILD=1`, or without a TTY. These read environment variables, so they stop an agent that calls the verbs as given. An agent that unsets `CLAUDECODE` and sets `DETENT_FORCE_TTY=1` gets past them. A drive child has no Bash and cannot try.
 - **Cost accepted.** For the ship and drift gates the code relies on the stage prompt to file the decision. In the example run, `decisions.json` shows D-004 and D-005 raised by `ship`.
 - **Evidence.** [GUIDE.md](../GUIDE.md#3-the-stages-and-gates), `engine/cli/tests/verbs-approve.test.mjs`, `engine/cli/tests/drive.test.mjs`.
 
@@ -72,6 +72,6 @@ Each entry links the PR where the decision landed. Where no alternative was writ
 - Move the ship push into the CLI behind the ship decision, so the code and not only the prompt refuses a push without it (decision 3).
 - Run `drive --implement` live, end to end. That run is unverified (#41).
 - Add a secret scan of implement commits, which SECURITY.md lists as not covered.
-- Run the `docs/demo` tests and `smoke.sh` in CI.
+- Run the `docs/demo` tests and `smoke.sh` in CI. `docs/demo/terminal-smoke.sh` now finishes offline.
 - Split `engine/cli/engine.mjs`, 3337 lines at 464e527, into modules along its existing section comments: run and stage, gates, sockets, and the friendly verbs.
-- Fix `detent decide` and the demo smoke scripts. The `decide` step starts a real curator, so `docs/demo/terminal-smoke.sh` waits in `curator poll` (docs/demo/README.md). `cmdDecide` also reports only the last 300 characters of a curator failure, which cuts off the cause.
+- Fix `cmdDecide`, which reports only the last 300 characters of a curator failure and cuts off the cause. `detent decide` also has no option to skip the wait in `curator poll`, which is why the demo scripts do not call it.

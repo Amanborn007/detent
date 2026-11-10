@@ -1,5 +1,5 @@
-# Render from the repo root:  vhs docs/demo/terminal.tape   (the same commands run in CI: bash docs/demo/terminal-smoke.sh)
-# Stub claude, gh and ticket socket. The detent engine is real. See docs/demo/README.md for the decide step.
+# Render from the repo root:  vhs docs/demo/terminal.tape   (replay without vhs: bash docs/demo/terminal-smoke.sh)
+# Stub claude, gh and ticket socket. The detent engine is real.
 Output docs/demo/terminal.gif
 
 Set Shell "bash"
@@ -39,8 +39,6 @@ Type "y" Enter
 Sleep 3s
 Type "clear" Enter
 Type "# the plan stage raised the intent gate" Enter
-Type "detent decide" Enter
-Sleep 4s
 Type "detent approve" Enter
 Sleep 1s
 Type "y" Enter

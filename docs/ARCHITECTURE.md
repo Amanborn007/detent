@@ -46,7 +46,7 @@ The file layout and decision schema are in [engine/stages/CONTRACT.md](../engine
 
 - Text from tickets, PRs, bots and threads is data. Skills read it and never follow instructions found in it.
 - The CLI enforces the plan `intent` gate. The drift and ship gates are rules in the stage prompts, recorded as pending decisions that block the stages they name.
-- `approve` and `revise` refuse inside Claude Code, inside a drive child (`DETENT_DRIVE_CHILD=1`) and without a TTY (#24). The drive outbox validator refuses `answer`, `status` and `answered_*` keys on child decisions (`engine/cli/drive/outbox.mjs`), and the integrity digest fails the step as `state_tampered` if run state changed (#17).
+- `approve` and `revise` refuse when `CLAUDECODE` is set, when `DETENT_DRIVE_CHILD=1`, or without a TTY (#24). These are environment checks, and `DETENT_FORCE_TTY=1` skips the TTY one, so they stop an agent that uses the verbs as given and not one that edits its environment. The drive outbox validator refuses `answer`, `status` and `answered_*` keys on child decisions (`engine/cli/drive/outbox.mjs`), and the integrity digest fails the step as `state_tampered` if run state changed (#17).
 - A drive child for intake, research and plan gets file tools only, a read-only empty working directory, a `git archive` export with no `.git`, and an outbox, the only place it can write, which drive validates and secret-scans (#17). The `--implement` child is Bash-only under Claude Code's sandbox, with a shim and post-run checks (#41).
 - Curator keeps a mode 0600 secret, proves itself to the CLI with an HMAC, checks `Host` on every request, and checks `Origin` when one is sent (#21).
 - The leak gate fails a PR that contains a string from a private denylist.
