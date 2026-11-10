@@ -919,6 +919,12 @@ export function chromePage(session) {
   // Registered before 'message' because the shell-behavior stub keeps only the last window listener.
   // A hidden tick could land after pagehide's gone and re-mark a closing page live.
   window.addEventListener('visibilitychange', function () { if (!noKey && document.visibilityState !== 'hidden') tick(); });
+  // pagehide already sent gone for the old id, and the server ignores ticks from gone ids.
+  window.addEventListener('pageshow', function (e) {
+    if (noKey || !e.persisted) return;
+    PID = Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
+    tick();
+  });
   window.addEventListener('pagehide', function () {
     if (noKey) return;
     fetch('/api/gone?s=' + SID + '&p=' + PID, { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json', 'X-Curator-Cap': CAP }, body: '{}' });
