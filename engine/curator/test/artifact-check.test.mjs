@@ -400,3 +400,8 @@ test("an unreadable file is reported rather than passed over", () => {
   assert.equal(code, 1);
   assert.match(out, /cannot be read/);
 });
+
+test("an entity-encoded hatch option is still a hatch and owes no comparison", () => {
+  const { code, out } = run("encoded-hatch-option.html");
+  assert.equal(code, 0, out);
+});

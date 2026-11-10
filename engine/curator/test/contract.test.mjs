@@ -213,3 +213,10 @@ test('CLI: --page prints the JSON result', () => {
   assert.deepEqual(out.errors, []);
   assert.ok(out.warnings.some((w) => w.id === 'C1'));
 });
+
+test('CLI: --page survives numeric entities outside the Unicode range', () => {
+  const f = path.join(HERE, 'fixtures', 'numeric-entity-out-of-range.html');
+  const r = spawnSync(process.execPath, [path.join(HERE, '..', 'contract.mjs'), '--page', f], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(Array.isArray(JSON.parse(r.stdout).errors));
+});
