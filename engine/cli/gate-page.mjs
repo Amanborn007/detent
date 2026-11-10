@@ -19,6 +19,8 @@ const INTENT_THEN = {
   approve: "Then the implement stage runs the plan steps.",
   revise: "Then the plan stage reruns with your note.",
 };
+// The engine words its intent question as an instruction; the option cards already say approve or revise.
+const INTENT_READER_QUESTION = "Does the plan build what the brief asks for?";
 const INTENT_NO_RECOMMENDATION = "the engine has no recommendation here, you are the check on whether the plan matches the brief";
 
 const EXTRA_CSS = `
@@ -264,7 +266,13 @@ function clause(text, max) {
   return first.length <= max ? first : `${first.slice(0, max).replace(/\s+\S*$/, "")}…`;
 }
 const stepTitle = (text) => clause(text.replace(/^CONDITIONAL on D-\d{3,}[.,]?\s*/, ""), 60);
-const shortGoal = (text) => clause(text, 60);
+// A subject for the h1: whole words only, no trailing joiner, no ellipsis.
+function shortGoal(text) {
+  const first = String(text).replace(/[`*_]/g, "").trim().split(/[.;:]\s|,\s|\s—\s|\.$/)[0].trim();
+  let s = first;
+  if (s.length > 70) s = s.slice(0, 71).replace(/\s+\S*$/, "");
+  return s.replace(/(?:\s+(?:a|an|the|of|to|from|in|on|for|and|or|with|by|at))+$/i, "");
+}
 
 function meter(parts, label) {
   const total = parts.reduce((s, [, k]) => s + k, 0);
@@ -409,7 +417,7 @@ export function buildGatePage(run, gate, model) {
             r.blocked_reason && `Blocked: ${r.blocked_reason}`, r.enable_action && `To unblock: ${r.enable_action}`,
             r.criticality === "critical" && r.status === "blocked" && "Hard-blocking: implementation cannot start until this is resolved."]
             .filter(Boolean).join(" ");
-          return `<div class="cell" data-verdict="${v}"><span class="n">${mark(v)} ${esc(r.source ?? "")}</span><span class="d">${esc(detail)}</span></div>`;
+          return `<div class="cell" data-verdict="${v}"><span class="n">${mark(v)} ${esc(r.source ?? "")}</span>${detail ? `\n<details class="sub cell-more"><summary>Details</summary><p class="d">${esc(detail)}</p></details>` : ""}</div>`;
         }).join("\n");
         const bad = rows.filter((r) => r.status !== "reachable").length;
         accessBlocked = bad > 0;
@@ -580,7 +588,7 @@ export function buildGatePage(run, gate, model) {
       return `<div class="option${o === rec ? " opt-rec" : ""}" data-plan-option="${esc(o)}"><strong>${esc(label)}</strong>${explain ? `\n<p class="o-note" data-plan-consequence>${esc(explain)}</p>` : ""}${then ? `\n<p class="o-note o-then" data-plan-then>${esc(then)}</p>` : ""}</div>`;
     }).join("\n");
     return `<div data-plan-question="${esc(d.id)}" id="decision-${esc(d.id)}" data-plan-required data-plan-shape="pick-one" ${attrs}>
-<h3 class="q-label">${inl(d.question || "")}</h3>
+<h3 class="q-label">${intentOpts && !/\?\s*$/.test(d.question || "") ? INTENT_READER_QUESTION : inl(d.question || "")}</h3>
 <p class="small" data-plan-why-now>${esc(whyNow)}</p>
 ${intentOpts ? "" : d.context_excerpt ? `<div class="q-context" data-plan-context>\n${md(d.context_excerpt)}\n</div>` : d.context ? `<p class="small">Context: ${esc(d.context)}</p>` : ""}
 ${rec || intentOpts ? "" : `<p class="small">recommended option: no recommendation given</p>`}
@@ -602,7 +610,7 @@ ${cards}
   const doneHtml = esc(done).replace(/\bD-\d+\b/g, (id) => `<abbr title="decision ${id}">${id}</abbr>`);
 
   let h1;
-  if (isIntent) h1 = `Is the “${esc(shortGoal(hasGoal ? goalText : title || ref))}” plan ready to implement?`;
+  if (isIntent) h1 = `Is the “${esc(shortGoal(title || (hasGoal ? goalText : ref)))}” plan ready to implement?`;
   else if (n === 1) {
     const q = String(gate.decisions[0].question || "").trim();
     h1 = inl(/\?$/.test(q) ? q : `${q.replace(/[.!:\s]+$/, "")}?`);
