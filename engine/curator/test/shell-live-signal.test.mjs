@@ -35,7 +35,7 @@ function boot({ hash = '#c=C1&r=R1' } = {}) {
   els.plan = mk();
   vm.createContext(ctx);
   vm.runInContext(code, ctx);
-  const fire = (t) => (listeners[t] || []).forEach((f) => f({ type: t }));
+  const fire = (t, e = {}) => (listeners[t] || []).forEach((f) => f({ type: t, ...e }));
   return { calls, fire, document };
 }
 
@@ -68,4 +68,22 @@ test('a page with no key sends no signals', () => {
   p.fire('pagehide');
   p.fire('visibilitychange');
   assert.equal(p.calls.length, 0);
+});
+
+test('a page restored from the back-forward cache comes back under a fresh page id', () => {
+  const p = boot();
+  p.fire('pagehide');
+  const goneId = /&p=([^&]+)/.exec(p.calls.at(-1).url)[1];
+  p.calls.length = 0;
+  p.fire('pageshow', { persisted: true });
+  const ticks = p.calls.filter((c) => c.url.startsWith('/api/updates?s=abc'));
+  assert.equal(ticks.length, 1);
+  assert.notEqual(/&p=([^&]+)/.exec(ticks[0].url)[1], goneId);
+});
+
+test('a normal first pageshow does not send an extra tick', () => {
+  const p = boot();
+  p.calls.length = 0;
+  p.fire('pageshow', { persisted: false });
+  assert.equal(p.calls.filter((c) => c.url.startsWith('/api/updates')).length, 0);
 });
