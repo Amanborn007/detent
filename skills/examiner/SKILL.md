@@ -27,5 +27,5 @@ round ends by naming what is still open, and you call it, not me. When you do, w
 is left gets recorded as a call I made, with the consequence if I made it wrong.
 
 **Outside an engine run** the answers land in the caller's working note. **Inside one**
-they land in `decisions.json` as `kind: "examiner"` blocks and ride the host stage's
+they land in `decisions.json` as `kind: "examiner"` blocks (string `options` plus `option_details`, and `recommended` or `no_recommendation`) and ride the host stage's
 existing gate, so a successor session sees what you settled instead of asking again.

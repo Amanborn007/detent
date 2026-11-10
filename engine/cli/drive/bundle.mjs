@@ -405,6 +405,7 @@ export function verifyBundle(args) {
       throw new TypeError("scratch must be absolute and step a plain token");
     }
     if (!identity || typeof identity.email !== "string" || !identity.email) throw new TypeError("identity.email required");
+    if (typeof identity.name !== "string" || !identity.name) throw new TypeError("identity.name required");
     if (!/^refs\/heads\/[A-Za-z0-9._/-]+$/.test(branch || "") || branch.includes("..")) {
       throw new BundleReject("wrong_ref", `unsafe branch ${branch}`);
     }
@@ -451,7 +452,7 @@ export function verifyBundle(args) {
       .toString().split("\n").filter(Boolean).length;
     if (reach !== packCount) throw new BundleReject("extra_objects", `pack holds ${packCount} objects, the branch reaches ${reach}`);
 
-    const result = inspect({ G, Q, base, head, identity, caps, fmt });
+    const result = inspect({ G, Q, base, head, identity: expectedIdent(R, repo, identity), caps, fmt });
     const verified = { ok: true, step, head, base, bundle_sha256: sha, copy, quarantine: Q, ...result };
     genuine.set(verified, { step, head, scratchReal, quarantine: Q });
     return verified;
@@ -526,6 +527,16 @@ function inspect({ G, Q, base, head, identity, caps, fmt }) {
   };
 }
 
+const IDENT_LINE = /^([^<>]*) <([^<>]*)> \d+ [+-]\d{4}$/;
+
+// git strips crud characters from a name before it writes the ident, so the expected name is what git itself would record.
+function expectedIdent(R, repo, identity) {
+  const r = R(["var", "GIT_COMMITTER_IDENT"], { repo, env: { GIT_COMMITTER_NAME: identity.name, GIT_COMMITTER_EMAIL: identity.email } });
+  const m = r.status === 0 ? IDENT_LINE.exec(r.stdout.toString("utf8").trim()) : null;
+  if (!m) throw new Error(`git var GIT_COMMITTER_IDENT for ${identity.name} <${identity.email}> exited ${r.status}: ${r.stderr.toString("utf8").trim()}`);
+  return { name: m[1], email: m[2] };
+}
+
 function checkCommit(sha, body, identity, caps) {
   const cut = body.indexOf("\n\n");
   const head = (cut < 0 ? body : body.subarray(0, cut)).toString("latin1");
@@ -545,9 +556,9 @@ function checkCommit(sha, body, identity, caps) {
     throw new BundleReject("bad_commit_header", `${sha}: headers ${keys.join(",")}`);
   }
   for (const who of ["author", "committer"]) {
-    const m = /^.* <([^<>]*)> \d+ [+-]\d{4}$/.exec(authors[who]);
+    const m = IDENT_LINE.exec(authors[who]);
     if (!m) throw new BundleReject("bad_commit_header", `${sha}: malformed ${who}`);
-    if (m[1] !== identity.email) throw new BundleReject("foreign_author", `${sha}: ${who} ${m[1]}`);
+    if (m[1] !== identity.name || m[2] !== identity.email) throw new BundleReject("foreign_author", `${sha}: ${who} ${m[1]} <${m[2]}>`);
   }
   if (msg.length > caps.msgBytes) throw new BundleReject("bad_message", `${sha}: ${msg.length} bytes`);
   if (msg.includes(0)) throw new BundleReject("bad_message", `${sha}: NUL byte`);

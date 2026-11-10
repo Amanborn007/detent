@@ -5,13 +5,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync, mkdtempSync, realpathSync,
-  readdirSync, statSync,
+  readdirSync, statSync, rmSync,
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { engine, mkCuratorClone, mkRun, readJson, writeJson, writeArtifact, eventsOf, ENGINE } from "./helpers.mjs";
+import { engine, mkCuratorClone, mkRun, readJson, writeJson, writeArtifact, eventsOf, ENGINE, assertCuratorOpened, trackCuratorStateDir } from "./helpers.mjs";
 
 const CURATOR_CLI = join(fileURLToPath(import.meta.url), "..", "..", "..", "curator", "cli.mjs");
 const BARE_PATH = "/usr/bin:/bin";
@@ -48,6 +48,8 @@ if (settings && settings.apiKeyHelper) {
 appendFileSync(join(here, "stub.log"), JSON.stringify({
   args: argv, cwd: realpathSync(process.cwd()), cwdEntries: readdirSync(process.cwd()), cwdMode: statSync(process.cwd()).mode & 0o777,
   prompt, settings, settingsPath, env: process.env, stage, inputs, outbox, inputsTree: tree(inputs).slice(0, 400), apiKey,
+  stepInputs: JSON.parse(readFileSync(join(inputs, "step.json"), "utf8")).inputs,
+  mtimesNs: Object.fromEntries(tree(inputs).map((f) => [f, String(statSync(join(inputs, f), { bigint: true }).mtimeNs)])),
 }) + "\\n");
 const step = JSON.parse(readFileSync(join(inputs, "step.json"), "utf8"));
 const FILES = {
@@ -185,7 +187,8 @@ function setMode(t, cfg) {
 function driveArgs(t, extra) { return ["drive", "--run", t.runId, "--repo", t.repo, "--claude-bin", t.stub, "--stack", t.stack, ...extra]; }
 function driveEnv(t, env = {}) {
   mkdirSync(t.tmp, { recursive: true });
-  return { PATH: BARE_PATH, TMPDIR: t.tmp, ...env };
+  if (!t.curatorDir) { t.curatorDir = scratch(); mkCuratorStub(t.curatorDir); }
+  return { PATH: BARE_PATH, TMPDIR: t.tmp, TEST_CLONE: t.curatorDir, ...env };
 }
 
 function drive(t, cfg, extra = [], env = {}) {
@@ -271,6 +274,35 @@ test("inputs: skill, DRIVEN.md, step.json, git-log, ticket, repo export without 
   for (const f of ["SKILL.md", "DRIVEN.md", "step.json", "git-log.txt", "ticket.json", "repo/README.md"]) assert.ok(tr.includes(f), `inputs lacks ${f}: ${tr}`);
   assert.ok(!tr.some((f) => f === "repo/.git" || f.startsWith("repo/.git/")), "no .git in the export");
   assert.match(r.calls[0].prompt, /DRIVEN\.md/);
+});
+
+test("step.json inputs equals the top-level input files, and the prompt names each by absolute path, on a large repo", () => {
+  const t = setup();
+  for (let i = 0; i < 150; i++) writeFileSync(join(t.repo, `f${i}.txt`), `file ${i}\n`);
+  const env = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.invalid" };
+  spawnSync("git", ["-C", t.repo, "add", "."], { env });
+  spawnSync("git", ["-C", t.repo, "commit", "-q", "-m", "many files"], { env });
+  const r = drive(t, {});
+  assert.deepEqual(r.calls.map((c) => c.stage), ["intake", "research", "plan"]);
+  for (const c of r.calls) {
+    const top = c.inputsTree.filter((f) => !f.startsWith("repo/"));
+    assert.deepEqual([...c.stepInputs].sort(), top.sort(), `${c.stage}: step.json inputs`);
+    for (const f of c.stepInputs) assert.ok(c.prompt.includes(join(c.inputs, f)), `${c.stage}: prompt lacks ${f}`);
+  }
+  const plan = r.calls[2].stepInputs;
+  for (const f of ["brief.md", "research.md", "access-report.json"]) assert.ok(plan.includes(f), `plan inputs lacks ${f}`);
+  assert.ok(r.calls[0].stepInputs.includes("ticket.json"));
+  assert.ok(r.calls[1].stepInputs.includes("knowledge.json"));
+});
+
+test("a missing upstream artifact stops drive with inputs_artifact_missing, not a blocked child", () => {
+  const t = setup();
+  throughResearch(t);
+  rmSync(join(t.runDir, "research.md"));
+  const r = drive(t, {}, ["--max-steps", "1"]);
+  assert.equal(r.code, 1);
+  assert.equal(JSON.parse(r.stdout).reason, "inputs_artifact_missing");
+  assert.equal(r.calls.length, 0, "no child was spawned");
 });
 
 test("settings: dontAsk, exactly two outbox allows, denies, hooks off, file outside child dirs", () => {
@@ -368,6 +400,7 @@ test("drive runs intake, research and plan, stops at the plan gate with a clean 
   const r = drive(t, {});
   assert.equal(r.code, 0, r.stdout + r.stderr);
   assert.equal(r.json.stopped, "needs_human");
+  assertCuratorOpened(r);
   assert.deepEqual(r.calls.map((c) => c.stage), ["intake", "research", "plan"]);
   const st = readJson(join(t.runDir, "stage-status.json")).stages;
   assert.equal(st.intake.status, "done");
@@ -427,6 +460,7 @@ test("a child needs_human outbox files pending decisions with drive-assigned ids
   const r = drive(t, { outbox: "needshuman" });
   assert.equal(r.code, 0, r.stdout + r.stderr);
   assert.equal(r.json.stopped, "needs_human");
+  assertCuratorOpened(r);
   const d = readJson(join(t.runDir, "decisions.json"));
   assert.equal(d.length, 1);
   assert.equal(d[0].id, "D-001");
@@ -452,6 +486,7 @@ test("curator feedback is drained only at drive start; a child-planted marker an
   const r = drive(t, { marker: join(cur, "marker") }, [], { PATH: BARE_PATH, TEST_CLONE: cur });
   assert.equal(r.code, 0, r.stdout + r.stderr);
   assert.equal(r.json.stopped, "needs_human");
+  assertCuratorOpened(r);
   assert.ok(existsSync(join(cur, "marker")), "the child did plant it");
   assert.equal(readJson(join(t.runDir, "decisions.json"))[0].status, "pending");
   const log = existsSync(join(cur, "curator.log")) ? readFileSync(join(cur, "curator.log"), "utf8") : "";
@@ -655,8 +690,11 @@ async function signalRun(sig, cfg) {
   const t = setup();
   throughIntake(t);
   setMode(t, { sleep: true, ...cfg });
+  const { TEST_CLONE, ...childEnv } = driveEnv(t); // TEST_CLONE is for engine(); this runs the real ENGINE
+  const curatorState = join(t.home, ".local", "curator");
+  trackCuratorStateDir(curatorState);
   const child = spawn(process.execPath, [ENGINE, ...driveArgs(t, ["--max-steps", "1"])], {
-    env: { ...process.env, DETENT_ROOT: t.home, ...driveEnv(t) },
+    env: { ...process.env, DETENT_ROOT: t.home, CURATOR_NO_BROWSER: "1", CURATOR_STATE_DIR: curatorState, CURATOR_OWNER_PID: String(process.pid), ...childEnv },
     stdio: ["ignore", "pipe", "pipe"],
   });
   const exited = new Promise((res) => child.on("close", (code, s) => res({ code, s })));
@@ -666,6 +704,7 @@ async function signalRun(sig, cfg) {
   const pids = readJson(pf);
   child.kill(sig);
   const res = await Promise.race([exited, new Promise((r) => setTimeout(() => r("timeout"), 15000))]);
+  if (res === "timeout") child.kill("SIGKILL");
   return { t, res, pids };
 }
 

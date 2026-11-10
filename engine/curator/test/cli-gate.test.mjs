@@ -5,6 +5,8 @@
 // ahead of it, and the state dir below points at a pid that is not a curator server so the command
 // stops on an unreachable server rather than spawning one.
 
+import "./daemon-env.mjs";
+import { stopCuratorDaemon } from "./daemon-kit.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -56,7 +58,9 @@ test("every fault class is refused, not just the diagram one", () => {
 });
 
 test("CURATOR_NO_CHECK gets past the gate rather than being refused by it", () => {
-  const { out } = open("diagram-owed.html", { CURATOR_NO_CHECK: "1" });
+  const dir = stateDir();
+  const { out } = open("diagram-owed.html", { CURATOR_NO_CHECK: "1", CURATOR_STATE_DIR: dir });
+  stopCuratorDaemon(dir); // throws when a daemon the open started cannot be stopped
   // What happens after the gate depends on whether this shell can reach loopback, so assert only
   // that the gate did not stop it. Asserting the exit code here made this pass sandboxed (loopback
   // blocked, so the command stopped on an unreachable server) and fail unsandboxed (it spawned one).

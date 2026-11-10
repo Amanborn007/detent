@@ -11,6 +11,7 @@
 //   browser routes identify the session with ?s=<id>; agent routes identify the file with `key`.
 //
 // Cases that already pass on main (a foreign Host name) are kept as regression guards.
+import "./daemon-env.mjs";
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import {

@@ -79,3 +79,55 @@ test("the engine no longer carries the old permission model", () => {
   }
   assert.ok(existsSync(join(REPO, "engine", "cli", "drive", "profile.mjs")));
 });
+
+test("SECURITY.md and REFERENCE.md document drive --implement and its limits", () => {
+  const sec = read("SECURITY.md");
+  const ref = read("docs/REFERENCE.md");
+  for (const [rel, t] of [["SECURITY.md", sec], ["docs/REFERENCE.md", ref]]) {
+    assert.ok(!/never implements/i.test(t), `${rel}: stale "never implements" claim`);
+    assert.ok(t.includes("--implement"), `${rel}: --implement`);
+    assert.match(t, /--implement[^]{0,400}macOS only|macOS only[^]{0,400}--implement/, `${rel}: --implement near "macOS only"`);
+    assert.match(t, /--implement[^]{0,600}Linux[^]{0,200}refus|Linux[^]{0,200}refus[^]{0,200}--implement/i, `${rel}: Linux refusal`);
+    assert.ok(/experimental/i.test(t), `${rel}: experimental`);
+  }
+  assert.ok(sec.includes("KERN_PROCARGS2"), "SECURITY.md: KERN_PROCARGS2");
+  assert.match(sec, /hooks[^]{0,200}unsandboxed|unsandboxed[^]{0,200}hooks/i, "SECURITY.md: hooks run unsandboxed");
+  assert.match(sec, /commit content[^]{0,100}exfiltration|exfiltration[^]{0,100}commit/i, "SECURITY.md: commit exfiltration channel");
+  assert.match(sec, /forge/i, "SECURITY.md: shim log forging limit");
+  assert.match(sec, /live[^]{0,80}(unverified|not verified)/i, "SECURITY.md: live end-to-end unverified");
+  for (const code of ["implement_platform_unsupported", "sandbox_probe_failed", "implement_api_key_refused", "implement_flag_invalid", "setup_unsupported", "import_conflict", "bundle_rejected", "state_tampered"]) {
+    assert.ok(ref.includes(code), `REFERENCE.md lacks ${code}`);
+  }
+  for (const w of ["recheck-review", "sensitive-paths", "implement_imported", "bundle_sha256", "env.json"]) {
+    assert.ok(ref.includes(w), `REFERENCE.md lacks ${w}`);
+  }
+});
+
+test("docs state the user's git identity, the eval-quoted match and the missing secret scan", () => {
+  const sec = read("SECURITY.md");
+  const ref = read("docs/REFERENCE.md");
+  for (const [rel, t] of [["SECURITY.md", sec], ["docs/REFERENCE.md", ref]]) {
+    assert.ok(!t.includes("implement@detent.invalid"), `${rel}: stale fixed identity`);
+    assert.ok(t.includes("foreign_author"), `${rel}: foreign_author`);
+    assert.match(t, /own git identity/, `${rel}: user's own identity`);
+    assert.match(t, /eval '/, `${rel}: eval-quoted command match`);
+    assert.match(t, /no secret scan|does not scan/i, `${rel}: no secret scan`);
+  }
+  for (const code of ["git_identity_missing", "git_identity_invalid"]) assert.ok(ref.includes(code), `REFERENCE.md lacks ${code}`);
+});
+
+test("docs list the verify and host box stops and say a negative gate answer keeps blocking", () => {
+  const sec = read("SECURITY.md");
+  const ref = read("docs/REFERENCE.md");
+  for (const code of ["verify_failed", "hostbox_failed", "run_base_invalid"]) assert.ok(ref.includes(code), `REFERENCE.md lacks ${code}`);
+  assert.match(sec, /negative answer[^]{0,200}(keeps|still)[^]{0,100}block/i, "SECURITY.md: a negative gate answer keeps blocking");
+});
+
+test("README and GUIDE describe drive --implement instead of claiming drive never implements", () => {
+  for (const rel of ["engine/cli/README.md", "GUIDE.md"]) {
+    const t = read(rel);
+    assert.ok(!/never implements|never driven|always stops/i.test(t), `${rel}: stale claim`);
+    assert.match(t, /--implement[^]{0,400}macOS only|macOS only[^]{0,400}--implement/, `${rel}: --implement near "macOS only"`);
+    assert.ok(t.includes("SECURITY.md"), `${rel}: points at SECURITY.md`);
+  }
+});

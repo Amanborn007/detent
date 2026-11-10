@@ -10,6 +10,8 @@ tells you how to hand it over.
   `run.json`, `decisions.json`, `git-log.txt`, `repo/` (a read-only export of the
   work repo at HEAD, no history), and the earlier artifacts the stage needs
   (`ticket.json`, `brief.md`, `knowledge.json`, `research.md`, `access-report.json`).
+- `step.json` `inputs` lists every file in the inputs directory outside `repo/`. Read those
+  by path; use Glob and Grep on `repo/` only to look for code.
 - An outbox directory, the only place you can write.
 - File tools only: Read, Glob, Grep, Write, Edit, TodoWrite. No shell, no network.
 
@@ -72,6 +74,10 @@ write `outbox/manifest.json` last:
   `{ "key", "question", "options" (2 to 6), "blocks" (stages after yours), "cause"
   (judgment|external|infra|capability|data), "context"? }`. Never set an id, a status,
   an answer or a gate: drive assigns ids and every decision starts pending.
+- Write each option as `{ "key", "label", "consequence", "then" }`; drive normalizes
+  these into string `options` plus `option_details` in `decisions.json`. Add exactly one
+  of `recommended` (`{ "key", "reason" }`) or `no_recommendation` (a string), plus
+  `why_now?` and `context_excerpt?` (the verbatim evidence, so `question` stays a question).
 - A decision that would block review or a PR blocks `ship`.
 - `plan/plan.md` follows the SKILL's sections except `## Intent check`: do not write
   that section. Drive adds it, and the human reviews the plan against the brief at the gate.

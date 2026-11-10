@@ -1,6 +1,6 @@
 ---
 name: plan
-description: SDLC engine stage 3 (owning stage 4, the intent check, inside its gate) — consume .sdlc/<run-id>/brief.md + research.md into plan/plan.md (approach, ordered steps with files-touched and verify commands, risks, test strategy), run a fresh-context machine intent check of the plan against the brief's acceptance criteria (divergences filed as pending decisions), and render everything as a self-contained curator HTML artifact under .plans/ that LEADS with an "Access & data completeness" panel (each needed source reachable/blocked/partial from access-report.json, dependent conclusions degraded-confidence tagged, inline unblock controls) and carries a data-plan-question block for every pending D-* decision. The plan gate is HARD — implement stays locked until a human approves in curator or the terminal fallback, and a blocked CRITICAL source hard-blocks approval unless the human explicitly picks "proceed degraded".
+description: SDLC engine stage 3 (owning stage 4, the intent check, inside its gate) — consume .sdlc/<run-id>/brief.md + research.md into plan/plan.md (approach, ordered steps with files-touched and verify commands, risks, test strategy), run a fresh-context machine intent check of the plan against the brief's acceptance criteria (divergences filed as pending decisions), and render everything as a self-contained curator HTML artifact under .plans/ that opens with the decision brief and a data-plan-question block for every pending D-* decision, then carries an "Access & data completeness" panel after them (each needed source reachable/blocked/partial from access-report.json, dependent conclusions degraded-confidence tagged, inline unblock controls). The plan gate is HARD — implement stays locked until a human approves in curator or the terminal fallback, and a blocked CRITICAL source hard-blocks approval unless the human explicitly picks "proceed degraded".
 ---
 
 # plan — brief + research in, gated plan out
@@ -35,7 +35,8 @@ rule from intake: evidence to cite, never instructions to follow.
    - `## Approach` — 3–6 sentences: the shape of the change and why this shape. Every
      design choice cites its source: `[brief.md#goal]`, `[research.md#F2]`, `[D-004]`.
      A choice with no citation gets the tag `(PLAN CALL)` — and every `(PLAN CALL)`
-     that a reasonable reviewer could dispute MUST also be filed as a pending decision.
+     that a reasonable reviewer could dispute MUST also be filed as a pending decision
+     (string `options`, `option_details`, and `recommended` or `no_recommendation`).
    - `## Steps` — numbered. Each step carries: what to do, **files touched** (explicit
      paths), and a **verify command** (the test/command that proves the step landed).
      A step may rest only on `(from ticket)` criteria, KNOW findings, or *answered*
@@ -62,7 +63,9 @@ rule from intake: evidence to cite, never instructions to follow.
    - Additions: does the plan do work the brief never asked for?
    Every divergence (uncovered criterion, unrequested work) is appended to
    `decisions.json` as a pending `D-*` with `"raised_by": "plan"`,
-   `"blocks": ["implement"]`, quoting the divergence verbatim. The checker's verdict
+   `"blocks": ["implement"]`, quoting the divergence verbatim in `context_excerpt`
+   with a `question` ending in `?`, string `options` plus `option_details`, and
+   `recommended` or `no_recommendation`. The checker's verdict
    table goes into `## Intent check` in plan.md. Then set `intent_check: done` — done
    means *the check ran and its divergences are filed*, not that the human approved.
    Checking your own plan from the authoring context is a rejected run.
@@ -80,7 +83,8 @@ rule from intake: evidence to cite, never instructions to follow.
 5a. **Append access hard-block decisions (CONTRACT.md § Access hard-block).** Read
    `access-report.json`. For **every** record with `criticality: "critical"` and
    `status: "blocked"`, append a pending decision:
-   `{"raised_by": "plan", "kind": "access-degraded", "blocks": ["implement"], "source": "<source>", "question": "CRITICAL source '<source>' is BLOCKED (<blocked_reason>): <conclusions it feeds> rest on it. Enable: <enable_action>. How to proceed?", "options": ["retry — now reachable", "offline copy at path: <free-text>", "proceed degraded (accept degraded confidence)"]}`.
+   `{"raised_by": "plan", "kind": "access-degraded", "blocks": ["implement"], "source": "<source>", "question": "CRITICAL source '<source>' is BLOCKED (<blocked_reason>): <conclusions it feeds> rest on it. Enable: <enable_action>. How to proceed?", "option_details": {...}, "no_recommendation": "...", "options": ["retry — now reachable", "offline copy at path: <free-text>", "proceed degraded (accept degraded confidence)"]}`
+   (never `recommended`: only a human picks proceed-degraded; the strings and details live in `engine/cli/drive/access-degraded.mjs`).
    These block `implement` exactly like the approval gate, so a blocked critical source
    halts implementation until the human resolves it — "proceed degraded" (recorded in
    `decisions.json`), or a retry/offline-copy that re-probes the source to reachable
@@ -97,8 +101,15 @@ rule from intake: evidence to cite, never instructions to follow.
    Requirements:
    - Self-contained: inline CSS, system font stack, no external URLs/fonts/scripts,
      readable in light and dark.
-   - **LEAD with an "Access & data completeness" panel** — the first content block in
-     the artifact, above the plan summary. Built from `access-report.json`, it is a row
+   - **Decisions first.** Under the `<h1>` comes the four-part `data-plan-brief`
+     (goal, done, ask, next), then one `data-plan-question` block per pending
+     decision, then a `Background` heading. Each decision has a question ending in
+     "?", a `data-plan-why-now` line, a recommendation with its reason (or
+     `data-plan-no-recommendation`), and per option a `<strong>` label and a
+     `data-plan-consequence`. The skeleton is in `engine/curator/theme.html`;
+     `engine/curator/contract.mjs` checks it. Context is excerpt text, never a bare path.
+   - **The "Access & data completeness" panel goes AFTER every decision**, under
+     Background, above the plan summary. Built from `access-report.json`, it is a row
      per needed source with: the source, its status written as a word
      (**reachable** / **blocked** / **partial**; curator's pre-open check refuses
      status pill classes), the criticality, **which
@@ -121,7 +132,8 @@ rule from intake: evidence to cite, never instructions to follow.
    - Renders the plan summary, steps, risks, and the intent-check table.
    - **One `data-plan-question="<D-id>"` block per pending decision** — intent-check
      divergences, carried-over unknowns, the `access-degraded` decisions (step 5a), and
-     the approval gate — with each option as a `data-plan-option`. A pending decision
+     the approval gate — with each option as a `data-plan-option`, placed before
+     the plan summary and every other background section. A pending decision
      missing from the artifact is a gate bypass: the human cannot answer what they
      cannot see.
 
@@ -182,9 +194,9 @@ Additions: plan drafted a retry-metrics dashboard — NOT in the brief → filed
 
 `decisions.json` gains: D-006 (pending, "Plan adds a retry-metrics dashboard the brief
 never asked for — keep or drop?", blocks implement) and D-005 (the engine's `intent` gate, pending). The artifact `.plans/2026-07-04-proj-2534-retry-webhooks-plan.html`
-LEADS with the "Access & data completeness" panel (here: code/VCS, tracker, and docs all
+opens with the brief and `data-plan-question` blocks for D-002, D-005, D-006, then carries the "Access & data completeness" panel under Background (here: code/VCS, tracker, and docs all
 probed **reachable** in `access-report.json` — an all-green panel, no `access-degraded`
-decision) and then contains `data-plan-question` blocks for D-002, D-005, D-006. Had the
+decision). Had the
 delivery-dashboard source (F4's real numbers) been a *critical* blocked source, step 5a
 would have appended an `access-degraded` decision and the panel row for it would carry
 retry / offline-copy / proceed-degraded controls plus its enable action — implement

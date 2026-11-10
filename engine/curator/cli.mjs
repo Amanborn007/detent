@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // curator CLI — agent-ergonomic: every outcome is a single JSON line on
 // stdout with a next_step field. Exit 0 on success, 1 on error.
-// Commands: open | poll | reply | end | status | log
+// Commands: open | poll | reply | end | status | log | stop
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -20,7 +20,7 @@ const STATE_FILE = path.join(STATE_DIR, 'state.json');
 const POLL_FAILURES_FILE = path.join(STATE_DIR, 'poll-failures.json');
 
 const USAGE =
-  'Usage: curator open <file.html> | curator check <file.html> | curator poll <file> | curator drain [<file>...] | curator reply <file> -m "<msg>" | curator log <file> -m "<entry>" | curator answer <file> --question <id> --answer <value> [--note <text>] | curator end <file> | curator status';
+  'Usage: curator open <file.html> | curator check <file.html> | curator poll <file> | curator drain [<file>...] | curator reply <file> -m "<msg>" | curator log <file> -m "<entry>" | curator answer <file> --question <id> --answer <value> [--note <text>] | curator end <file> | curator status | curator stop';
 
 function out(obj) {
   process.stdout.write(JSON.stringify(obj) + '\n');
@@ -200,6 +200,8 @@ async function retireLegacyServer() {
 // The keys must never reach an argv, where any process can read them. The browser opens a local file that redirects.
 function launchBrowser(url) {
   if (process.env.CURATOR_NO_BROWSER) return;
+  // BROWSER is the convention for "do not open"; none/true/false/empty all mean it.
+  if (process.env.BROWSER !== undefined && ['', 'none', 'true', 'false'].includes(process.env.BROWSER.trim().toLowerCase())) return;
   const opener = process.platform === 'darwin' ? 'open' : process.platform === 'linux' ? 'xdg-open' : null;
   if (!opener) return;
   const launcher = path.join(STATE_DIR, `open-${crypto.randomBytes(8).toString('hex')}.html`);
@@ -281,12 +283,28 @@ function failUnreachable({ state, cause, command, consecutive, counterError }) {
   process.exit(1);
 }
 
+// node --test sets NODE_TEST_CONTEXT; a test reaching a real browser or an unscoped daemon leaks both onto the owner's machine.
+function inTestProcess() {
+  return Boolean(process.env.NODE_TEST_CONTEXT) && process.env.CURATOR_ALLOW_BROWSER !== '1';
+}
+
+// CURATOR_OWNER_PID makes the daemon exit with its owner. Only a test helper may set it: a user's daemon must outlive their shell.
+function daemonEnv() {
+  const env = { ...process.env, CURATOR_STATE_DIR: STATE_DIR };
+  if (!process.env.NODE_TEST_CONTEXT) delete env.CURATOR_OWNER_PID;
+  return env;
+}
+
 function spawnServer() {
+  if (process.env.NODE_TEST_CONTEXT && process.env.CURATOR_ALLOW_DAEMON !== '1') {
+    fail('curator: refusing to start a daemon from a test process; set CURATOR_ALLOW_DAEMON=1 in a test that needs one',
+      'Pair it with an explicit CURATOR_STATE_DIR in a temp dir, and stop the daemon when the test ends.');
+  }
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [SERVER_PATH, '--daemon'], {
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, CURATOR_STATE_DIR: STATE_DIR },
+      env: daemonEnv(),
     });
     let buf = '';
     let errBuf = '';
@@ -343,7 +361,10 @@ const POLL_HINT = (file) =>
 // rules existed is the case it is there for — and taking it is reported on the success line, never
 // silently.
 function runArtifactCheck(file) {
-  const result = spawnSync('python3', [CHECK_PATH, file], { encoding: 'utf8' });
+  const result = spawnSync('python3', [CHECK_PATH, file], {
+    env: { ...process.env, CURATOR_NODE: process.execPath },
+    encoding: 'utf8',
+  });
   const lines = `${result.stdout || ''}${result.stderr || ''}`.split('\n').filter((l) => l.trim());
   return {
     error: result.error,
@@ -391,11 +412,43 @@ async function cmdCheck(args) {
 }
 
 // --- commands ---------------------------------------------------------------
+const TAB_LIVE_MS = 10000;
+
+// A tab ticks /api/updates while open. Any broken /api/status contract opens a duplicate tab with a warning rather than guessing "live".
+async function tabIsLive({ port, secret, file }) {
+  const warn = (why) => {
+    process.stderr.write(`curator: WARNING cannot tell whether a tab is already open for ${file}: ${why}. Opening a new tab.\n`);
+    return false;
+  };
+  let res;
+  try {
+    res = await httpJson({ method: 'GET', port, path: '/api/status', timeoutMs: 5000, secret });
+  } catch (e) {
+    return warn(`GET /api/status failed: ${e.message}`);
+  }
+  if (res.code !== 200) return warn(`GET /api/status returned ${res.code}`);
+  if (!res.json || !Array.isArray(res.json.sessions)) return warn('/api/status has no sessions array');
+  const session = res.json.sessions.find((s) => s.key === file);
+  if (!session) return warn('/api/status has no session for this artifact');
+  if (!('last_seen_at' in session)) return warn('the /api/status session has no last_seen_at field');
+  if (session.last_seen_at === null) return false;
+  const seen = Date.parse(session.last_seen_at);
+  if (Number.isNaN(seen)) return warn(`last_seen_at "${session.last_seen_at}" is not a timestamp`);
+  return Date.now() - seen < TAB_LIVE_MS;
+}
+
 async function cmdOpen(args) {
   const { positionals } = parseArgs(args, {});
   const file = canonicalFile(positionals[0], { mustExist: true });
   if (!fs.statSync(file).isFile()) fail(`not a file: ${file}`, 'Point curator open at a self-contained .html artifact.');
   const checked = enforceArtifactCheck(file);
+  if (inTestProcess() && !process.env.CURATOR_NO_BROWSER) {
+    fail('curator: refusing to open a browser from a test process; set CURATOR_NO_BROWSER=1 or CURATOR_ALLOW_BROWSER=1');
+  }
+  if (inTestProcess() && !process.env.CURATOR_STATE_DIR) {
+    fail('curator: refusing to open from a test process without an explicit CURATOR_STATE_DIR, which could be a developer\'s live daemon',
+      'set CURATOR_STATE_DIR to a temp dir, or CURATOR_ALLOW_BROWSER=1');
+  }
   const warnings = await retireLegacyServer();
   let resolved = await resolveServer();
   if (resolved.status === 'unreachable') {
@@ -407,7 +460,9 @@ async function cmdOpen(args) {
     await stopUntrustedServer(resolved);
     resolved = { status: 'down' };
   }
-  if (resolved.status !== 'running') {
+  // A restarted daemon restores last_seen_at from state.json, so a restored value says nothing about a live tab.
+  const spawned = resolved.status !== 'running';
+  if (spawned) {
     await spawnServer();
     resolved = await resolveServer();
     if (resolved.status !== 'running') {
@@ -416,10 +471,12 @@ async function cmdOpen(args) {
   }
   const { port, secret } = resolved;
   const { code, json } = await httpJson({ method: 'POST', port, path: '/api/open', body: { file }, timeoutMs: 5000, secret });
-  if (code !== 200) fail(json.error || `server error ${code}`, json.next_step);
+  if (code !== 200) fail(json?.error || `server error ${code}`, json?.next_step);
+  if (!json || typeof json.sessionId !== 'string') fail('POST /api/open returned no sessionId', 'Run: curator status');
   const url = browserUrl(port, json.sessionId, secret, resolved.boot);
-  launchBrowser(url);
-  out({ url, key: file, session: json.sessionId, ...checked, ...(warnings.length ? { warnings } : {}), next_step: POLL_HINT(file) });
+  const tab_live = spawned ? false : await tabIsLive({ port, secret, file });
+  if (!tab_live) launchBrowser(url);
+  out({ url, key: file, session: json.sessionId, tab_live, ...checked, ...(warnings.length ? { warnings } : {}), next_step: POLL_HINT(file) });
 }
 
 // `drainTimeoutMs` bounds the running-server long-poll. Left undefined for the
@@ -793,7 +850,7 @@ function stripPriorMarks(block) {
 // Marks the block's own leading (question) open tag with the answer.
 function markAnswered(block, { escapedAnswer, iso, escapedNote }) {
   return block.replace(/^<[a-zA-Z][a-zA-Z0-9-]*\b[^>]*>/, (tag) => {
-    let attrs = ` data-curator-answered="${escapedAnswer}" data-curator-answered-at="${iso}"`;
+    let attrs = escapedAnswer === null ? ` data-curator-answered-at="${iso}"` : ` data-curator-answered="${escapedAnswer}" data-curator-answered-at="${iso}"`;
     if (escapedNote !== undefined) attrs += ` data-curator-answered-note="${escapedNote}"`;
     return insertAttrBeforeClose(tag, attrs);
   });
@@ -816,15 +873,19 @@ function markOption(block, escapedAnswer, id, rawAnswer) {
 // and `stampDecisions`. Throws on refusal (no match / not unique / no such
 // option); never touches `data-curator-chosen`, the SDK's transient mark.
 function applyAnswer(file, { question, answer, note }) {
-  const escapedAnswer = escapeHtml(answer);
+  const escapedAnswer = answer === null ? null : escapeHtml(answer);
   const escapedNote = note !== undefined ? escapeHtml(note) : undefined;
   const iso = new Date().toISOString();
   mutateArtifact(file, (html) => {
     const { start, end } = scopeQuestionBlock(html, question, file);
     let block = html.slice(start, end);
-    block = stripPriorMarks(block);
+    // The chosen option is transient after a reload, so a note typed on an answered question arrives as answer:null.
+    const keepAnswer = escapedAnswer === null && /^<[^>]*\sdata-curator-answered="/.test(block);
+    block = keepAnswer
+      ? block.replace(/\s+data-curator-answered-at="[^"]*"|\s+data-curator-answered-note="[^"]*"/g, () => '')
+      : stripPriorMarks(block);
     block = markAnswered(block, { escapedAnswer, iso, escapedNote });
-    block = markOption(block, escapedAnswer, question, answer);
+    if (escapedAnswer !== null) block = markOption(block, escapedAnswer, question, answer);
     return html.slice(0, start) + block + html.slice(end);
   });
 }
@@ -922,9 +983,25 @@ async function cmdStatus(args) {
   }
 }
 
+async function cmdStop(args) {
+  parseArgs(args, {});
+  const state = readState();
+  if (!state || !state.pid || !pidAlive(state.pid)) {
+    out({ status: 'not running', next_step: 'Nothing to stop.' });
+    return;
+  }
+  const cmd = commandOf(state.pid);
+  if (cmd === null || !cmd.endsWith(` ${SERVER_PATH} --daemon`)) {
+    fail(`pid ${state.pid} in ${STATE_FILE} is not a curator daemon started from this clone, so it was not stopped`,
+      `Check CURATOR_STATE_DIR (${STATE_DIR}).`);
+  }
+  await terminate(state.pid);
+  out({ status: 'stopped', pid: state.pid, next_step: 'Run: curator open <file.html> to start a new server.' });
+}
+
 // --- dispatch ----------------------------------------------------------------
 const [cmd, ...rest] = process.argv.slice(2);
-const commands = { open: cmdOpen, check: cmdCheck, poll: cmdPoll, drain: cmdDrain, reply: cmdReply, end: cmdEnd, status: cmdStatus, log: cmdLog, answer: cmdAnswer };
+const commands = { open: cmdOpen, check: cmdCheck, poll: cmdPoll, drain: cmdDrain, reply: cmdReply, end: cmdEnd, status: cmdStatus, stop: cmdStop, log: cmdLog, answer: cmdAnswer };
 
 if (!cmd || !commands[cmd]) {
   fail(cmd ? `unknown command: ${cmd}` : 'missing command', USAGE);
