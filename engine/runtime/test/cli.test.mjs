@@ -55,11 +55,11 @@ test("runtime run: an unknown request key exits 2 naming the field", () => {
 
 test("runtime run: an undeclared capability exits 2 naming capability and runtime, and spawns nothing", () => {
   const dir = scratch();
-  const r = verb(["run", "--bin", makeFake(dir, "ok").bin], { input: JSON.stringify(baseRequest(dir, { budget: { usd: 1 } })) });
+  const r = verb(["run", "--runtime", "openai-compatible", "--bin", makeFake(dir, "ok").bin], { input: JSON.stringify(baseRequest(dir, { budget: { usd: 1 } })) });
   assert.equal(r.code, 2);
   assert.equal(r.json.ok, false);
   assert.match(r.json.reason, /budget/);
-  assert.match(r.json.reason, /claude-code/);
+  assert.match(r.json.reason, /openai-compatible/);
   assert.equal(spawned(dir), false);
 });
 
@@ -108,7 +108,7 @@ test("runtime capabilities prints the declaration", () => {
   assert.equal(r.json.ok, true);
   assert.equal(r.json.runtime, "claude-code");
   assert.deepEqual(r.json.capabilities.output, ["text", "json"]);
-  assert.equal(r.json.capabilities.budget, false);
+  assert.equal(r.json.capabilities.budget, true);
   assert.ok(r.json.next_step);
 });
 

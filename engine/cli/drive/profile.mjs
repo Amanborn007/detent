@@ -1,28 +1,13 @@
 // drive/profile: what a contained drive child is allowed to be. Pure functions, zero dependencies.
 "use strict";
 
-export const MIN_CLAUDE_VERSION = "2.1.306";
+export { MIN_CLAUDE_VERSION, parseVersion, versionAtLeast } from "../../runtime/adapters/claude-code.mjs";
 export const CHILD_TOOLS = "Read,Glob,Grep,Write,Edit,TodoWrite";
 export const STATIC_DENY = ["WebFetch", "WebSearch", "Task", "Agent", "Skill", "NotebookEdit"];
 
 const ENV_ALLOW = new Set(["PATH", "HOME", "USER", "LANG", "TERM", "SHELL", "TMPDIR"]);
 export const SECRET_NAME =/TOKEN|KEY|SECRET|PASS|CRED|AUTH|COOKIE|SESSION/i;
 const OUTBOX_RULE = /^(Write|Edit)\(\/\/[^()]+\/\*\*\)$/;
-
-export function parseVersion(text) {
-  const m = /(\d+)\.(\d+)\.(\d+)/.exec(String(text));
-  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
-}
-
-export function versionAtLeast(text, min = MIN_CLAUDE_VERSION) {
-  const v = parseVersion(text);
-  const m = parseVersion(min);
-  if (!v) return false;
-  for (let i = 0; i < 3; i++) {
-    if (v[i] !== m[i]) return v[i] > m[i];
-  }
-  return true;
-}
 
 function bad(label, why) {
   throw new Error(`drive profile ${label}: ${why}`);

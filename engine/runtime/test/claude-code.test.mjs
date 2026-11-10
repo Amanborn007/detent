@@ -52,7 +52,7 @@ test("capabilities: frozen, exactly the golden-tested set", () => {
     output: ["text", "json"], tools: ["none", "inherit"], mcp: ["none", "inherit"],
     settings_sources: ["none", "project", "inherit"], settings_file: true, auth: ["session", "api_key"],
     model: true, persist_session: true, timeout: true, reports: { cost_usd: "json", turns: "json" },
-    budget: false, add_dirs: false, deny_tools: false, containment: false, env: false, tools_allow: false,
+    budget: true, add_dirs: true, deny_tools: true, containment: true, env: true, tools_allow: true, approvals: ["deny"],
   });
 });
 
