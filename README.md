@@ -8,12 +8,12 @@ A coding agent that works from a ticket can plan something the ticket did not as
 
 Branch protection and required review already stop an agent PR from merging. They act after the code exists, so a wrong plan costs a full implement and review cycle, and the reviewer reads evidence the author gathered. Detent adds one human check before implement, and takes review from a separate reviewer command and evidence from a separate test command.
 
-A plan approved in a chat session, or a review bot that runs after the push, can cover part of this. Detent differs in two ways. The plan answer is a record in `decisions.json` that the engine accepts only if it is exactly one of the offered options. The reviewer and verifier are commands you configure, so the author does not grade its own work. I have not compared it with those tools on the same task.
+A plan approved in a chat session, or a review bot that runs after the push, can cover part of this. Detent differs in two ways. When you answer in curator, `detent gate collect` records the plan answer in `decisions.json` only if it is exactly one of the offered options. The reviewer and verifier are commands you configure, so the author does not grade its own work. I have not compared it with those tools on the same task.
 
 One committed run shows both, on [detent-demo#1](https://github.com/Amanborn007/detent-demo/issues/1) ("Add a maxLength option to slugify"). It ended in [PR #2](https://github.com/Amanborn007/detent-demo/pull/2), merged 2026-10-21. The change is a toy one in a demo repo, so this shows the mechanism and nothing about how often it matters. The decisions are in [decisions.json](docs/examples/2026-10-20-amanborn007-detent-demo-1/decisions.json).
 
 - **D-002.** The plan added a documentation step the ticket never asked for. The run asked instead of silently doing it. The answer was "keep step 4".
-- **D-004 and D-005.** At ship there was no reviewer socket and no verifier socket. The only review was the agent's own pass, which "found no blocking issue", and the evidence was gathered by hand. The human refused both ("wanted a reviewer independent of the author", "evidence from the author is not independent", reasons recorded after the run, in #16), and both sockets were then wired.
+- **D-004 and D-005.** At ship there was no reviewer socket and no verifier socket. The only review was the agent's own pass, which "found no blocking issue", and the evidence was gathered by hand. The human answered "wire a reviewer socket first" and "wire a verifier socket first", and both sockets were then wired. Reasons for the refusals ("wanted a reviewer independent of the author", "evidence from the author is not independent") were added after the run, in #16.
 - **D-007.** The wired `claude-reviewer`, a separate headless Claude call, found that an empty or alphanumeric separator lets the `maxLength` cut split words. The PR fixed it by rejecting a word-character separator when `maxLength` is set, with the failing test committed first.
 
 ## See it run
@@ -136,7 +136,7 @@ Most PRs commit the failing test before the fix. When a committed test has to ch
 - Curator auth does not protect against another process running as you. See [SECURITY.md](SECURITY.md).
 - In the example, `respond` converged on its first scan because no bot had commented on the PR (`respond/round-1.json`).
 - The regex tagger in `engine/index` is the only one tested. The tree-sitter path runs only if you install the optional deps, and it is untested ([PR #22](https://github.com/Amanborn007/detent/pull/22)).
-- On a fresh clone, `curator open` and `curator status` fail with ENOENT on `<clone>/.local` until that directory exists, whether or not `DETENT_ROOT` is set. `mkdir .local` in the clone avoids it. The fix is [PR #51](https://github.com/Amanborn007/detent/pull/51).
+- On a fresh clone, `curator open` and `curator status` fail with ENOENT on `<clone>/.local` until that directory exists, with `DETENT_ROOT` unset or set to the clone, which is what the install script sets. `mkdir .local` in the clone avoids it. The fix is [PR #51](https://github.com/Amanborn007/detent/pull/51).
 
 ## Read more
 

@@ -4,7 +4,9 @@ This folder holds one real run of Detent. It went through all seven stages on [A
 
 The run folder `2026-10-20-amanborn007-detent-demo-1/` has the brief, the research, the plan, the decisions that were answered through curator, the recheck, and the ship evidence. The curator pages are in its `plans/` folder.
 
-The git worktree is left out, because the code lives in the demo PR. Local paths, the username and the hostname are replaced, so you will see `$DETENT_ROOT`, `~`, `<user>` and `<host>` in the files. Nothing else was edited in the export. `decision-rationale.jsonl` and the handoffs were added and regenerated after the run, in [PR #16](https://github.com/Amanborn007/detent/pull/16), so the recorded reasons for D-004 and D-005 date from 2026-10-21 07:58, after respond ended at 07:28.
+The git worktree is left out, because the code lives in the demo PR. Local paths, the username and the hostname are replaced, so you will see `$DETENT_ROOT`, `~`, `<user>` and `<host>` in the files. Apart from the next sentence, nothing else was edited in the export. [PR #16](https://github.com/Amanborn007/detent/pull/16) added `decision-rationale.jsonl`, regenerated the handoffs and appended 11 `decision_rationale_recorded` lines to `events.jsonl`. The stage times in `events.jsonl` are unchanged. The recorded reasons for D-004 and D-005 date from 2026-10-21 07:58, after respond ended at 07:28, and nothing in the repo says who wrote them.
+
+D-004 to D-006 have `blocks: ["pr"]`, a stage name the CLI does not have. The stage is `ship`, and the stage-name fix landed in #10 after this run. Those three decisions did not block `ship` in code.
 
 What the run does and does not show:
 

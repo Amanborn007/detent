@@ -30,7 +30,7 @@ Detent is a Claude Code plugin (14 skill directories under `skills/`, hooks in `
 
 If you are reading for the core, the path from intake to ship is `engine/cli/engine.mjs`, `engine/stages/`, `engine/sockets/`, `engine/adapters/` and `engine/curator/`. Everything else is a helper around it.
 
-`engine/` also holds `curator-triggers`, `herald`, `courier`, `scout`, `examiner`, `self-feedback`, `handoff`, `statusline`, `spend`, `routing`, `pack`, `sources` and `lexicon`. They are optional crew that the 7-stage run does not need. The ones that ship as skills or `detent` verbs are in [docs/REFERENCE.md](REFERENCE.md).
+`engine/` also holds `routing`, `handoff`, `spend` and `pack`, which `engine/cli/engine.mjs` imports, so the CLI cannot load without them. `handoff` supplies the answer matching that gates use. The rest are optional crew that the 7-stage run does not need: `curator-triggers`, `herald`, `courier`, `scout`, `examiner`, `self-feedback`, `statusline`, `sources` and `lexicon`. The ones that ship as skills or `detent` verbs are in [docs/REFERENCE.md](REFERENCE.md).
 
 ## One run
 
