@@ -1,6 +1,8 @@
-# Demo GIF
+# Demos
 
 `demo.gif` runs the real engine from `detent setup` to the plan gate on one offline ticket: `setup`, `run new`, one line per stage, then `gate open`, which prints "waiting on you: intent gate D-001 (approve or revise)" and the path of the gate page. It makes no network call and uses no LLM. It runs on a throwaway repo and a throwaway `DETENT_ROOT`.
+
+`try.sh` prints the same lines as text and ends at the gate page path, so you can run it without vhs.
 
 Two things are stand-ins, and the GIF says so. `fixtures/stub-ticket` answers the ticket socket in place of `gh-ticket`, and `fixtures/*.md` replace the files Claude writes at each stage. Every stage transition, refusal and gate comes from the engine.
 
@@ -16,23 +18,25 @@ brew install vhs
 vhs docs/demo/demo.tape
 ```
 
-Prerequisites: `curator` on PATH (the gate page and `smoke.sh` need it). Re-rendering also needs Chrome and ffmpeg (macOS paths; override Chrome with `CHROME=`).
+Prerequisites: `try.sh` needs only Node 20 and `git`. `smoke.sh` and `render-fallback.mjs` check for `curator` on PATH before they start, although the gates themselves run the bundled `engine/curator/cli.mjs`. Re-rendering also needs Chrome and ffmpeg (macOS paths; override Chrome with `CHROME=`).
 
-Without vhs, `render-fallback.mjs` replays the `Type` lines from `demo.tape` using headless Chrome and ffmpeg (macOS paths, override Chrome with `CHROME=`). It also screenshots the gate page the run opened into `docs/assets/demo-gate.png` and `demo-gate-dark.png`:
+Without vhs, `render-fallback.mjs` replays the `Type` lines from `demo.tape` using headless Chrome and ffmpeg. It also screenshots the gate page the run opened into `docs/assets/demo-gate.png` and `demo-gate-dark.png`:
 
 ```sh
 node docs/demo/render-fallback.mjs
 ```
 
-Check the flow without rendering: `bash docs/demo/smoke.sh`.
+Check the flow without rendering: `bash docs/demo/smoke.sh`. Its last step calls `terminal-smoke.sh`.
 
 A recording of the real thing inside Claude Code is scripted in [RECORDING.md](RECORDING.md).
 
 ## Terminal track
 
-`terminal.tape` drives the friendly verbs end to end on a throwaway clone of `acme/widgets`: `detent doctor`, `detent start acme/widgets#1` (which also builds the repo index and prints one line with its counts), `status`, three `continue` steps, `decide` and `approve`. Stand-ins, all offline: `fixtures/stub-claude.mjs` writes each stage's file from `fixtures/term/`, `fixtures/stub-gh-term` answers `gh`, `fixtures/bin/curator` answers `curator`, and `fixtures/stub-ticket` answers the ticket socket. The engine is real. `terminal-env.sh` builds the repo and defines `detent`.
+`terminal.tape` drives the friendly verbs end to end on a throwaway clone of `acme/widgets`: `detent doctor`, `detent start acme/widgets#1` (which also builds the repo index and prints one line with its counts), `status`, three `continue` steps and `approve`. Stand-ins, all offline: `fixtures/stub-claude.mjs` writes each stage's file from `fixtures/term/`, `fixtures/stub-gh-term` answers `gh`, and `fixtures/stub-ticket` answers the ticket socket. The engine is real. `terminal-env.sh` builds the repo and defines `detent`.
 
-`terminal-smoke.sh` runs the same commands without vhs and asserts the key output lines; `smoke.sh` calls it. To render the GIF, run `vhs docs/demo/terminal.tape` from the repo root. The rendered GIF is committed as `terminal.gif`; re-render it after changing the tape or the verbs' output.
+`fixtures/bin/curator` answers only a `curator` command found on `PATH`. Since 948e9e5 (#21), `detent decide` and `gate open` run the bundled `engine/curator/cli.mjs`, so the stub never answers a gate. `detent decide` starts a real curator on `127.0.0.1` and waits in `curator poll` until someone answers the page, so the tape and `terminal-smoke.sh` skip it and answer with `approve`. `terminal.gif` was rendered before this change and still shows a `decide` step.
+
+`terminal-smoke.sh` runs the same commands without vhs and asserts the key output lines. To render the GIF, run `vhs docs/demo/terminal.tape` from the repo root. The rendered GIF is committed as `terminal.gif`; re-render it after changing the tape or the verbs' output.
 
 ## Claude Code track
 

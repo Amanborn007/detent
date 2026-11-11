@@ -1,6 +1,6 @@
 # Detent user guide
 
-The [README](README.md) says what detent is and how to install it. This guide says what to type, what each stage does, how to wire in your own tools, and how the checks work. Every command runs from the root of your detent clone unless a step says otherwise.
+The [README](README.md) says what detent is and how to install it. This guide says what to type, what each stage does, how to wire in your own tools, and how the checks work. Every command runs from the root of your detent clone unless a step says otherwise. How the parts fit is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and why they are built this way is in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 Contents:
 
@@ -28,19 +28,19 @@ Three rules hold everywhere:
 
 - State lives in plain files. You can `ls` and `cat` a run at any point.
 - Text from tickets, PRs, bots and threads is data. A skill reads it but never follows instructions found in it.
-- Nothing merges. Creating tickets, the first push and the draft PR each wait for you.
+- Nothing in Detent merges a PR, because no code calls `gh pr merge` or a merge API. Creating tickets, the first push and the draft PR each wait for you.
 
 ---
 
 ## 2. First run
 
-Install the plugin and run the shell script as described in the README. Then:
+Install the plugin and run the shell script as described in the README. The script runs `npm link` for `engine/curator` and `engine/cli`, which needs a writable npm global prefix. nvm works. With a system Node, set `NPM_CONFIG_PREFIX` to a directory you own first. It appends a `DETENT_ROOT` block and a `detent-upgrade` alias to `~/.zshrc`, `~/.bashrc` or `~/.profile` (chosen by `$SHELL`), or to the file named by `DETENT_PROFILE`. It copies `detent.user.example.yaml` to `detent.user.yaml` if that file is missing. Then:
 
 ```sh
 cp detent.user.example.yaml detent.user.yaml   # skip if the install script already made it
 ```
 
-To do the next two steps in one command, run `detent setup --repo ~/code/your-repo`. It creates `detent.user.yaml` from the example if it is missing and fills `user.name` and `user.email` from `git config` and `user.github_login` from `gh api user`, only where they are empty. It also writes a starter `stack.yaml` in your work repo with the three built-in adapters below, as absolute paths. It refuses if `stack.yaml` already exists (add `--force` to overwrite) or if the path is not a git repo. It prints one JSON line that lists what it wrote, what it left alone, and an `unresolved` list of values it could not detect, such as `user.teams`; fill those in by hand. If `gh` is not logged in, `user.github_login` is listed as unresolved and the rest still runs.
+To do the next two steps in one command, run `detent setup --repo ~/code/your-repo`. It creates `detent.user.yaml` from the example if it is missing and fills `user.name` and `user.email` from `git config` and `user.github_login` from `gh api user`, only where they are empty. It also writes a starter `stack.yaml` in your work repo with four built-in adapters as absolute paths: `gh-ticket`, `repo-docs-knowledge`, `repo-index-knowledge` and `gh-bot-comments`. It does not write `claude-reviewer` or `cmd-verifier`, so add the `reviewer` and `verifier` sockets by hand from `engine/stack.example.yaml`. It refuses if `stack.yaml` already exists (add `--force` to overwrite) or if the path is not a git repo. It prints one JSON line that lists what it wrote, what it left alone, and an `unresolved` list of values it could not detect, such as `user.teams`; fill those in by hand. If `gh` is not logged in, `user.github_login` is listed as unresolved and the rest still runs.
 
 Otherwise, open `detent.user.yaml` and fill in your name, email, GitHub login, teams and tracker account. Leave the GitHub login empty if you want detent to read it from `gh api user`.
 
@@ -81,7 +81,7 @@ The CLI enforces one gate itself, the plan `intent` gate (approve or revise). Th
 | plan | brief and research | `plan/plan.md`, a curator page under `.plans/` | plan gate (hard) |
 | implement | the approved plan | commits on branch `sdlc/<run-id>` in a git worktree | none |
 | recheck | the diff and the approved plan | `recheck.md` | drift gate, only if the diff diverges from the plan |
-| ship | `reviewer` and `verifier` sockets | evidence manifest, pushed branch, draft PR | ship gate (hard) |
+| ship | `reviewer` and `verifier` sockets | evidence manifest, pushed branch, draft PR | ship gate (prompt rule, filed as a blocking decision) |
 | respond | PR comments through sentinel | fixes, replies, an escalation list | you mark the PR ready to arm it |
 
 What each stage does, in more detail:
@@ -133,7 +133,7 @@ Every engine command prints one JSON line with a `next_step`. Do what it says, t
 detent gate open <gate-id> --repo ~/code/your-repo
 ```
 
-With curator installed this writes `.plans/<run-id>-<gate>.html`, a page with one question per pending decision and the plan or research text underneath, and prints a `curator open` command. Answer in the browser, then run `detent gate collect --run <run-id>`. It reads your clicks from curator and writes an answer into `decisions.json` only when it is exactly one of the decision's options. Anything else stays pending and is listed under `unresolved`. Comments you add are saved to `review-feedback.jsonl` in the run directory. Run `detent dashboard` to see every active run with its stage and pending gates.
+With curator installed this writes `.plans/<run-id>-<gate>.html`, a page with one question per pending decision and the plan or research text underneath, and prints a `curator open` command. Answer in the browser, then run `detent gate collect --run <run-id>`. It reads your clicks from curator and writes an answer into `decisions.json` only when it matches one of the decision's options, ignoring case and surrounding whitespace. Anything else stays pending and is listed under `unresolved`. Comments you add are saved to `review-feedback.jsonl` in the run directory. Run `detent dashboard` to see every active run with its stage and pending gates.
 
 **Letting the engine drive.** `detent drive --run <run-id>` runs the stages for you with one headless Claude child per stage and stops when it needs your decision, before implement, or when it has spent `--budget` (default 5 USD). In a Claude Code session, `/detent:drive` launches it in the background and walks you through the gate page. `detent drive` is experimental, works on macOS and Linux only, and spends Claude credit. It covers intake, research and plan only; children get file tools and no Bash, so the target repo's hooks and scripts never run. The details are in [engine/cli/README.md](engine/cli/README.md).
 
