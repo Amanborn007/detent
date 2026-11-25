@@ -2,6 +2,10 @@
 
 **Ticket in. Draft PR out. The plan waits for your yes before any code is written.**
 
+Detent is a Claude Code plugin and a Node CLI. It takes a GitHub issue through seven stages to a draft PR, and it stops for your approval on the plan before any code exists. It is for a developer or a team that already lets a coding agent open PRs from tickets, and wants a human check before the code is written, not only after.
+
+Stack: Node 20, bash, Claude Code skills and hooks, plain files for run state, and a local page on `127.0.0.1` for approvals.
+
 ## The problem
 
 A coding agent that works from a ticket can plan something the ticket did not ask for, review its own diff, and push. A team that lets agents open PRs from tickets, and already requires human review on them, needs two things. A human approves the plan before any code exists, and the review and the evidence come from something other than the author before anything is pushed.
@@ -58,7 +62,7 @@ You need Claude Code with plugins, Node 20, `git`, `bash`, `jq`, `python3` and a
 /plugin install detent@detent
 ```
 
-Then, from a clone of this repo, run `scripts/detent-install.sh`. It npm-links the CLI and appends `DETENT_ROOT` to your shell profile. It needs a writable npm global prefix. If the prefix is not writable, each `npm link` prints `WARN`, so set `NPM_CONFIG_PREFIX` to a directory you own and run it again. On a fresh clone the closing `curator status` row of the script shows FAIL, because curator stops with ENOENT until `<clone>/.local` exists. Run `mkdir .local` in the clone before the script ([PR #51](https://github.com/Amanborn007/detent/pull/51) fixes it). The other install details are in [GUIDE.md section 2](GUIDE.md#2-first-run).
+Then, from a clone of this repo, run `scripts/detent-install.sh`. It npm-links the CLI and appends `DETENT_ROOT` to your shell profile. It needs a writable npm global prefix. If the prefix is not writable, each `npm link` prints `WARN`, so set `NPM_CONFIG_PREFIX` to a directory you own and run it again. The other install details are in [GUIDE.md section 2](GUIDE.md#2-first-run).
 
 Then open a new shell, so that `DETENT_ROOT` is set and `detent` is on your `PATH`:
 
@@ -83,6 +87,15 @@ In Claude Code the same verbs are `/detent:start`, `/detent:continue` and `/dete
 
 ## How it works
 
+You work in a Claude Code session. Its skills and hooks drive the Detent engine, which keeps each run as files under `.sdlc/<run-id>/`, renders every gate as a local curator page, and reaches your tracker and GitHub through providers you configure.
+
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/detent-architecture-dark.png">
+  <img alt="Detent architecture: you work in a Claude Code session whose skills and hooks drive the Detent engine; the engine keeps run state in plain files, renders gates to a local curator page for your approval, and reaches GitHub and your tracker through configured providers, while sentinel watches PR bot comments." src="docs/assets/detent-architecture.png" width="880">
+</picture></p>
+
+A run moves through these stages:
+
 <p align="center"><picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/detent-pipeline-dark.png">
   <img alt="Detent stage pipeline: intake, research, plan, implement, recheck, ship and respond, with your approval required at the plan gate and the ship gate, and the respond loop driven by sentinel scans." src="docs/assets/detent-pipeline.png" width="880">
@@ -103,6 +116,22 @@ The CLI enforces the plan intent gate in code, where you click **Approve the pla
 Your tracker, docs search, reviewer and test runner plug in as sockets. A socket is a command you configure in `stack.yaml`. The engine writes one JSON request to its stdin and reads one JSON response from its stdout. Exit 0 is ok, exit 1 is retried once and then shown to you, and exit 2 halts the stage and asks. Six adapters ship in `engine/adapters/`. See [GUIDE.md section 5](GUIDE.md#5-sockets-and-providers) and [section 6](GUIDE.md#6-writing-a-provider-and-a-pack).
 
 The plugin has 14 skills, typed as `/detent:<skill>`. `start`, `continue`, `status` and `drive` run the stages. The `respond` stage also drafts its replies with `scribe`. The rest are optional helpers, listed in [docs/REFERENCE.md](docs/REFERENCE.md#skills).
+
+## Design decisions
+
+Three choices shaped most of the code. The full list, with what each one cost, is in [docs/DECISIONS.md](docs/DECISIONS.md).
+
+**Run state is plain files.** You need to read and correct a run at any point, even when nothing is running. So a run is a directory under `$DETENT_ROOT/.sdlc/<run-id>/`, the gates live in `decisions.json`, and there is no database or daemon. You can `ls` and `cat` a run. The cost is no queries and no locking, and any process of yours can edit `decisions.json`.
+
+**Tools are commands that speak JSON over stdio.** The reviewer and the verifier have to be something other than the agent that wrote the code, and a test has to be able to stub them. So each tool is a command in `stack.yaml` that reads one JSON request on stdin and writes one JSON response on stdout, with exit 0 for ok, 1 for retry once, and 2 for stop and ask. The six shipped adapters are scripts with no dependencies, and a test stubs one in a few lines of shell. The cost is that an MCP tool cannot be a socket the engine runs itself, and the CLI does not check a provider's contract version yet.
+
+**Unattended steps get no Bash.** The first permission model for `detent drive` ([#8](https://github.com/Amanborn007/detent/pull/8)) used a settings profile and a Bash allowlist, and its own notes said a child's test command could still run repo code and reach the network. [#17](https://github.com/Amanborn007/detent/pull/17) replaced it within the hour. Each intake, research and plan child now gets `Read`, `Glob`, `Grep`, `Write`, `Edit` and `TodoWrite`, reads an export of HEAD with no `.git`, and writes only an outbox that drive validates and secret-scans. The cost is that `--restricted` is still not an OS sandbox, and the `--implement` child is the exception that has Bash.
+
+## What I learned
+
+- The first end-to-end run, on detent-demo#1 ([#10](https://github.com/Amanborn007/detent/pull/10)), broke on things the docs promised and the code did not do. `next_step` named a command that was not on `PATH`, the stage prompts described sockets no adapter implemented, and run state went into the user's own checkout. Each fix landed with a failing test first, and `docs/demo/try.sh` now runs the README path offline.
+- Squash-merging a stacked PR into its base branch means its content never reaches main. That happened to #11 and #13, which #14 landed again, and then to #37 and #38, which #40 landed. I now check main after a stack merges.
+- Tests that reached a gate opened real browser tabs and left curator daemons running, 149 of them in one session ([#35](https://github.com/Amanborn007/detent/pull/35)). The curator CLI now refuses to open a browser under `node --test`, and each test gets its own state directory.
 
 ## Testing
 
@@ -136,7 +165,6 @@ Most PRs commit the failing test before the fix. When a committed test has to ch
 - Curator auth does not protect against another process running as you. See [SECURITY.md](SECURITY.md).
 - In the example, `respond` converged on its first scan because no bot had commented on the PR (`respond/round-1.json`).
 - The regex tagger in `engine/index` is the only one tested. The tree-sitter path runs only if you install the optional deps, and it is untested ([PR #22](https://github.com/Amanborn007/detent/pull/22)).
-- On a fresh clone, `curator open` and `curator status` fail with ENOENT on `<clone>/.local` until that directory exists, with `DETENT_ROOT` unset or set to the clone, which is what the install script sets. `mkdir .local` in the clone avoids it. The fix is [PR #51](https://github.com/Amanborn007/detent/pull/51).
 
 ## Read more
 
